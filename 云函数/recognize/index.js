@@ -48,15 +48,35 @@ const PROVIDERS = {
     model: 'doubao-vision',
     apiKeyEnv: 'DOUBAO_API_KEY',
   },
+  // 智谱 GLM 视觉（已有：GLM-4V 视觉模型）
   glm: {
     endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
     model: 'glm-4v',
     apiKeyEnv: 'GLM_API_KEY',
   },
+  // 智谱 GLM 纯文字（GLM-4-Flash，轻量便宜）
+  glmText: {
+    endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+    model: 'glm-4-flash',
+    apiKeyEnv: 'GLM_API_KEY',
+  },
+  // 百度千帆 ERNIE（OpenAI 兼容，base_url: https://qianfan.baidubce.com/v2）
+  // 视觉用 ERNIE-4.0-Turbo（多模态）；文字用 ERNIE-Speed（最便宜）
+  // 注册：https://cloud.baidu.com/ → 千帆控制台 → API Key
+  qianfan: {
+    endpoint: 'https://qianfan.baidubce.com/v2/chat/completions',
+    model: 'ernie-4.0-turbo-8k',
+    apiKeyEnv: 'QIANFAN_API_KEY',
+  },
+  qianfanText: {
+    endpoint: 'https://qianfan.baidubce.com/v2/chat/completions',
+    model: 'ernie-speed-8k',
+    apiKeyEnv: 'QIANFAN_API_KEY',
+  },
 };
 
 // 版本标记：发布后 curl 可通过返回值里的 ver 字段确认是否部署了最新代码
-const FN_VERSION = '20260722a-sensenova';
+const FN_VERSION = '20260722b-sensenova';
 
 // 服务端兜底：纯通用回应（不论上下文）强制 types:["none"]，不依赖模型是否听话。
 // 与云端提示词规则 10 双保险，杜绝「好的/可以」被当成记录指令重复建待办。
@@ -335,8 +355,15 @@ async function callWithFallback(body, apiKey) {
   const primary = PROVIDERS[providerName] || PROVIDERS.qwen;
   const primaryKey = apiKey;
 
-  // 定义 fallback 映射：sensenova→qwen, sensenovaText→qwenText
-  const fallbackMap = { sensenova: 'qwen', sensenovaText: 'qwenText' };
+  // 定义 fallback 映射：所有非 qwen 的厂商 → 回到 qwen/qwenText 兜底
+  const fallbackMap = {
+    sensenova: 'qwen',
+    sensenovaText: 'qwenText',
+    glm: 'qwen',
+    glmText: 'qwenText',
+    qianfan: 'qwen',
+    qianfanText: 'qwenText',
+  };
   const fallbackName = fallbackMap[providerName];
   const fallback = fallbackName ? (PROVIDERS[fallbackName] || null) : null;
   const fallbackKey = fallback ? process.env[fallback.apiKeyEnv] || primaryKey : null;
