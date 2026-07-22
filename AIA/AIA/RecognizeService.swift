@@ -257,6 +257,30 @@ struct RecognizeService {
         return localOCR(from: imageData)?.text
     }
 
+    /// 单独 OCR 状态栏区域（顶部约 5%），不受 minimumTextHeight 限制，救回被主 OCR
+    /// 过滤掉的「HH:MM 1」等状态栏时间（定位箭头紧跟时间，主 OCR 误以为是噪点）。
+    /// 失败 / 无文字返回 nil。不会影响主 OCR 逻辑，只把结果作为时间提取的额外输入。
+    static func localOCRStatusBar(from imageData: Data) -> String? {
+        guard let ui = UIImage(data: imageData),
+              let cg = ui.cgImage else { return nil }
+        // 状态栏高度约 44pt；iPhone 截图常见 1280~2796px 高，按 6% 上限 160px / 下限 60px 截顶
+        let topH = max(60, min(160, cg.height / 16))
+        guard let top = cg.cropping(to: CGRect(x: 0, y: 0, width: cg.width, height: topH)) else { return nil }
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        request.recognitionLanguages = ["zh-Hans", "en"]
+        request.minimumTextHeight = 0.0   // 不过滤状态栏小字
+        let handler = VNImageRequestHandler(cgImage: top, options: [:])
+        do {
+            try handler.perform([request])
+        } catch {
+            return nil
+        }
+        let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+
     /// 设备端 OCR：同时返回文字和所有文本块的 bounding box，供营养成分表等需要版面分析的模块使用。
     /// - Parameter customWords: 可选词典偏置（已知商户名/常见商户名），提升易混字识别率。
     private static func localOCR(from imageData: Data,
@@ -896,8 +920,15 @@ struct RecognizeService {
     static func recognizeWithLocalPriority(imageData: Data, in context: ModelContext) async throws -> (result: RecognitionResult, rawText: String, source: RecognitionSource) {
         let tier = AppUserTier.current
         let ocr = localOCR(from: imageData, customWords: merchantBiasWords(in: context))
-        let cleanText = ocr?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var cleanText = ocr?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let observations = ocr?.observations ?? []
+        // 状态栏 OCR：主 OCR 会过滤状态栏小字（minimumTextHeight=0.008），这里单独把状态栏文字
+        // 补回来，主要为了让「HH:MM」时间能被 extractISODateTime 看到（支付宝/微信付款成功页的截图，
+        // 状态栏里的时间就是交易时间）。状态栏通常只有时间/电量/信号，没有 ¥ 金额或商户名，
+        // 不会污染 isAmountLine / isPotentialMerchant。
+        if let statusBarText = localOCRStatusBar(from: imageData) {
+            cleanText = statusBarText + "\n" + cleanText
+        }
 
         var fallbackLocal: RecognitionResult?
         // 提前检测营养成分表标志，后续多处用它跳过账单路径
@@ -1725,9 +1756,9 @@ struct RecognizeService {
                   let m = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
                   let r1 = Range(m.range(at: 1), in: line),
                   let r2 = Range(m.range(at: 2), in: line) else { continue }
-            // 防御：避免把「19:09」格式的支付时间标签值（已经被上面 tryExtractDateTime 处理）再吃一遍；
-            // 同时跳过明显的标签行（带冒号）。
-            if line.contains("：") || line.contains(":") && m.range(at: 3).location == NSNotFound && line.range(of: #"^\d{1,2}:\d{2}$"#, options: .regularExpression) == nil { continue }
+            // 防御：避免把已经被前面 priority 1 标签模式吃过的「支付时间: 13:10」再吃一遍。
+            // 这些带中文标签冒号「：」的行交给上面处理；这里只认纯时刻行（含状态栏「13:10 1」）。
+            if line.contains("：") { continue }
             let h = Int(line[r1]) ?? 0
             let min = Int(line[r2]) ?? 0
             let s = m.numberOfRanges > 3 && m.range(at: 3).location != NSNotFound
