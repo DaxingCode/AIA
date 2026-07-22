@@ -210,18 +210,18 @@ struct RecognizeService {
         return (result, rawText)
     }
 
-    // Agent 聊天：走云端 mode:"agent"（带工具调用的智能助理）。
-    // 云函数内部失败会自动降级回本地摘要兜底，保证始终有回复。
     static func chat(text: String, context: [String: Any]) async throws -> String {
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.timeoutInterval = 60
+        req.timeoutInterval = 30
 
-        // 切到 Agent 模式：mode:"agent" + 注入 userId + 改用商汤 sensechat-turbo。
-        // 其余（超时 60s、错误提示、返回值）保持与原来一致。
-        let request = AgentChatRequest(text: text, context: context)
-        let body: [String: Any] = request.toDictionary()
+        let body: [String: Any] = [
+            "mode": "chat",
+            "text": text,
+            "context": context,
+            "provider": "sensenova"
+        ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (respData, response) = try await URLSession.shared.data(for: req)
