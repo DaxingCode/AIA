@@ -14,6 +14,8 @@ struct SettingsView: View {
     @AppStorage("userNickname") private var userNickname = "阿宝的朋友"
     // 外观模式：浅色 / 深色 / 跟随系统（写 UserDefaults，ContentView 读取并应用到全窗口）
     @AppStorage("aia.appearance") private var appearanceRaw = "system"
+    // 智能问答 Agent 总开关（与「云同步」同组）。默认关，零污染。
+    @AppStorage("aia.agentEnabled") private var agentEnabled = false
     @State private var showCopied = false
     @State private var toastText = "已复制同步账号"
     @State private var showShortcutGuide = false
@@ -29,6 +31,7 @@ struct SettingsView: View {
                 appearanceCard
                 tierCard
                 autoSyncSettingsCard
+                agentCard
                 screenshotAutoCard
                 reminderCard
                 testNotifyCard
@@ -201,6 +204,29 @@ struct SettingsView: View {
             .background(AIATheme.surface)
         }
         .buttonStyle(.plain)
+        .card()
+    }
+
+    // MARK: - 智能问答 Agent（可单独开关）
+    private var agentCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "brain")
+                    .font(AIATheme.Font.callout.weight(.medium))
+                    .foregroundStyle(AIATheme.blue)
+                Text("智能问答 Agent")
+                    .font(AIATheme.Font.subhead.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Toggle("智能问答 Agent", isOn: $agentEnabled)
+                    .labelsHidden()
+            }
+            Text("开启后，对话页的问答由 AI 基于你的记录智能回答（只读，不会改动任何数据）。")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+                .lineSpacing(2)
+        }
+        .padding(14)
         .card()
     }
 

@@ -242,6 +242,43 @@ struct RecognizeService {
         return reply
     }
 
+    /// 智能问答 Agent（可单独开关）：与 chat() 同构，但请求 mode 改为 "agent"，
+    /// 并注入登录账户 userId（aia.userId，未登录为空 → 云端回落 chat）。
+    /// provider 用 sensenovaText（SenseChat-Turbo 文本模型，支持 function calling）。
+    static func agentChat(text: String, context: [String: Any], userId: String) async throws -> String {
+        var req = URLRequest(url: endpoint)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // Agent 含多轮工具调用，超时放宽到 60s（chat 为 30s）。
+        req.timeoutInterval = 60
+
+        let body: [String: Any] = [
+            "mode": "agent",
+            "text": text,
+            "context": context,
+            "userId": userId,
+            "provider": "sensenovaText"
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (respData, response) = try await URLSession.shared.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let rawText = String(data: respData, encoding: .utf8) ?? ""
+
+        guard (200...299).contains(status) else {
+            let preview = rawText.isEmpty ? "" : "，云端返回：\(rawText.prefix(200))"
+            throw NSError(domain: "AgentChat", code: -3,
+                          userInfo: [NSLocalizedDescriptionKey: "请求失败 (HTTP \(status))\(preview)。请检查：1) 是否已重新部署最新归档.zip；2) CloudBase HTTP 触发是否关闭了「集成响应」"])
+        }
+
+        let wrapper = try JSONDecoder().decode(ChatResponse.self, from: respData)
+        guard wrapper.ok, let reply = wrapper.reply else {
+            throw NSError(domain: "AgentChat", code: -2,
+                          userInfo: [NSLocalizedDescriptionKey: wrapper.error ?? "智能问答失败"])
+        }
+        return reply
+    }
+
     // MARK: - 本地优先识别层（OCR + 规则，0 成本、离线）
     // 设计：截图/照片先跑设备端 OCR，再用规则解析金额/商户/日期，并查本地 MerchantMeta 经验库补全分类。
     // 能解析出明确账单则直接返回（跳过云端视觉模型，成本≈0）；否则回退云端。
@@ -1935,8 +1972,28 @@ struct RecognizeService {
 
     /// 无经验库时按关键词猜测分类/收支方向。
     /// merchant 优先：先根据已提取的商户名判断；未命中再看全文关键词。
+    /// 餐次词 / 餐饮词 → 餐饮分类提示。
+    /// 用于「晚餐花了35」「午饭付了28」「夜宵一份烧烤」这类文本/商户被提取为餐次词时，
+    /// 仍能正确归到「餐饮」而非默认「其他」。命中返回 "餐饮"，否则 nil。
+    /// 聊天本地建账单（createBillLocally）与图像识别（guessCategory）共用，避免两条路径分类逻辑分叉。
+    static func mealCategoryHint(_ text: String) -> String? {
+        let t = text.lowercased()
+        let mealWords = ["早餐", "早饭", "午餐", "午饭", "晚餐", "晚饭", "夜宵", "宵夜",
+                         "加餐", "下午茶", "聚餐", "宴请", "请客", "吃饭", "外卖",
+                         "奶茶", "咖啡", "餐厅", "饭馆", "饭店", "食堂"]
+        if mealWords.contains(where: { t.contains($0) }) || t.contains("饭") || t.contains("餐") {
+            return "餐饮"
+        }
+        return nil
+    }
+
     private static func guessCategory(_ merchant: String, _ text: String) -> (String, Bool) {
         let m = merchant.trimmingCharacters(in: .whitespaces)
+
+        // 餐饮：餐次词/餐饮词优先（覆盖「晚餐/夜宵/零食」等，避免被归为其他）
+        if RecognizeService.mealCategoryHint(text) != nil {
+            return ("餐饮", false)
+        }
 
         // 云服务：必须优先于全文关键词判断，避免被截图里的"打车券/红包"等优惠信息带偏。
         let cloudMerchants = [
@@ -1958,7 +2015,7 @@ struct RecognizeService {
         if text.contains("退款") || text.contains("收款") || text.contains("入账") || text.contains("收入") {
             return ("其他", true)
         }
-        if text.contains("餐饮") || text.contains("饭") || text.contains("餐") || text.contains("经营码") {
+        if text.contains("经营码") {
             return ("餐饮", false)
         }
         if text.contains("医疗健康") || text.contains("医院") || text.contains("诊所") || text.contains("药店") {
