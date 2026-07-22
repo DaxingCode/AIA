@@ -48,7 +48,15 @@ const PROVIDERS = {
     model: 'doubao-vision',
     apiKeyEnv: 'DOUBAO_API_KEY',
   },
-  // 智谱 GLM 视觉（已有：GLM-4V 视觉模型）
+  // 智谱 GLM-4V-Flash —— 永久免费的视觉模型（16K 上下文）
+  // 注册：https://open.bigmodel.cn/ → API Key（与 glm/glmText 共用的 GLM_API_KEY）
+  // 说明：https://aisharenet.com/zhipukaifangpingtai/
+  glm4vFlash: {
+    endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+    model: 'glm-4v-flash',
+    apiKeyEnv: 'GLM_API_KEY',
+  },
+  // 智谱 GLM 视觉（已有：GLM-4V 视觉模型，较贵 ¥50/M，救急用）
   glm: {
     endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
     model: 'glm-4v',
@@ -374,7 +382,8 @@ async function callWithFallback(body, apiKey) {
 
   // 定义 fallback 映射：所有非 qwen 的厂商 → 回到 qwen/qwenText 兜底
   const fallbackMap = {
-    sensenova: 'qwen',
+    glm4vFlash: 'sensenova',      // 免费视觉→免费视觉（次选）
+    sensenova: 'qwen',            // 免费视觉→付费视觉（兜底）
     sensenovaText: 'qwenText',
     glm: 'qwen',
     glmText: 'qwenText',
