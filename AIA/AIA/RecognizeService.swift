@@ -909,12 +909,9 @@ struct RecognizeService {
     /// 本地优先识别入口（UIImage 版）。先 OCR+规则；命中返回 local，否则回退云端。
     static func recognizeWithLocalPriority(image: UIImage, in context: ModelContext) async throws -> (result: RecognitionResult, rawText: String, source: RecognitionSource) {
         guard let data = image.jpegData(compressionQuality: 0.9) ?? image.pngData() else {
-            // 无法转 data（极罕见）：付费允许视觉兜底，免费降级本地-only（不发的图）
-            if AppUserTier.current.allowVision {
-                let output = try await recognize(image: image)
-                return (output.result, output.rawText, .cloud)
-            }
-            return degrade(fallback: nil, raw: "")
+            // 无法转 data（极罕见）：直接 visual 兜底
+            let output = try await recognize(image: image)
+            return (output.result, output.rawText, .cloud)
         }
         return try await recognizeWithLocalPriority(imageData: data, in: context)
     }
@@ -978,34 +975,20 @@ struct RecognizeService {
             }
             }  // end else: isNutritionLabel 为 false 时才走 localParseBill
 
-            // 4) 文本模型（不发的图，便宜）：免费用户先扣额度，超额则降级本地-only。
-            if tier == .free, !AppUserTier.consumeCloudTextQuota() {
-                print("[识别] 免费额度耗尽，降级本地-only，source=local")
-                return degrade(fallback: fallbackLocal, raw: cleanText)
-            }
-            do {
-                let (textResult, textRaw) = try await recognizeOCRText(cleanText)
-                if let types = textResult.types, !types.contains("none") {
-                    print("[识别] 文本模型命中，source=cloudText")
-                    return (textResult, textRaw, .cloudText)
-                }
-                print("[识别] 文本模型返回 none，回退")
-            } catch {
-                print("[识别] 文本模型失败，回退：\(error)")
-            }
+            // 3) 视觉模型（发图，最准）：本地规则没命中就直接传图给模型。
+            //    (2026-07-22 用户要求：所有图片识别走视觉模型，精度优先，不考虑 tier 限制)
+            let vision = try await recognizeResilient(imageData: imageData)
+            print("[识别] 视觉模型命中，source=cloud")
+            return (vision.result, vision.rawText, .cloud)
+
         } else if tier == .free {
             // 完全无 OCR 文本：免费用户禁止视觉兜底，直接降级本地-only。
             return degrade(fallback: nil, raw: "")
         }
 
-        // 4) 视觉模型兜底：仅付费用户（发的图，最贵一档）。
-        if tier.allowVision {
-            let output = try await recognizeResilient(imageData: imageData)
-            return (output.result, output.rawText, .cloud)
-        }
-
-        // 5) 免费用户无视觉兜底：降级到本地宽松结果或空账单（手动录入）。
-        return degrade(fallback: fallbackLocal, raw: cleanText)
+        // 有图但未进上方分支（极少条件分支兜底）：同上视觉模型。
+        let vision = try await recognizeResilient(imageData: imageData)
+        return (vision.result, vision.rawText, .cloud)
     }
 
     /// 本地结果是否「高置信」可本地胜出（按档位）。
