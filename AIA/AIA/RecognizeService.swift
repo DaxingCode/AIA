@@ -454,6 +454,27 @@ struct RecognizeService {
         return entries.count >= 2 && Set(validMerchants).count >= 2
     }
 
+    /// 列表页/历史记录页：微信/支付宝「账单」列表、支付宝「交易记录」、美团「我的订单」等。
+    /// 这类截图**每条都是历史交易**，适合逐条入库（多笔账单），但需要比支付详情更严的边界切分。
+    /// 用于：在多账单路径里给 confirm 页加「检测到列表，逐条记录」提示；同时影响 extractBillEntries
+    /// 的切分策略（按 row group 而非金额行向上扫描）。
+    private static func isBillListScreen(_ text: String) -> Bool {
+        let signals = [
+            "全部账单", "我的账单", "我的订单", "搜索交易记录", "搜索我的订单",
+            "收支统计", "收支分析", "查找交易", "本月已省",
+            "大额消费", "自动扣款", "花呗付款", "分期付款", "支付消息",
+            "待付款", "待收货", "待使用", "待到店", "退款/售后",
+            "订单", "账单管理"   // 单条详情页也含「账单管理」，需配合其他信号
+        ]
+        // 至少命中 2 个列表页信号才认定（避免误把详情页里"账单管理"当列表页）
+        var hit = 0
+        for s in signals where text.localizedCaseInsensitiveContains(s) {
+            hit += 1
+            if hit >= 2 { return true }
+        }
+        return false
+    }
+
     /// 支付/交易结果页：单笔交易的结果页（含状态文案、订单信息、可能的红包/广告）。
     /// 典型：支付宝「支付成功」、微信「支付成功」、银联「交易成功」。
     private static func isPaymentSuccessScreen(_ text: String) -> Bool {
@@ -1245,7 +1266,9 @@ struct RecognizeService {
     }
 
     /// 判断字符串是否像时间或日期，商户名绝不应是时间/日期。
-    /// 覆盖：纯时分秒、YYYY-MM-DD、今天/昨天+时刻、星期X+时刻、M月D日+时刻。
+    /// 覆盖：纯时分秒、YYYY-MM-DD、今天/昨天+时刻、星期X+时刻、M月D日+时刻、纯 M月D日、列表项短格式。
+    /// 注意：只用于「不要把它当商户」的过滤；不代表「可作为支付时间」——支付时间仍由
+    /// extractISODateTime 严格匹配「支付时间/付款时间/交易时间/创建时间」标签。
     private static func isLikelyTime(_ s: String) -> Bool {
         let t = s.trimmingCharacters(in: .whitespaces)
         // 纯时分秒（如 19:11、09:00:30）
@@ -1256,9 +1279,13 @@ struct RecognizeService {
         let relTime = t.range(of: #"^(?:今天|昨天)\s*\d{1,2}:\d{2}(?::\d{2})?$"#, options: .regularExpression) != nil
         // 星期X + 时刻（如 星期四 18:26、星期四18:37）
         let weekdayTime = t.range(of: #"^星期[一二三四五六日天]\s*\d{1,2}:\d{2}(?::\d{2})?$"#, options: .regularExpression) != nil
-        // M月D日 + 时刻（如 7月21日 15:39）
-        let mdTime = t.range(of: #"^\d{1,2}月\d{1,2}日[\s]*\d{1,2}:\d{2}(?::\d{2})?$"#, options: .regularExpression) != nil
-        return timeOnly || dateLike || relTime || weekdayTime || mdTime
+        // M月D日 + 时刻（如 7月21日 15:39、7月21日15:39、7月21日 15:39:07）
+        let mdTime = t.range(of: #"^\d{1,2}月\d{1,2}日\s*\d{1,2}:\d{2}(?::\d{2})?$"#, options: .regularExpression) != nil
+        // 纯 M月D日（如 7月21日、07-21）——列表项简写
+        let mdOnly = t.range(of: #"^\d{1,2}月\d{1,2}日$"#, options: .regularExpression) != nil
+        // MM-DD HH:MM / MM-DD（如 07-21 15:39、07-21）——列表项短格式
+        let shortDateTime = t.range(of: #"^\d{1,2}[-/.]\d{1,2}(\s+\d{1,2}:\d{2}(?::\d{2})?)?$"#, options: .regularExpression) != nil
+        return timeOnly || dateLike || relTime || weekdayTime || mdTime || mdOnly || shortDateTime
     }
 
     /// 判断字符串是否为重量/规格/单位，商户名绝不应是「400g」「0g」「件数」等。
@@ -1495,13 +1522,31 @@ struct RecognizeService {
         s = s.replacingOccurrences(of: "*", with: "")
         s = s.replacingOccurrences(of: "（", with: "(")
         s = s.replacingOccurrences(of: "）", with: ")")
-        // 优先去掉小票里常见的分店后缀，保留品牌名
+        // 优先去掉小票/列表里常见的分店/位置后缀，保留品牌名。
+        // 规则：
+        //  ① 命中已知小票/商户后缀关键词（个人/商户/官方/店/世界/广场/中心/HC）→ 剥
+        //  ② 括号内含地址/位置/分店号/分店提示词 → 剥
+        //  ③ 括号紧跟"（）...（）"中内容是中文地址/街道/学院/分店 → 剥
+        //  ④ 开头有 `（` 但 OCR 截掉了 `）`（如「老汤和·乌鸡米线（西乡塘大学东..."）→ 剥
         if let r = s.range(of: #"\([^)]*\)"#, options: .regularExpression) {
             let suffix = String(s[r]).lowercased()
-            if suffix.contains("个人") || suffix.contains("商户") || suffix.contains("官方") ||
-               suffix.contains("店") || suffix.contains("世界") || suffix.contains("广场") ||
-               suffix.contains("中心") || suffix.contains("HC") {
+            let inside = String(suffix.dropFirst().dropLast())
+            let knownSuffix = ["个人", "商户", "官方", "店", "世界", "广场", "中心", "hc"]
+            let locationHint = ["路", "街", "号", "区", "市", "省", "东", "西", "南", "北",
+                                "学院", "大学", "医院", "楼", "层", "室", "栋", "座", "园",
+                                "店", "分店", "门店", "地址", "位置", "印象城", "广场"]
+            if knownSuffix.contains(where: { inside.contains($0) }) ||
+                locationHint.contains(where: { inside.contains($0) }) {
                 s.removeSubrange(r)
+            }
+        } else if let openParenIdx = s.firstIndex(of: "(") {
+            // ④ 截断的左括号：含位置/地址/分店关键词时剥到末尾
+            let inside = String(s[s.index(after: openParenIdx)...])
+            let locationHint = ["路", "街", "号", "区", "市", "省", "东", "西", "南", "北",
+                                "学院", "大学", "医院", "楼", "层", "室", "栋", "座", "园",
+                                "分店", "门店", "印象城", "广场"]
+            if locationHint.contains(where: { inside.contains($0) }) {
+                s = String(s[..<openParenIdx])
             }
         }
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
