@@ -11,6 +11,20 @@ import UniformTypeIdentifiers
 /// 同时被下方"过滤 AI 确认消息不进上下文"的逻辑复用，务必与那个过滤集合保持一致。
 private let chatConfirmOpeners = ["记好啦", "收到～", "好嘞", "搞定", "记下啦", "OK，记上了"]
 
+/// 聊天内待确认饮食记录（内嵌在 AI 消息文本中，避免改 ChatMessage schema）。
+private struct PendingFoodConfirm: Codable {
+    let meal: String
+    let name: String
+    let portion: String
+    let weight: Double
+    let cal: Double
+    let protein: Double
+    let carbs: Double
+    let fat: Double
+    let amount: Double?
+    let originalText: String
+}
+
 struct ChatView: View {
     @Query private var foods: [FoodEntry]
     @Query private var bills: [Bill]
@@ -376,8 +390,121 @@ struct ChatView: View {
     /// 阿宝招呼：每次进入页面时根据本地数据与用户习惯实时生成（不持久化，避免重复堆积）。
     private var greeting: String { buildGreeting() }
 
+    @ViewBuilder
     private func bubble(_ m: ChatMessage) -> some View {
-        messageBubble(text: m.text, isUser: m.role == .user)
+        if let pending = parseFoodConfirm(m.text) {
+            foodConfirmBubble(pending, message: m)
+        } else {
+            messageBubble(text: m.text, isUser: m.role == .user)
+        }
+    }
+
+    /// 解析消息文本中内嵌的待确认饮食标记。
+    private func parseFoodConfirm(_ text: String) -> PendingFoodConfirm? {
+        let marker = "__FOOD_CONFIRM__"
+        guard text.hasPrefix(marker),
+              let data = text.dropFirst(marker.count).data(using: .utf8),
+              let decoded = try? JSONDecoder().decode(PendingFoodConfirm.self, from: data) else {
+            return nil
+        }
+        return decoded
+    }
+
+    /// 聊天气泡里的饮食确认卡片：用户点确认才写库，避免静默入库。
+    private func foodConfirmBubble(_ pending: PendingFoodConfirm, message: ChatMessage) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "fork.knife")
+                    .foregroundStyle(AIATheme.food)
+                Text("待确认的饮食记录")
+                    .font(AIATheme.Font.subhead.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(pending.meal) · \(pending.name) · \(pending.portion)")
+                    .font(AIATheme.Font.body)
+                    .foregroundStyle(.primary)
+                Text("约 \(Int(pending.cal)) kcal　蛋白质 \(String(format: "%.1f", pending.protein))g　碳水 \(String(format: "%.1f", pending.carbs))g　脂肪 \(String(format: "%.1f", pending.fat))g")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                if let amount = pending.amount {
+                    Text("支出 ¥\(String(format: "%.2f", amount)) 已保留")
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.sub)
+                }
+            }
+            HStack(spacing: 10) {
+                Button {
+                    confirmPendingFood(pending, message: message)
+                } label: {
+                    Text("确认记录")
+                        .font(AIATheme.Font.callout.weight(.medium))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(AIATheme.food)
+
+                Button {
+                    cancelPendingFood(pending, message: message)
+                } label: {
+                    Text("算了")
+                        .font(AIATheme.Font.callout.weight(.medium))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(AIATheme.muted)
+            }
+        }
+        .padding(12)
+        .background(AIATheme.dietBG)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .contextMenu {
+            Button {
+                UIPasteboard.general.string = "\(pending.meal) · \(pending.name) · \(pending.portion) · \(Int(pending.cal)) kcal"
+            } label: {
+                Label("复制", systemImage: "doc.on.doc")
+            }
+        }
+    }
+
+    /// 用户确认：创建 FoodEntry 并入饮食库，把确认卡片消息替换为普通确认文案。
+    private func confirmPendingFood(_ pending: PendingFoodConfirm, message: ChatMessage) {
+        let ratio = pending.weight / 100.0
+        let baseCalories = ratio > 0 ? pending.cal / ratio : pending.cal
+        let baseProtein  = ratio > 0 ? pending.protein / ratio : pending.protein
+        let baseCarbs    = ratio > 0 ? pending.carbs / ratio : pending.carbs
+        let baseFat      = ratio > 0 ? pending.fat / ratio : pending.fat
+
+        let entry = FoodEntry(
+            name: pending.name,
+            calories: pending.cal,
+            protein: pending.protein,
+            carbs: pending.carbs,
+            fat: pending.fat,
+            portion: pending.portion,
+            meal: pending.meal,
+            weightGram: pending.weight,
+            baseCalories: baseCalories,
+            baseProtein: baseProtein,
+            baseCarbs: baseCarbs,
+            baseFat: baseFat,
+            imageName: nil
+        )
+        context.insert(entry)
+        HealthManager.shared.saveCaloriesConsumed(pending.cal, date: .now)
+        CloudSyncManager.shared.syncAfterLocalChange(context: context)
+
+        let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
+        let foodIcon = ["🍽", "🍜", "🍚", "🥗", "🍔", "🍱"].randomElement() ?? "🍽"
+        message.text = "\(opener)：\(foodIcon) \(pending.meal)「\(pending.name)」\(Int(pending.cal)) kcal（\(pending.portion)）"
+        try? context.save()
+    }
+
+    /// 用户取消：保留账单，仅把确认卡片替换为取消提示。
+    private func cancelPendingFood(_ pending: PendingFoodConfirm, message: ChatMessage) {
+        message.text = "🍽 已取消记录「\(pending.name)」的饮食，支出仍保留。"
+        try? context.save()
     }
 
     /// 顶部阿宝招呼气泡（带小头像，区别于普通聊天记录）
@@ -933,6 +1060,63 @@ struct ChatView: View {
         return "🍽 已记下「\(name)」\(portion)，但暂时没查到热量，点开这条记录可以补全哦～"
     }
 
+    /// 账单已记且本地营养库未命中时，异步联网查营养并在聊天中发送确认卡片。
+    /// 用户点击"确认记录"后才创建 FoodEntry；查询失败则仅提示，保留账单。
+    private func sendFoodConfirmCard(text: String) async {
+        let meal = ChatView.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
+        guard let (name, weight, portion) = ChatView.parseFoodNameAndWeight(text), !name.isEmpty else { return }
+
+        do {
+            if let ref = try await RecognizeService.queryFood(name: name) {
+                let ratio = weight / 100.0
+                let cal = ref.kcal * ratio
+                let protein = ref.protein * ratio
+                let carbs = ref.carbs * ratio
+                let fat = ref.fat * ratio
+
+                FoodMetaStore.upsert(name: name, displayName: ref.name,
+                                     kcal: ref.kcal, protein: ref.protein, carbs: ref.carbs, fat: ref.fat,
+                                     source: "cloud", in: context)
+
+                let pending = PendingFoodConfirm(
+                    meal: meal,
+                    name: ref.name,
+                    portion: portion,
+                    weight: weight,
+                    cal: cal,
+                    protein: protein,
+                    carbs: carbs,
+                    fat: fat,
+                    amount: extractAmount(text),
+                    originalText: text
+                )
+                guard let data = try? JSONEncoder().encode(pending),
+                      let json = String(data: data, encoding: .utf8) else { return }
+                let confirmText = "__FOOD_CONFIRM__" + json
+                let aiMessage = ChatMessage(role: .ai, text: confirmText, createdAt: Date().addingTimeInterval(0.2))
+                context.insert(aiMessage)
+                try? context.save()
+            } else {
+                let aiMessage = ChatMessage(
+                    role: .ai,
+                    text: "🍽 没查到「\(name)」的营养信息，支出已经记下啦，你可以稍后手动补录饮食哦～",
+                    createdAt: Date().addingTimeInterval(0.2)
+                )
+                context.insert(aiMessage)
+                try? context.save()
+            }
+        } catch {
+            print("[sendFoodConfirmCard] 失败：\(error)")
+            let aiMessage = ChatMessage(
+                role: .ai,
+                text: "🍽 联网查营养时出错了，支出已经记下啦，稍后再试吧～",
+                createdAt: Date().addingTimeInterval(0.2)
+            )
+            context.insert(aiMessage)
+            try? context.save()
+        }
+    }
+
     /// 本地营养库未命中时，走云端专项食物营养查询；仍失败则兜底通用识别。
     private func createFoodFromCloud(text: String, recentMessages: [[String: String]]) async -> String {
         let meal = ChatView.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
@@ -1451,12 +1635,16 @@ struct ChatView: View {
                     // 2. 本地能解析的明确账单意图（如「记一笔星巴克35」「付了美团28」）直接本地建，复用 MerchantMeta 分类，跳过 AI。
                     else if let localBill = createBillLocally(from: t) {
                         // 账单已创建；若该文本同时含食物意图（如「晚餐吃了汉堡花了10元」），
-                        // 并行补建一条饮食记录：本地营养库命中则直接建，未命中则仅记账单并提示联网查营养。
+                        // 本地营养库命中则直接建饮食；未命中则先记账单，再异步联网查营养并以确认卡片形式让用户确认入库。
                         if hasRawFoodIntent(t) {
                             if let localFood = createFoodLocally(from: t) {
                                 responseText = localBill + "\n" + stripOpener(localFood)
                             } else {
-                                responseText = localBill + "\n🍽 饮食部分需要联网查一下营养信息，支出先帮你记好啦～"
+                                responseText = localBill
+                                // 异步联网查营养，成功后发送聊天气泡内确认卡片（用户点确认才写入饮食库）
+                                Task { @MainActor in
+                                    await sendFoodConfirmCard(text: t)
+                                }
                             }
                         } else {
                             responseText = localBill
