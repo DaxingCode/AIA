@@ -251,7 +251,10 @@ struct FoodListView: View {
                                     Circle().fill(AIATheme.food).frame(width: 7, height: 7).padding(.top, 2)
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(f.name).font(AIATheme.Font.footnote.weight(.medium))
-                                        Text([f.portion, NSLocalizedString("food.recognized", comment: "")].compactMap { $0.isEmpty ? nil : $0 }.joined(separator: " · "))
+                                        let sourceText = (f.imageName?.isEmpty == false)
+                                            ? NSLocalizedString("food.recognized", comment: "")
+                                            : NSLocalizedString("food.by_chat", comment: "")
+                                        Text([f.portion, sourceText].compactMap { $0.isEmpty ? nil : $0 }.joined(separator: " · "))
                                             .font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
                                     }
                                     Spacer()

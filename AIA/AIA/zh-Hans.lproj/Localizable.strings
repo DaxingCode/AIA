@@ -97,6 +97,7 @@
 "food.empty.title" = "还没有%@记录";
 "food.empty.desc" = "点底部相机拍照识别";
 "food.recognized" = "识别";
+"food.by_chat" = "对话";
 "food.meal.breakfast" = "早餐";
 "food.meal.lunch" = "午餐";
 "food.meal.dinner" = "晚餐";

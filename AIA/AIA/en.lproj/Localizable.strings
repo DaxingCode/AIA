@@ -97,6 +97,7 @@
 "food.empty.title" = "No %@ records yet";
 "food.empty.desc" = "Tap the camera at the bottom to scan";
 "food.recognized" = "Recognized";
+"food.by_chat" = "Chat";
 "food.meal.breakfast" = "Breakfast";
 "food.meal.lunch" = "Lunch";
 "food.meal.dinner" = "Dinner";

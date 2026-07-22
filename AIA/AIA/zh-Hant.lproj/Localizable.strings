@@ -97,6 +97,7 @@
 "food.empty.title" = "還沒有%@記錄";
 "food.empty.desc" = "點底部相機拍照識別";
 "food.recognized" = "識別";
+"food.by_chat" = "對話";
 "food.meal.breakfast" = "早餐";
 "food.meal.lunch" = "午餐";
 "food.meal.dinner" = "晚餐";
