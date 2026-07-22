@@ -72,6 +72,7 @@ M1 分享扩展导入 → M2 快捷指令无感对接 → M3 食物卡路里(+�
 - **动效令牌 + 按压反馈约定（2026-07-22 落地）**：新动效一律走 `AIATheme.Motion`（press=spring(0.32/0.6)、draw=easeOut(0.8)、progress=easeOut(0.6)）+ `AIATheme.motionReduce`（= `UIAccessibility.isReduceMotionEnabled`），禁止散写 `Animation.xxx`。**可点卡片/按钮的按压反馈统一用 `PressableCardStyle`**（已写入 `UIComponents.swift`），把 `.buttonStyle(.plain)` 换成 `.buttonStyle(PressableCardStyle())` 即得「缩放下沉 + 阴影抬升 + spring 回弹」；切勿在 `.card()` 里另加 `Gesture`/`onTapGesture` 做按压（会违反项目铁律吞点击）。图表类（`RingView`/`DonutView`/`MacroCard`/`MiniBar`）用 `@State` 插值 + `onAppear`/`onChange(of:)` 做描边/生长动画；Swift Charts 曲线在 iOS 26 下路径动画不可靠，用「透明度+缩放淡入」替代真·描边生长。
 - **账单支付时间铁律（2026-07-22，用户明确）**：`RecognizeService.extractISODateTime` **只匹配「支付时间/付款时间/交易时间/创建时间」标签下的时间戳**；命中不到则返回 nil，上层 `localParseBill` fallback 到 `.now`（系统当前时间）。**绝不**把状态栏（左上角）的 HH:MM 当成支付时间——那是截图拍摄时间，不是交易时间。禁止再加任何「纯 HH:MM / 今天/昨天/M月D日/星期X」的相对时间兜底。
   - **2026-07-22 补充**：列表项时间（如「7月21日15:39」「昨天 19:09」）例外——用户明确这是支付时间（每笔交易的显示时间）。在多账单路径中，`extractBillEntries` 提取的 `timeLine` 通过 `preferredTimeLine` 参数传入 `localParseBill`，作为 `extractISODateTime` 之后、`.now` 之前的第二 fallback。单账单路径不涉及此参数。
+- **图片识别链路铁律（2026-07-22，用户明确）**：所有图片识别（拍照/截图/相册）→ 本地规则（**仅一图多账单 + 营养成分表**）→ **直接发图给视觉模型**（sensenova，公测免费）。**单账单本地规则不提前返回**（localParseBill 只作 fallback）—— 曾因命中「本月」字符错把「生活缴费」认成「7月 ¥1.0 17:32」错账，2026-07-22 之后永久禁止。识别来源徽章要么是「本地AI识别」（一图多账单/营养成分表），要么是「云端AI识别」/「云端AI识别」（视觉），不可能再走「本地AI识别」+单账单路径。模型收费后改回成本优先链路：OCR 文字 + 文本模型。
 
 ## 多对话并行协作协议（2026-07-22 起，强制）
 - 本仓库是**多 WorkBuddy 对话并行改同一份代码**，各对话互不知情，同文件会静默覆盖。协调中枢 = 根目录 `多团队协作分工表.md`。
