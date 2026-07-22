@@ -966,12 +966,10 @@ struct RecognizeService {
                 // 不设置回退，继续走文本模型 or 视觉兜底。
                 // 文本模型仍可能正确分类为食物并提供结构数据。
             } else {
+            // 单账单本地规则只作降级备选：不再提前返回，全部走视觉模型保精度。
+            // (2026-07-22 用户明确：所有图片识别走云端视觉模型，本地不能拦下。)
             if let local = localParseBill(text: cleanText, in: context, candidates: ocr?.candidates ?? []) {
-                if localWins(local, rawText: cleanText, tier: tier, context: context) {
-                    print("[识别] 本地 OCR+规则高置信命中，source=local")
-                    return (local, cleanText, .local)
-                }
-                fallbackLocal = local   // 免费用户超额/无视觉兜底时降级返回
+                fallbackLocal = local   // 仅在视觉模型彻底失败时降级返回
             }
             }  // end else: isNutritionLabel 为 false 时才走 localParseBill
 
