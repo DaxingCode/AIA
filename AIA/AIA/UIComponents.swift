@@ -702,7 +702,8 @@ struct AIBottomBar: View {
                 .stroke(Color(.separator), lineWidth: 0.5)
                 .allowsHitTesting(false)
         )
-        .padding(.horizontal, 12).padding(.bottom, 10)
+        // 左右 20pt 边距 → 与首页「今日事项预览」气泡同宽，整页对齐
+        .padding(.horizontal, 20).padding(.bottom, 10)
         .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker)
         .task {
             guard prompts.count > 1 else { return }
