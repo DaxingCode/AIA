@@ -634,18 +634,19 @@ struct AIBottomBar: View {
     }
 
     var body: some View {
-        HStack(spacing: 9) {
-            // 语音按钮（已换到左侧）
+        // 悬浮胶囊：一个整体 Capsule 承载所有控件，替代原来 4 个独立按钮分散布局。
+        // 玻璃材质 + 柔阴影 + 左右 12pt 边距 → 真正"浮动"，不再贴满屏幕宽。
+        HStack(spacing: 4) {
+            // 语音按钮（不再有独立圆背景，图标直接浮在胶囊玻璃底色上）
             Button { router.path.append(.chatVoice) } label: {
                 Image(systemName: "mic.fill")
-                    .font(AIATheme.Font.title2.weight(.medium))
+                    .font(AIATheme.Font.body.weight(.medium))
                     .foregroundStyle(AIATheme.sub)
-                    .frame(width: 50, height: 50)
-                    .background(AIATheme.surfaceSecondary)
-                    .clipShape(Circle())
+                    .frame(width: 40, height: 40)
             }
             .buttonStyle(.plain)
 
+            // 中间滚动文案区（浅灰填充的小胶囊，与外部大胶囊形成双层视觉层次）
             Button { router.path.append(.chat) } label: {
                 HStack {
                     Spacer()
@@ -665,38 +666,44 @@ struct AIBottomBar: View {
                     .clipped()
                     Spacer()
                 }
-                .frame(height: 50)
-                .background(AIATheme.surfaceSecondary)
+                .frame(height: 36)
+                .background(AIATheme.fillSoft)
                 .clipShape(Capsule())
             }
             .buttonStyle(.plain)
 
-            // 拍照按钮（已换到右侧）
+            // 拍照按钮
             Button { showCamera = true } label: {
                 Image(systemName: "camera")
-                    .font(AIATheme.Font.title2.weight(.medium))
+                    .font(AIATheme.Font.body.weight(.medium))
                     .foregroundStyle(AIATheme.sub)
-                    .frame(width: 50, height: 50)
-                    .background(AIATheme.surfaceSecondary)
-                    .clipShape(Circle())
+                    .frame(width: 40, height: 40)
             }
+            .buttonStyle(.plain)
 
+            // 相册按钮
             Button { showPicker = true } label: {
                 Image(systemName: "photo")
-                    .font(AIATheme.Font.title2.weight(.medium))
+                    .font(AIATheme.Font.body.weight(.medium))
                     .foregroundStyle(AIATheme.sub)
-                    .frame(width: 50, height: 50)
-                    .background(AIATheme.surfaceSecondary)
-                    .clipShape(Circle())
+                    .frame(width: 40, height: 40)
             }
+            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 14)
-        // 玻璃质感：用系统毛玻璃材质替代纯色背景，底部栏更轻盈、更有层次（自动适配明暗）。
-        // 保持顶部 1px 分隔线，确保与上方内容区有明确边界。
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .top) { Divider() }
+        .padding(5)
+        // 玻璃胶囊 + 柔阴影 → 真正"悬浮"（不再贴边、不再有顶部分割线）
+        .background(
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
+        )
+        .overlay(
+            Capsule()
+                .stroke(Color(.separator), lineWidth: 0.5)
+                .allowsHitTesting(false)
+        )
+        .padding(.horizontal, 12).padding(.bottom, 10)
         .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker)
-        // 用 .task 异步循环驱动文案轮滚，绑定视图生命周期，避免 Timer 在底部栏布局下失效。
         .task {
             guard prompts.count > 1 else { return }
             var idx = promptIndex
