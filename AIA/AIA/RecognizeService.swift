@@ -446,9 +446,21 @@ struct RecognizeService {
     /// 额外排除：超市/便利店收银小票，避免 1 张小票被拆成 N 笔错账。
     private static func detectMultiBillList(_ text: String) -> Bool {
         if isSupermarketReceipt(text) { return false }
+        // 支付/交易成功页：本质是单笔交易的结果页，金额在状态栏+金额行+同行右栏
+        // 重复出现 2~3 次都是同一笔。强制走单账单路径，避免「同一笔拆 2~3 笔」。
+        if isPaymentSuccessScreen(text) { return false }
         let entries = extractBillEntries(text)
         let validMerchants = entries.compactMap { $0.merchant }.filter { !$0.isEmpty }
         return entries.count >= 2 && Set(validMerchants).count >= 2
+    }
+
+    /// 支付/交易结果页：单笔交易的结果页（含状态文案、订单信息、可能的红包/广告）。
+    /// 典型：支付宝「支付成功」、微信「支付成功」、银联「交易成功」。
+    private static func isPaymentSuccessScreen(_ text: String) -> Bool {
+        let signals = [
+            "支付成功", "交易成功", "付款成功", "支付完成", "交易完成", "已付款", "收款成功"
+        ]
+        return signals.contains { text.localizedCaseInsensitiveContains($0) }
     }
 
     /// 把账单列表拆成若干条目文本块，每块交给 localParseBill 解析。
@@ -499,6 +511,14 @@ struct RecognizeService {
 
         func isPotentialMerchant(_ line: String) -> Bool {
             if isUINoise(line) { return false }
+            // 支付/交易结果文案：绝不能当商户
+            let resultNoise: Set<String> = [
+                "支付成功", "交易成功", "付款成功", "支付完成", "交易完成", "已付款", "收款成功",
+                "回首页", "完成", "◎ 支付成功"
+            ]
+            if resultNoise.contains(line) || resultNoise.contains(where: { line.localizedCaseInsensitiveContains($0) && line.count <= $0.count + 4 }) {
+                return false
+            }
             if isLikelyTime(line) { return false }
             if isAmountLine(line) { return false }
             // 允许中文单字商户（如收款人"娟"），仅过滤完全空串；纯噪声短串已由 isUINoise 兜底。
@@ -1694,15 +1714,25 @@ struct RecognizeService {
             }
         }
 
-        // 4) 纯 HH:MM[:SS]（独占一行，无日期）：用参考日期补齐年月日
+        // 4) 纯 HH:MM[:SS]（独占一行/行首，无日期）：用参考日期补齐年月日
+        //    实测：状态栏常把定位箭头「➤」OCR 成「1」「l」等单字符，紧跟在时间后面
+        //    （如「13:10 1」），原来的 `^...$` 严格匹配会漏掉；这里改为「行首 + 时间 + 空白/行尾」。
         let lines = text.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
+        let timeHeadPattern = #"^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s|$)"#
         for line in lines {
-            guard line.range(of: #"^\d{1,2}:\d{2}(:\d{2})?$"#, options: .regularExpression) != nil else { continue }
-            let parts = line.components(separatedBy: ":")
-            let h = Int(parts[0]) ?? 0
-            let min = Int(parts[1]) ?? 0
-            let s = parts.count > 2 ? (Int(parts[2]) ?? 0) : 0
+            guard let regex = try? NSRegularExpression(pattern: timeHeadPattern, options: []),
+                  let m = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+                  let r1 = Range(m.range(at: 1), in: line),
+                  let r2 = Range(m.range(at: 2), in: line) else { continue }
+            // 防御：避免把「19:09」格式的支付时间标签值（已经被上面 tryExtractDateTime 处理）再吃一遍；
+            // 同时跳过明显的标签行（带冒号）。
+            if line.contains("：") || line.contains(":") && m.range(at: 3).location == NSNotFound && line.range(of: #"^\d{1,2}:\d{2}$"#, options: .regularExpression) == nil { continue }
+            let h = Int(line[r1]) ?? 0
+            let min = Int(line[r2]) ?? 0
+            let s = m.numberOfRanges > 3 && m.range(at: 3).location != NSNotFound
+                ? (Range(m.range(at: 3), in: line).flatMap { Int(line[$0]) } ?? 0)
+                : 0
             if let r = iso(from: reference, h: h, min: min, s: s) { return r }
         }
         return nil
