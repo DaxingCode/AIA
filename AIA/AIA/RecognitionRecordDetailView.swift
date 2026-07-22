@@ -70,8 +70,9 @@ struct RecognitionRecordDetailView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                     guard let rec = context.model(for: id) as? RecognitionRecord else { return }
                     LocalImageStore.delete(rec.imageName)
-                    context.delete(rec)
-                    // 不显式 save，依赖 SwiftData autosave 持久化
+                    // 软删除（标记 syncDeleted=true），由 CloudSyncManager 在 push 成功后清理。
+                    rec.syncDeleted = true
+                    rec.syncUpdatedAt = Date()
                 }
             }
         }

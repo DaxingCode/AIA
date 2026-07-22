@@ -115,8 +115,10 @@ final class CloudSyncManager: ObservableObject {
         do {
             let pushed = try await push(context: context)
             let pulled = try await pull(context: context)
-            // 清理本地已同步删除的 MerchantMeta 墓碑（cloud 已收到 deleted=true）。
-            cleanupMerchantMetaTombstones(context: context)
+            // 清理本地已同步删除的墓碑（cloud 已收到 deleted=true）。
+            // 涵盖 Bill / FoodEntry / Reminder / HealthMetric / RecognitionRecord /
+            // ChatMessage / MerchantMeta 等所有通过 buildPushItems 同步的类型。
+            cleanupSyncedTombstones(context: context)
             let now = Date()
             lastSyncAt = now
             UserDefaults.standard.set(now, forKey: "aia_last_sync")
@@ -514,11 +516,35 @@ final class CloudSyncManager: ObservableObject {
     }
 
     // MARK: - 本地墓碑清理
-    private func cleanupMerchantMetaTombstones(context: ModelContext) {
-        let descriptor = FetchDescriptor<MerchantMeta>(predicate: #Predicate { $0.syncDeleted == true })
-        guard let list = try? context.fetch(descriptor), !list.isEmpty else { return }
-        for m in list { context.delete(m) }
-        print("[sync] 清理 MerchantMeta 墓碑 \(list.count) 条")
+    /// 删除所有已成功推送到云端的软删记录（syncDeleted == true）。
+    /// 在 push 成功后调用——云端已收到 deleted=true 标志，后续 pull 不会返回这些记录。
+    /// 覆盖所有通过 buildPushItems 同步的模型类型。
+    private func cleanupSyncedTombstones(context: ModelContext) {
+        var total = 0
+
+        if let bills = try? context.fetch(FetchDescriptor<Bill>(predicate: #Predicate { $0.syncDeleted == true })) {
+            for b in bills { context.delete(b); total += 1 }
+        }
+        if let foods = try? context.fetch(FetchDescriptor<FoodEntry>(predicate: #Predicate { $0.syncDeleted == true })) {
+            for f in foods { context.delete(f); total += 1 }
+        }
+        if let reminders = try? context.fetch(FetchDescriptor<Reminder>(predicate: #Predicate { $0.syncDeleted == true })) {
+            for r in reminders { context.delete(r); total += 1 }
+        }
+        if let healths = try? context.fetch(FetchDescriptor<HealthMetric>(predicate: #Predicate { $0.syncDeleted == true })) {
+            for h in healths { context.delete(h); total += 1 }
+        }
+        if let records = try? context.fetch(FetchDescriptor<RecognitionRecord>(predicate: #Predicate { $0.syncDeleted == true })) {
+            for r in records { context.delete(r); total += 1 }
+        }
+        if let chats = try? context.fetch(FetchDescriptor<ChatMessage>(predicate: #Predicate { $0.syncDeleted == true })) {
+            for c in chats { context.delete(c); total += 1 }
+        }
+        if let metas = try? context.fetch(FetchDescriptor<MerchantMeta>(predicate: #Predicate { $0.syncDeleted == true })) {
+            for m in metas { context.delete(m); total += 1 }
+        }
+
+        if total > 0 { print("[sync] 清理本地墓碑 \(total) 条") }
     }
 
     // MARK: - 网络

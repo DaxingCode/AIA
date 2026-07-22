@@ -4,7 +4,7 @@ import SwiftUI
 import SwiftData
 
 struct RecognitionRecordsView: View {
-    @Query(sort: \RecognitionRecord.recognizedAt, order: .reverse) private var records: [RecognitionRecord]
+    @Query(filter: #Predicate<RecognitionRecord> { !$0.syncDeleted }, sort: \RecognitionRecord.recognizedAt, order: .reverse) private var records: [RecognitionRecord]
     @State private var selectedRecord: RecognitionRecord?
     @Environment(\.modelContext) private var context
 
@@ -34,12 +34,11 @@ struct RecognitionRecordsView: View {
     }
 
     private func deleteRecords(offsets: IndexSet) {
-        let toDelete = offsets.map { records[$0] }
-        for record in toDelete {
+        for record in offsets.map({ records[$0] }) {
             LocalImageStore.delete(record.imageName)
-            context.delete(record)
+            record.syncDeleted = true
+            record.syncUpdatedAt = Date()
         }
-        try? context.save()
     }
 }
 

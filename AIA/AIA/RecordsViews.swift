@@ -406,12 +406,9 @@ struct FoodListView: View {
     }
 
     private func deleteFood(_ f: FoodEntry) {
-        LocalImageStore.delete(f.imageName)
-        // 列表页删除：cell 非 NavigationLink 目标，直接硬删即可；不显式 save，
-        // 交给 SwiftData autosave，避免同步写盘阻塞主线程（用户多次反馈删除卡死）。
-        withAnimation {
-            context.delete(f)
-        }
+        // 使用 SafeDelete 软删：设置 syncDeleted=true 后由 CloudSyncManager 推送到云端，
+        // 避免直接硬删导致 deleted=true 标志无法到达云端（详见 SafeDelete 注释）。
+        SafeDelete.food(f, in: context)
     }
 }
 
@@ -543,10 +540,7 @@ struct HealthListView: View {
     }
 
     private func deleteHealth(_ h: HealthMetric) {
-        LocalImageStore.delete(h.imageName)
-        withAnimation {
-            context.delete(h)
-        }
+        SafeDelete.health(h, in: context)
     }
 }
 
@@ -1054,10 +1048,7 @@ struct BillListView: View {
     }
 
     private func deleteBill(_ b: Bill) {
-        LocalImageStore.delete(b.imageName)
-        withAnimation {
-            context.delete(b)
-        }
+        SafeDelete.bill(b, in: context)
     }
 
     // MARK: - 账单日历视图（在日历查看）
@@ -1600,11 +1591,7 @@ struct ReminderListView: View {
     }
 
     private func deleteReminder(_ r: Reminder) {
-        ReminderNotificationManager.cancel(r)
-        LocalImageStore.delete(r.imageName)
-        withAnimation {
-            context.delete(r)
-        }
+        SafeDelete.reminder(r, in: context)
     }
 
 }

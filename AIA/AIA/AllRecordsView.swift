@@ -53,7 +53,7 @@ struct AllRecordsView: View {
                 date: f.date,
                 systemImage: "fork.knife",
                 color: .orange,
-                delete: { withAnimation { context.delete(f) } }
+                delete: { SafeDelete.food(f, in: context) }
             ))
         }
 
@@ -69,7 +69,7 @@ struct AllRecordsView: View {
                 date: b.time,
                 systemImage: "yensign.circle",
                 color: .green,
-                delete: { withAnimation { context.delete(b) } }
+                delete: { SafeDelete.bill(b, in: context) }
             ))
         }
 
@@ -84,7 +84,7 @@ struct AllRecordsView: View {
                 date: h.date,
                 systemImage: "heart.circle",
                 color: .blue,
-                delete: { withAnimation { context.delete(h) } }
+                delete: { SafeDelete.health(h, in: context) }
             ))
         }
 
@@ -100,7 +100,7 @@ struct AllRecordsView: View {
                 date: dueDate,
                 systemImage: "checklist",
                 color: .purple,
-                delete: { ReminderNotificationManager.cancel(r); withAnimation { context.delete(r) } }
+                delete: { SafeDelete.reminder(r, in: context) }
             ))
         }
 

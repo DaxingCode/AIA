@@ -14,7 +14,18 @@ import Foundation
 /// **关键**：软删时不显式 `context.save()`——让 SwiftData autosave 处理（autosaveEnabled=true）。
 /// 显式同步 save 与 `dismiss()` 触发的 NavigationStack 路径变化 + `@Query` 重新 fetch 三者
 /// 在主线程叠加会造成 UI 卡死（用户 13:59 反馈「点详情页删除卡住不动」即此因）。
-/// 1s 后硬删时再 save——此时详情页已 dismiss、@Query 无视图引用，主线程 save 不会卡。
+///
+/// ---
+///
+/// **修复 2026-07-30：消除与 CloudSyncManager 的时间竞争**
+///
+/// 问题：`scheduleHardDelete` 在软删 1 秒后硬删记录，但 CloudSyncManager 的
+/// `syncAfterLocalChange` 使用 3 秒防抖才推送。硬删后 `buildPushItems` 读不到记录，
+/// `deleted=true` 标志无法到达云端，后续 pull 把记录重新插入本地。
+///
+/// 方案：移除 `scheduleHardDelete`，仅保留软删。软删记录（`syncDeleted=true`）通过
+/// `buildPushItems`（无 `!syncDeleted` 过滤）正常推送到云端，云端标记 deleted=true 后
+/// 不会在 pull 中返回。本地墓碑由 CloudSyncManager 在 push 成功后统一清理。
 enum SafeDelete {
 
     static func reminder(_ r: Reminder, in context: ModelContext) {
@@ -25,7 +36,6 @@ enum SafeDelete {
             LocalImageStore.delete(r.imageName)
             r.syncDeleted = true
             r.syncUpdatedAt = Date()
-            scheduleHardDelete(id: r.persistentModelID, in: context)
         }
     }
 
@@ -34,7 +44,6 @@ enum SafeDelete {
             LocalImageStore.delete(b.imageName)
             b.syncDeleted = true
             b.syncUpdatedAt = Date()
-            scheduleHardDelete(id: b.persistentModelID, in: context)
         }
     }
 
@@ -43,7 +52,6 @@ enum SafeDelete {
             LocalImageStore.delete(f.imageName)
             f.syncDeleted = true
             f.syncUpdatedAt = Date()
-            scheduleHardDelete(id: f.persistentModelID, in: context)
         }
     }
 
@@ -52,7 +60,14 @@ enum SafeDelete {
             LocalImageStore.delete(h.imageName)
             h.syncDeleted = true
             h.syncUpdatedAt = Date()
-            scheduleHardDelete(id: h.persistentModelID, in: context)
+        }
+    }
+
+    static func recognitionRecord(_ r: RecognitionRecord, in context: ModelContext) {
+        DispatchQueue.main.async {
+            LocalImageStore.delete(r.imageName)
+            r.syncDeleted = true
+            r.syncUpdatedAt = Date()
         }
     }
 
@@ -80,23 +95,13 @@ enum SafeDelete {
         health(h, in: context)
     }
 
-    /// 用 persistentModelID 重新取活对象并二次确认仍是软删除状态，避免误删。
-    /// **不显式 `context.save()`**——`context.delete(live)` 是同步非阻塞；SwiftData
-    /// autosaveEnabled=true 会在合适时机（contextWillSave 通知、process termination、
-    /// 视图状态变化）自动持久化。显式 save 会阻塞主线程等异步写盘，删除最后一条记录时
-    /// 1s 后突然冻结 UI（用户 14:56 反馈）。1s 时 detail view 早已 dismiss、@Query 无引用，
-    /// 主线程 save 完全没必要。
-    private static func scheduleHardDelete(id: PersistentIdentifier, in context: ModelContext) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [context] in
-            guard let live = context.model(for: id) as? any PersistentModel,
-                  (live as? SyncDeletable)?.syncDeleted == true else { return }
-            context.delete(live)
-            // 不调 try? context.save()，依赖 autosave（autosaveEnabled=true）
-        }
+    static func recognitionRecordByID(_ id: PersistentIdentifier, in context: ModelContext) {
+        guard let r = context.model(for: id) as? RecognitionRecord else { return }
+        recognitionRecord(r, in: context)
     }
 }
 
-/// 需要支持软删除的模型统一遵循此协议（四个 @Model 均已拥有 syncDeleted / syncUpdatedAt 字段）。
+/// 需要支持软删除的模型统一遵循此协议（所有 @Model 均已拥有 syncDeleted / syncUpdatedAt 字段）。
 protocol SyncDeletable {
     var syncDeleted: Bool { get set }
     var syncUpdatedAt: Date { get set }
@@ -106,3 +111,6 @@ extension Reminder: SyncDeletable {}
 extension Bill: SyncDeletable {}
 extension FoodEntry: SyncDeletable {}
 extension HealthMetric: SyncDeletable {}
+extension RecognitionRecord: SyncDeletable {}
+extension ChatMessage: SyncDeletable {}
+extension MerchantMeta: SyncDeletable {}
