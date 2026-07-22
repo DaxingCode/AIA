@@ -26,6 +26,23 @@ const PROVIDERS = {
     model: 'qwen-plus',
     apiKeyEnv: 'DASHSCOPE_API_KEY',
   },
+  // 商汤科技「日日新」SenseNova 系列
+  // 视觉识别用 SenseChat-Vision（支持图文混合输入），替代 Qwen-VL
+  // 注册：https://platform.sensenova.cn/ → 控制台 → 访问密钥
+  // 公测期：¥0/月，每5小时1500次免费
+  // 付费后：输入0.01元/千tokens，输出0.06元/千tokens
+  sensenova: {
+    endpoint: 'https://token.sensenova.cn/v1/chat/completions',
+    model: 'sensechat-vision',
+    apiKeyEnv: 'SENSENOVA_API_KEY',
+  },
+  // 文字识别用 SenseChat-Turbo（轻量文本模型），替代 Qwen-Plus
+  // 付费后：输入0.0003元/千tokens，输出0.0006元/千tokens（当前最优性价比）
+  sensenovaText: {
+    endpoint: 'https://token.sensenova.cn/v1/chat/completions',
+    model: 'sensechat-turbo',
+    apiKeyEnv: 'SENSENOVA_API_KEY',
+  },
   doubao: {
     endpoint: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
     model: 'doubao-vision',
@@ -39,7 +56,7 @@ const PROVIDERS = {
 };
 
 // 版本标记：发布后 curl 可通过返回值里的 ver 字段确认是否部署了最新代码
-const FN_VERSION = '20260721a';
+const FN_VERSION = '20260722a-sensenova';
 
 // 服务端兜底：纯通用回应（不论上下文）强制 types:["none"]，不依赖模型是否听话。
 // 与云端提示词规则 10 双保险，杜绝「好的/可以」被当成记录指令重复建待办。
@@ -283,7 +300,7 @@ exports.main = async (event, context) => {
     // CloudBase HTTP 触发会把请求体放在 event.body；微信小程序端调用则直接是 event 对象。
     // 这里做兼容：先尝试 event.body，再回退到 event 本身。
     const body = parseEventBody(event);
-    const providerName = body.provider || 'qwen';
+    const providerName = body.provider || 'sensenova';
     const provider = PROVIDERS[providerName] || PROVIDERS.qwen;
     const apiKey = process.env[provider.apiKeyEnv];
     if (!apiKey) return { ok: false, error: `缺少环境变量 ${provider.apiKeyEnv}（请在 CloudBase 配置）`, ver: FN_VERSION };

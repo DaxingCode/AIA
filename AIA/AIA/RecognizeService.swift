@@ -77,7 +77,7 @@ struct RecognizeService {
 
         let body: [String: Any] = [
             "text": text,
-            "provider": "qwenText", // 显式走文本模型，省钱
+            "provider": "sensenovaText", // 显式走文本模型（日日新 SenseChat-Turbo）
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -111,7 +111,7 @@ struct RecognizeService {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 30
 
-        var body: [String: Any] = ["text": text, "provider": "qwenText"]
+        var body: [String: Any] = ["text": text, "provider": "sensenovaText"]
         if !recentMessages.isEmpty {
             body["recentMessages"] = recentMessages
         }
@@ -146,7 +146,7 @@ struct RecognizeService {
         let body: [String: Any] = [
             "mode": "queryFood",
             "foodName": name,
-            "provider": "qwenText"
+            "provider": "sensenovaText"
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -182,7 +182,7 @@ struct RecognizeService {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 30
 
-        let body: [String: Any] = ["imageBase64": base64, "provider": "qwen"]
+        let body: [String: Any] = ["imageBase64": base64, "provider": "sensenova"]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (respData, response) = try await URLSession.shared.data(for: req)
@@ -219,7 +219,7 @@ struct RecognizeService {
             "mode": "chat",
             "text": text,
             "context": context,
-            "provider": "qwen"
+            "provider": "sensenova"
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
