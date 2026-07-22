@@ -16,6 +16,8 @@ struct SettingsView: View {
     @AppStorage("aia.appearance") private var appearanceRaw = "system"
     // 智能问答 Agent 总开关（与「云同步」同组）。默认关，零污染。
     @AppStorage("aia.agentEnabled") private var agentEnabled = false
+    // 模型供应商选择（云端 PROVIDERS 已配齐四家视觉+文本，前端只传 provider 标识）。默认商汤 SenseNova。
+    @AppStorage("aia.modelProvider") private var modelProvider = "sensenova"
     @State private var showCopied = false
     @State private var toastText = "已复制同步账号"
     @State private var showShortcutGuide = false
@@ -32,6 +34,7 @@ struct SettingsView: View {
                 tierCard
                 autoSyncSettingsCard
                 agentCard
+                modelProviderCard
                 screenshotAutoCard
                 reminderCard
                 testNotifyCard
@@ -225,6 +228,34 @@ struct SettingsView: View {
                 .font(AIATheme.Font.micro)
                 .foregroundStyle(AIATheme.muted)
                 .lineSpacing(2)
+        }
+        .padding(14)
+        .card()
+    }
+
+    // MARK: - 模型供应商选择（四选一，零污染云端）
+    private var modelProviderCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "cpu")
+                    .font(AIATheme.Font.callout.weight(.medium))
+                    .foregroundStyle(AIATheme.blue)
+                Text("对话 / 识别模型")
+                    .font(AIATheme.Font.subhead.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            Text("切换 AI 问答与截图识别使用的模型（默认商汤 SenseNova）。需在云端对应环境变量已配置该供应商 Key。")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+                .lineSpacing(2)
+            Picker("模型", selection: $modelProvider) {
+                ForEach(AIAModelProvider.allCases) { p in
+                    Text(p.displayName).tag(p.rawValue)
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(AIATheme.blue)
         }
         .padding(14)
         .card()

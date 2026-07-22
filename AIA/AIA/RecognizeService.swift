@@ -4,6 +4,47 @@ import UIKit
 import Vision
 import SwiftData
 
+/// 可切换的模型供应商（设置页选择）。rawValue 是前端持久化标识；
+/// visionProvider / textProvider 是对应的云端 PROVIDERS key（云端已配齐四家视觉+文本，零改动）。
+enum AIAModelProvider: String, CaseIterable, Identifiable {
+    case sensenova = "sensenova"
+    case qwen = "qwen"
+    case glm = "glm"
+    case qianfan = "qianfan"
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .sensenova: return "商汤 SenseNova"
+        case .qwen:      return "阿里通义千问"
+        case .glm:       return "智谱 GLM"
+        case .qianfan:   return "百度千帆"
+        }
+    }
+    /// 视觉识别用的 provider（截图理解）
+    var visionProvider: String {
+        switch self {
+        case .sensenova: return "sensenova"
+        case .qwen:      return "qwen"
+        case .glm:       return "glm4vFlash"
+        case .qianfan:   return "qianfan"
+        }
+    }
+    /// 文本问答 / Agent 用的 provider
+    var textProvider: String {
+        switch self {
+        case .sensenova: return "sensenovaText"
+        case .qwen:      return "qwenText"
+        case .glm:       return "glmText"
+        case .qianfan:   return "qianfanText"
+        }
+    }
+    /// 当前用户选择；缺省或非法值回落商汤 SenseNova（向后兼容）
+    static var current: AIAModelProvider {
+        let raw = UserDefaults.standard.string(forKey: "aia.modelProvider") ?? "sensenova"
+        return AIAModelProvider(rawValue: raw) ?? .sensenova
+    }
+}
+
 struct RecognizeService {
     // ↓↓↓ 替换成你在 CloudBase 控制台拿到的「HTTP 触发」地址
     static let endpoint = URL(string: "https://cloud1-d1ga55pizf294dbe9-1445590522.ap-shanghai.app.tcloudbase.com/recognize")!
@@ -79,7 +120,7 @@ struct RecognizeService {
 
         let body: [String: Any] = [
             "text": text,
-            "provider": "sensenovaText", // 显式走文本模型（日日新 SenseChat-Turbo）
+            "provider": AIAModelProvider.current.textProvider, // 显式走文本模型（日日新 SenseChat-Turbo）
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -113,7 +154,7 @@ struct RecognizeService {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 60
 
-        var body: [String: Any] = ["text": text, "provider": "sensenovaText"]
+        var body: [String: Any] = ["text": text, "provider": AIAModelProvider.current.textProvider]
         if !recentMessages.isEmpty {
             body["recentMessages"] = recentMessages
         }
@@ -148,7 +189,7 @@ struct RecognizeService {
         let body: [String: Any] = [
             "mode": "queryFood",
             "foodName": name,
-            "provider": "sensenovaText"
+            "provider": AIAModelProvider.current.textProvider
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -184,7 +225,7 @@ struct RecognizeService {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 60
 
-        let body: [String: Any] = ["imageBase64": base64, "provider": "sensenova"]
+        let body: [String: Any] = ["imageBase64": base64, "provider": AIAModelProvider.current.visionProvider]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (respData, response) = try await URLSession.shared.data(for: req)
@@ -220,7 +261,7 @@ struct RecognizeService {
             "mode": "chat",
             "text": text,
             "context": context,
-            "provider": "sensenova"
+            "provider": AIAModelProvider.current.textProvider
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -257,7 +298,7 @@ struct RecognizeService {
             "text": text,
             "context": context,
             "userId": userId,
-            "provider": "sensenovaText"
+            "provider": AIAModelProvider.current.textProvider
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
