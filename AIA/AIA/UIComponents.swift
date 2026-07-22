@@ -150,6 +150,22 @@ enum AIATheme {
     static let cardShadow = Color.black.opacity(0.06)
     static let cardShadowRadius: CGFloat = 10
     static let cardShadowY: CGFloat = 3
+    // 按压抬升时的更强阴影
+    static let cardShadowStrong = Color.black.opacity(0.12)
+
+    // MARK: - 动效令牌（统一缓动与时长；所有动效须尊重减弱动态效果）
+    /// 用户是否开启「减弱动态效果」——动效据此降级为无动画。
+    static var motionReduce: Bool {
+        UIAccessibility.isReduceMotionEnabled
+    }
+    enum Motion {
+        /// 按压回弹（卡片/按钮）
+        static let press    = Animation.spring(response: 0.32, dampingFraction: 0.6)
+        /// 描边生长（环形 / 账单 donut）
+        static let draw     = Animation.easeOut(duration: 0.8)
+        /// 进度条 / 数值增长
+        static let progress = Animation.easeOut(duration: 0.6)
+    }
 }
 
 // MARK: - 统一卡片样式（表面色 + 细描边 + 柔和投影）
@@ -512,8 +528,18 @@ func runImageRecognition(image: UIImage,
 // 注意：底部栏的「问问 AI / 麦克风」按钮走 NavigationRouter.shared.path 编程式跳转，
 // 不能再用 NavigationLink(destination:) 闭包式——它位于首页 NavigationStack(path:) 根层，
 // 老式 NavigationLink 与 .navigationDestination(for:) 混用会导致 path 推送的目的地不触发（白跳）。
+// MARK: - 底部栏图标与提示文案的「单一布局真源」
+// 改图标左右顺序时，只改 `iconOrder` 这一处，箭头方向会自动跟随，无需手动改文案。
+enum AIBarTarget: Equatable { case mic, camera, album }
+
+/// 一条底部栏提示：正文 + 指向哪个按钮（用于自动推导箭头方向）。
+struct AIPrompt: Equatable {
+    let text: String            // 不含箭头的正文
+    let pointsTo: AIBarTarget?  // 指向哪个按钮；nil 表示不指向任何按钮（无箭头）
+}
+
 struct AIBottomBar: View {
-    let prompts: [String]
+    let prompts: [AIPrompt]
     @State private var promptIndex = 0
     @State private var rolling = false
     @State private var showCamera = false
@@ -522,14 +548,32 @@ struct AIBottomBar: View {
     private let router = NavigationRouter.shared
     private let rowH: CGFloat = 18
 
-    init(prompts: [String]? = nil) {
+    /// 底部栏图标从左到右的顺序，必须与 HStack 内 Button 顺序一致。
+    /// nil 代表中间的输入框胶囊。改图标位置只改这里，箭头自动跟着变。
+    private static let iconOrder: [AIBarTarget?] = [.mic, nil, .camera, .album]
+
+    /// 根据图标位置推导箭头：目标在输入框左侧 → ←，在右侧 → →。无指向返回空串。
+    private func arrowPrefix(_ target: AIBarTarget?) -> String? {
+        guard let target = target,
+              let textIdx = Self.iconOrder.firstIndex(where: { $0 == nil }),
+              let targetIdx = Self.iconOrder.firstIndex(of: target) else { return nil }
+        return targetIdx < textIdx ? "←" : "→"
+    }
+
+    /// 组合出带箭头的显示文案：指向左侧时箭头在前，指向右侧时箭头在后。
+    private func displayText(_ prompt: AIPrompt) -> String {
+        guard let arrow = arrowPrefix(prompt.pointsTo) else { return prompt.text }
+        return arrow == "←" ? arrow + prompt.text : prompt.text + arrow
+    }
+
+    init(prompts: [AIPrompt]? = nil) {
         self.prompts = prompts ?? [
-            "问问阿宝AI",
-            "点拍照能自动识别哦→",
-            "叫阿宝AI帮记",
-            "←点麦克风可语音输入哦",
-            "叫阿宝AI帮总结",
-            "点相册可上传、识别哦→"
+            AIPrompt(text: "问问阿宝AI", pointsTo: nil),
+            AIPrompt(text: "点拍照能自动识别哦", pointsTo: .camera),
+            AIPrompt(text: "叫阿宝AI帮记", pointsTo: nil),
+            AIPrompt(text: "点麦克风可语音输入哦", pointsTo: .mic),
+            AIPrompt(text: "叫阿宝AI帮总结", pointsTo: nil),
+            AIPrompt(text: "点相册可上传、识别哦", pointsTo: .album)
         ]
     }
 
@@ -550,12 +594,12 @@ struct AIBottomBar: View {
                 HStack {
                     Spacer()
                     ZStack(alignment: .center) {
-                        Text(prompts[promptIndex])
+                        Text(displayText(prompts[promptIndex]))
                             .font(AIATheme.Font.caption)
                             .foregroundStyle(AIATheme.muted)
                             .lineLimit(1)
                             .offset(y: rolling ? -rowH : 0)
-                        Text(prompts[(promptIndex + 1) % max(prompts.count, 1)])
+                        Text(displayText(prompts[(promptIndex + 1) % max(prompts.count, 1)]))
                             .font(AIATheme.Font.caption)
                             .foregroundStyle(AIATheme.muted)
                             .lineLimit(1)

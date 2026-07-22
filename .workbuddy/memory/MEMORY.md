@@ -67,3 +67,4 @@ M1 分享扩展导入 → M2 快捷指令无感对接 → M3 食物卡路里(+�
 - 类型语义色板（2026-07-20）：`food`(饮食·暖琥珀)、`health`(健康·紫)、`bill`(账单·森绿)、`todo`(待办·科技蓝)、`income`(收入绿)、`expense`(支出红)、`warning`(预算预警琥珀)、`over`(超支深红)。蓝色仅留作品牌主操作色。
 - 宫格底色须与类型语义色同 hue：`dietBG/healthBG/billBG/todoBG` 分别为 `food/health/bill/todo` 同 hue 的淡 tint。
 - **空状态垂直居中约定（2026-07-22）**：各模块空态的插画+文案+「点击」提示必须落在模块可视区域中央，用 `EmptyStateView` 自带 `Spacer()` + 调用点 `.frame(maxWidth:.infinity, maxHeight:.infinity)` 实现。
+- **底部栏提示箭头自动跟随图标位置（2026-07-22，已代码固化）**：`AIBottomBar` 的提示文案改为结构化 `AIPrompt(text:pointsTo:)`（`pointsTo: .mic/.camera/.album/nil`），箭头方向由 `AIBottomBar.iconOrder`（图标从左到右顺序，含输入框胶囊 `nil`）单一真源推导——目标在输入框左侧→`←`在前、在右侧→`→`在后。**改图标左右顺序只改 `iconOrder` 一处**，箭头自动翻转，切勿在 `text` 里手写 `←`/`→`，也勿在调用点硬编码箭头字符串。HStack 内 Button 顺序必须与 `iconOrder` 保持一致。

@@ -267,11 +267,11 @@ struct FoodListView: View {
                 .padding()
             }
             AIBottomBar(prompts: [
-                "←点拍照识别、记录美食",
-                "吃了什么美食？点此阿宝帮你记",
-                "点麦克风，语音记录饮食→",
-                "阿宝帮总结今天的饮食情况",
-                "点相册上传、记录美食→"
+                AIPrompt(text: "点拍照识别、记录美食", pointsTo: .camera),
+                AIPrompt(text: "吃了什么美食？点此阿宝帮你记", pointsTo: nil),
+                AIPrompt(text: "点麦克风，语音记录饮食", pointsTo: .mic),
+                AIPrompt(text: "阿宝帮总结今天的饮食情况", pointsTo: nil),
+                AIPrompt(text: "点相册上传、记录美食", pointsTo: .album)
             ])
         }
         .navigationTitle(LocalizedStringKey("food.navTitle"))
@@ -878,11 +878,11 @@ struct BillListView: View {
                 .padding()
             }
             AIBottomBar(prompts: [
-                "←点拍照识别、记录账单、小票",
-                "今天花了多少钱？点此阿宝帮你记",
-                "点麦克风，语音记录账单→",
-                "阿宝帮总结这个月的消费情况",
-                "点相册上传，自动记账→"
+                AIPrompt(text: "点拍照识别、记录账单、小票", pointsTo: .camera),
+                AIPrompt(text: "今天花了多少钱？点此阿宝帮你记", pointsTo: nil),
+                AIPrompt(text: "点麦克风，语音记录账单", pointsTo: .mic),
+                AIPrompt(text: "阿宝帮总结这个月的消费情况", pointsTo: nil),
+                AIPrompt(text: "点相册上传，自动记账", pointsTo: .album)
             ])
         }
         .navigationTitle(LocalizedStringKey("tab.bill"))
@@ -1387,11 +1387,11 @@ struct ReminderListView: View {
             .animation(nil, value: list.count)
             .animation(nil, value: filter)
             AIBottomBar(prompts: [
-                "←点拍照识别、记录待办",
-                "有什需要提醒的吗？点此阿宝帮你记",
-                "点麦克风，语音记录待办→",
-                "阿宝帮总结最近有什么事要做",
-                "点相册上传，自动识别待办→"
+                AIPrompt(text: "点拍照识别、记录待办", pointsTo: .camera),
+                AIPrompt(text: "有什需要提醒的吗？点此阿宝帮你记", pointsTo: nil),
+                AIPrompt(text: "点麦克风，语音记录待办", pointsTo: .mic),
+                AIPrompt(text: "阿宝帮总结最近有什么事要做", pointsTo: nil),
+                AIPrompt(text: "点相册上传，自动识别待办", pointsTo: .album)
             ])
         }
         .navigationTitle(LocalizedStringKey("tab.todo"))
