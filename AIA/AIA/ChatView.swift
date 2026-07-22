@@ -821,6 +821,9 @@ struct ChatView: View {
 
         // 商户名：去掉金额数字及单位、去掉记账关键词、去掉时间/饮食动词与语气助词后剩下的文本
         var merchant = text
+        // 去掉「花」作花费动词且后接金额（如「汉堡花10元」），放在金额提取前，避免残留成商户名；
+        // 用占位符保护爆米花等含「花」菜品（stripSpendPhrase 已做保护）。
+        merchant = ChatView.stripSpendPhrase(merchant)
         merchant = merchant.replacingOccurrences(of: #"\d+(\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?"#,
                                                  with: "", options: .regularExpression)
         for kw in billKw { merchant = merchant.replacingOccurrences(of: kw, with: "") }
@@ -991,6 +994,52 @@ struct ChatView: View {
 
     /// 从用户输入里提取食物名、估算重量和份量描述。
     /// 支持「一碗」「两杯」「100克」等常见中文/阿拉伯数量词；匹配不到数量时默认 100g。
+    /// 清理「花费/账单」短语与金额，避免把「汉堡花10元」里的「花10元」残成食物名/商户名。
+    /// - 覆盖：花了/花掉/付了/付给/消费/支出/账单/花销/开销/扫码付/记一笔/记账/买了
+    /// - 覆盖裸写法：「花」直接接金额，如「汉堡花10元」「晚餐汉堡花32块」
+    /// - 用纯字母占位符保护「爆米花/花菜/花生/花卷/花蛤/花螺/红花」等本身含「花」的真实食物/菜品名，
+    ///   防止被误当花费动词清掉（占位符不含数字，避免被金额/标点清理误删）。
+    private static func stripSpendPhrase(_ text: String) -> String {
+        let protectedFoods = ["爆米花", "花菜", "花生", "花卷", "花蛤", "花螺", "红花"]
+        let placeholders = ["ZFA", "ZFB", "ZFC", "ZFD", "ZFE", "ZFF", "ZFG"]
+        var t = text
+        for (i, f) in protectedFoods.enumerated() {
+            if t.contains(f) {
+                t = t.replacingOccurrences(of: f, with: placeholders[i])
+            }
+        }
+        // 先清「花[了]? + 金额」裸写法，再清其它账单关键词
+        let spendPattern = #"花[了]?\s*\d+(\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?|花了?|花掉|付了?|付给|消费|支出|账单|花销|开销|扫码付|记一笔|记账|买了"#
+        t = t.replacingOccurrences(of: spendPattern, with: "", options: .regularExpression)
+        // 再清残留的所有数字金额（含货币单位，单位可选）
+        t = t.replacingOccurrences(of: #"\d+(\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?"#,
+                                   with: "", options: .regularExpression)
+        // 还原受保护的含「花」食物/菜品名
+        for (i, f) in protectedFoods.enumerated() {
+            t = t.replacingOccurrences(of: placeholders[i], with: f)
+        }
+        return t
+    }
+
+    /// 在份量提取「之前」调用：清掉「花」作花费动词且后接金额（含可选「了」，如「汉堡花10元」「汉堡花了10元」「汉堡花32块」）。
+    /// 必须放在份量提取前，否则「块」等货币/量词会被当成重量单位吃掉，导致食物名残留成「汉堡花」。
+    /// 仅删「花 + 金额」这一短语（不动其它数字），以保留「1个汉堡」里的数量供份量估算使用。
+    /// 用纯字母占位符保护爆米花/花菜/花生/花卷/花蛤/花螺/红花等本身含「花」的真实食物名。
+    private static func stripBareHuaAmount(_ text: String) -> String {
+        let protectedFoods = ["爆米花", "花菜", "花生", "花卷", "花蛤", "花螺", "红花"]
+        let placeholders = ["ZFA", "ZFB", "ZFC", "ZFD", "ZFE", "ZFF", "ZFG"]
+        var t = text
+        for (i, f) in protectedFoods.enumerated() {
+            if t.contains(f) { t = t.replacingOccurrences(of: f, with: placeholders[i]) }
+        }
+        t = t.replacingOccurrences(of: #"花[了]?\s*\d+(\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?"#,
+                                   with: "", options: .regularExpression)
+        for (i, f) in protectedFoods.enumerated() {
+            t = t.replacingOccurrences(of: placeholders[i], with: f)
+        }
+        return t
+    }
+
     private static func parseFoodNameAndWeight(_ text: String) -> (name: String, weight: Double, portion: String)? {
         var t = text
 
@@ -1001,6 +1050,11 @@ struct ChatView: View {
                      "夜宵", "加餐", "点心", "零食"] {
             t = t.replacingOccurrences(of: meal, with: "")
         }
+
+        // 在份量提取之前，先清掉「花」作花费动词且后接金额（含可选「了」，如「汉堡花10元」「汉堡花了10元」「汉堡花32块」），
+        // 否则「块」等会被当成重量单位吃掉，导致残留成「汉堡花」。
+        // 用占位符保护爆米花/花菜/花生/花卷/花蛤/花螺/红花等本身含「花」的真实食物名。
+        t = ChatView.stripBareHuaAmount(t)
 
         // 份量映射：单位 → 估算克数
         let unitWeights: [(String, Double)] = [
@@ -1031,6 +1085,17 @@ struct ChatView: View {
             }
         }
 
+        // 先去掉账单关键词（花了/付了/消费…），再去掉常见动词/语气助词。
+        // 顺序关键：必须先于下面的 noise（含「了」），否则「花了」会被「了」拆成「花」+金额，
+        // 导致食物名残留成「汉堡花」这类错误。
+        let billNoise = ["花了", "花掉", "付了", "付给", "消费", "支出", "账单", "花销", "开销", "扫码付",
+                         "记一笔", "记账", "买了"]
+        for b in billNoise { t = t.replacingOccurrences(of: b, with: "") }
+
+        // 先清掉花费/账单短语（含「花」直接接金额的裸写法，如「汉堡花10元」），
+        // 用占位符保护爆米花/花菜等本身含「花」的真实食物名，避免食物名残留成「汉堡花」
+        t = ChatView.stripSpendPhrase(t)
+
         // 去掉常见动词、语气助词、时间/场景词和残留量词，得到食物名
         let noise = ["吃了", "喝了", "吃", "喝", "做了", "点", "来", "是", "想", "要", "做",
                      "了", "的", "在", "给", "和", "去", "吧", "啊", "呢", "哦", "嘛",
@@ -1042,10 +1107,6 @@ struct ChatView: View {
                      "还", "又", "也", "刚", "就", "只", "都", "再", "正好", "大概", "差不多"]
         for n in noise { t = t.replacingOccurrences(of: n, with: "") }
 
-        // 去掉账单关键词与金额，避免「晚餐吃了汉堡花了10元」把「花了10元」混入食物名
-        let billNoise = ["花了", "花掉", "付了", "付给", "消费", "支出", "账单", "花销", "开销", "扫码付",
-                         "记一笔", "记账", "买了"]
-        for b in billNoise { t = t.replacingOccurrences(of: b, with: "") }
         // 去掉残留的数字金额与货币单位
         t = t.replacingOccurrences(of: #"\d+(\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?"#,
                                    with: "", options: .regularExpression)
