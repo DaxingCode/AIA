@@ -150,6 +150,13 @@ enum RecognitionSaver {
             let basePro = f.protein ?? 0
             let baseCar = f.carbs ?? 0
             let baseFat = f.fat ?? 0
+
+            // 校验：云端返回的食物名有值但全部营养为零 → 跳过保存空壳记录
+            if baseCal <= 0 && basePro <= 0 && baseCar <= 0 && baseFat <= 0 {
+                print("[autoSave] 跳过空壳食物记录：\(name)（所有营养值均为零）")
+                return  // 不保存，session.food 保持 nil
+            }
+
             let entry = FoodEntry(name: name,
                                   calories: baseCal * ratio,
                                   protein: basePro * ratio,

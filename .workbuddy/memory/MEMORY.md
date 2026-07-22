@@ -68,6 +68,7 @@ M1 分享扩展导入 → M2 快捷指令无感对接 → M3 食物卡路里(+�
 - 宫格底色须与类型语义色同 hue：`dietBG/healthBG/billBG/todoBG` 分别为 `food/health/bill/todo` 同 hue 的淡 tint。
 - **空状态垂直居中约定（2026-07-22）**：各模块空态的插画+文案+「点击」提示必须落在模块可视区域中央，用 `EmptyStateView` 自带 `Spacer()` + 调用点 `.frame(maxWidth:.infinity, maxHeight:.infinity)` 实现。
 - **底部栏提示箭头自动跟随图标位置（2026-07-22，已代码固化）**：`AIBottomBar` 的提示文案改为结构化 `AIPrompt(text:pointsTo:)`（`pointsTo: .mic/.camera/.album/nil`），箭头方向由 `AIBottomBar.iconOrder`（图标从左到右顺序，含输入框胶囊 `nil`）单一真源推导——目标在输入框左侧→`←`在前、在右侧→`→`在后。**改图标左右顺序只改 `iconOrder` 一处**，箭头自动翻转，切勿在 `text` 里手写 `←`/`→`，也勿在调用点硬编码箭头字符串。HStack 内 Button 顺序必须与 `iconOrder` 保持一致。
+- **底部栏悬浮胶囊形态（2026-07-22 落地，AIBottomBar 重构）**：`AIBottomBar` 现在是单体 Glass Capsule（`.ultraThinMaterial` + 柔阴影 + 12pt 水平边距），4 个控件（mic·输入·相机·相册）布局在胶囊内部，不再贴满屏幕宽。图标无独立圆背景，直接浮在玻璃上。中间输入区保持 `fillSoft` 小胶囊双层视觉。顶部 Divider 已移除。**构造仍为 ScrollView 的 VStack 兄弟**（非 overlay，遵守 iOS 26 白屏铁律）。`iconOrder`/`arrowPrefix` 依然生效。
 - **动效令牌 + 按压反馈约定（2026-07-22 落地）**：新动效一律走 `AIATheme.Motion`（press=spring(0.32/0.6)、draw=easeOut(0.8)、progress=easeOut(0.6)）+ `AIATheme.motionReduce`（= `UIAccessibility.isReduceMotionEnabled`），禁止散写 `Animation.xxx`。**可点卡片/按钮的按压反馈统一用 `PressableCardStyle`**（已写入 `UIComponents.swift`），把 `.buttonStyle(.plain)` 换成 `.buttonStyle(PressableCardStyle())` 即得「缩放下沉 + 阴影抬升 + spring 回弹」；切勿在 `.card()` 里另加 `Gesture`/`onTapGesture` 做按压（会违反项目铁律吞点击）。图表类（`RingView`/`DonutView`/`MacroCard`/`MiniBar`）用 `@State` 插值 + `onAppear`/`onChange(of:)` 做描边/生长动画；Swift Charts 曲线在 iOS 26 下路径动画不可靠，用「透明度+缩放淡入」替代真·描边生长。
 
 ## 多对话并行协作协议（2026-07-22 起，强制）

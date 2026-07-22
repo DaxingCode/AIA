@@ -1386,6 +1386,11 @@ struct ChatView: View {
                     summary.append("我没找到你想删除的饮食记录，能再描述一下吗？")
                 }
             default:
+                // 校验：全部营养为零 → 跳过保存空壳食物记录
+                if baseCal <= 0 && basePro <= 0 && baseCar <= 0 && baseFat <= 0 {
+                    summary.append("⚠️ 识别到「\(foodName)」但暂未查到营养数据，已跳过保存")
+                    break
+                }
                 context.insert(FoodEntry(name: foodName,
                                          calories: cal, protein: protein, carbs: carbs, fat: fat,
                                          portion: portion, meal: meal,
