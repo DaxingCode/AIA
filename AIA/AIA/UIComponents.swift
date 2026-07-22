@@ -694,7 +694,7 @@ struct AIBottomBar: View {
         // 玻璃胶囊 + 柔阴影 → 真正"悬浮"（不再贴边、不再有顶部分割线）
         .background(
             Capsule()
-                .fill(.regularMaterial)
+                .fill(.thickMaterial)
                 .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
         )
         .overlay(
