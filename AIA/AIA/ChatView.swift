@@ -1054,6 +1054,14 @@ struct ChatView: View {
 
         let name = t.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return nil }
+
+        // 护栏：纯数字、纯热量描述、非真实食物名应拒绝，
+        // 避免把「我吃了1500大卡」「今天摄入2000千焦」这类纯热量描述当成食物名建记录。
+        let energyUnits = ["大卡", "kcal", "千焦", "kj", "卡路里", "热量", "卡", "KCAL", "kJ"]
+        let isPureEnergyDesc = energyUnits.contains { name.lowercased().hasSuffix($0) }
+            || name.allSatisfy({ $0.isNumber || $0 == "." || $0 == " " })
+        if isPureEnergyDesc || name.isEmpty { return nil }
+
         return (name, weight ?? 100.0, portion)
     }
 
