@@ -318,7 +318,7 @@ exports.main = async (event, context) => {
       return { ...chatRes, ver: FN_VERSION };
     }
 
-    const result = await callChatCompletions(provider, { imageBase64: body.imageBase64, text: body.text, recentMessages: body.recentMessages }, apiKey);
+    const result = await callWithFallback(body, apiKey);
     if (result && result.food) {
       normalizeFoodResult(result.food);
     }
@@ -327,6 +327,59 @@ exports.main = async (event, context) => {
     return { ok: false, error: String(e && e.message ? e.message : e), ver: FN_VERSION };
   }
 };
+
+// 优先调用主 provider（sensenova/sensenovaText）→ 失败或结果不合格时回退到 qwen/qwenText。
+// 回退规则：主调用抛异常 OR 返回 types:["none"] 但输入明显有内容（有图或非通用回应文字）。
+async function callWithFallback(body, apiKey) {
+  const providerName = body.provider || 'sensenova';
+  const primary = PROVIDERS[providerName] || PROVIDERS.qwen;
+  const primaryKey = apiKey;
+
+  // 定义 fallback 映射：sensenova→qwen, sensenovaText→qwenText
+  const fallbackMap = { sensenova: 'qwen', sensenovaText: 'qwenText' };
+  const fallbackName = fallbackMap[providerName];
+  const fallback = fallbackName ? (PROVIDERS[fallbackName] || null) : null;
+  const fallbackKey = fallback ? process.env[fallback.apiKeyEnv] || primaryKey : null;
+  // fallback 是否可用（有 provider 配置且对应 API Key 存在）
+  const canFallback = !!(fallback && fallbackKey);
+
+  // 判断输入是否明显「有内容可分析」—— 有图或者文字非通用回应
+  function inputIsMeaningful() {
+    if (body.imageBase64) return true;
+    if (body.text && !isGenericAcknowledgement(body.text)) return true;
+    return false;
+  }
+
+  // 尝试主 provider
+  try {
+    const result = await callChatCompletions(primary, {
+      imageBase64: body.imageBase64, text: body.text, recentMessages: body.recentMessages
+    }, primaryKey);
+
+    // 主调用成功返回了，但若是 none 而且输入明显有内容 → 说明主模型可能没认出，降级试 fallback
+    if (canFallback && result && (!result.types || result.types.includes('none')) && inputIsMeaningful()) {
+      console.log(`[Fallback] ${providerName} 返回 none，尝试回退到 ${fallbackName}`);
+      const fbResult = await callChatCompletions(fallback, {
+        imageBase64: body.imageBase64, text: body.text, recentMessages: body.recentMessages
+      }, fallbackKey);
+      // 如果 fallback 返回了非 none 的结果，采用 fallback 的结果；否则保留主结果
+      if (fbResult && fbResult.types && !fbResult.types.includes('none')) {
+        return fbResult;
+      }
+    }
+    return result;
+  } catch (e) {
+    // 主调用失败（网络超时、HTTP 错误、JSON 解析错误等）
+    if (canFallback) {
+      console.log(`[Fallback] ${providerName} 调用失败（${e.message}），回退到 ${fallbackName}`);
+      const fbResult = await callChatCompletions(fallback, {
+        imageBase64: body.imageBase64, text: body.text, recentMessages: body.recentMessages
+      }, fallbackKey);
+      return fbResult;
+    }
+    throw e;  // 无 fallback 可选，继续抛
+  }
+}
 
 // 后处理：营养成分表上的能量常以 kJ 标注，而 calories 要求 kcal，统一换算
 function normalizeFoodResult(food) {
