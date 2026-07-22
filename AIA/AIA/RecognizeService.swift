@@ -1313,10 +1313,19 @@ struct RecognizeService {
         let lowered = line.lowercased()
         if lowered.contains("本月已省") { return true }
         if lowered.contains("收支统计") { return true }
+        if lowered.contains("本月支出") { return true }
+        if lowered.contains("本月收入") { return true }
+        if lowered.contains("本月总额") { return true }
         // 同时出现 支出+金额 和 收入+金额 的汇总行
         let hasExpense = line.range(of: #"支出.*\d+(?:\.\d{1,2})?"#, options: .regularExpression) != nil
         let hasIncome = line.range(of: #"收入.*\d+(?:\.\d{1,2})?"#, options: .regularExpression) != nil
         if hasExpense && hasIncome { return true }
+        // 单侧的支出/收入汇总（如「本月支出¥391.35，较上月降低＞」、「上月支出¥254.50」）
+        if line.contains("支出") || line.contains("收入") {
+            // 明确是汇总统计：含「较上月」「同比」「今年」「近30天」等统计语境
+            let statSignals = ["较上月", "同比", "今年", "近30天", "近7天", "比上月", "统计", "汇总"]
+            if statSignals.contains(where: { lowered.contains($0) }) { return true }
+        }
         return false
     }
 
