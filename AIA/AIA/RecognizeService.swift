@@ -318,12 +318,16 @@ struct RecognizeService {
     /// 本地账单规则解析：从 OCR 文字提取金额/商户/日期，并查 MerchantMeta 经验库补全分类。
     /// 能解析出「明确金额」则返回本地识别结果；否则返回 nil（交给云端）。
     /// - Parameter context: 用于查 MerchantMeta 经验库；传 nil 时跳过经验库，分类按关键词猜。
+    /// - Parameter preferredTimeLine: 来自一图多账单拆分时定位到的列表项时间（如「7月21日15:39」「昨天 19:09」），
+    ///   是**这笔交易的实际支付时间**（用户明确声明）。当 extractISODateTime 提取不到「支付时间」标签时，
+    ///   用它替代 .now 作为支付时间。
     static func localParseBill(text: String,
                                 in context: ModelContext?,
                                 referenceDate: Date? = nil,
                                 preferredMerchant: String? = nil,
                                 forceAmount: Bool = false,
-                                candidates: [[(string: String, confidence: Float)]]? = nil) -> RecognitionResult? {
+                                candidates: [[(string: String, confidence: Float)]]? = nil,
+                                preferredTimeLine: String? = nil) -> RecognitionResult? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
@@ -391,13 +395,14 @@ struct RecognizeService {
 
         // 3) 时间：优先精确提取「支付时间」行含时分秒的完整时间戳；
         //    只提取到日期时（有日期无时刻）用当天零点；
-        //    完全提取失败（截图里没有任何时间线索）则默认记「当前时间」，
-        //    符合用户要求：识别不出时间就记录当下这一刻，而不是 00:00。
-        //    注：若文本含「支付时间」标签但提取失败（极少见），仍 fallback .now —— 保持当前行为，
-        //        因为本地规则已能稳定从标签行提取时间（见 extractISODateTime 的 labeledPatterns / 跨行兜底）。
+        //    完全提取失败（截图里没有任何时间线索）则按优先级：
+        //    ① 列表项时间（如「7月21日15:39」「昨天 19:09」——用户明确这是支付时间）
+        //    ② .now（系统当前时间）
+        //    符合用户要求：有支付时间标签则取之，有列表项时间则用之，都没有才记 .now。
         let timeCands = candidates ?? []
         let isoTime = extractISODateTime(trimmed, referenceDate: referenceDate)
             ?? (timeCands.flatMap { $0 }.isEmpty ? nil : extractISODateTimeCandidates(timeCands, referenceDate: referenceDate))
+            ?? parseListItemTime(preferredTimeLine, referenceDate: referenceDate)
             ?? ISO8601DateFormatter().string(from: .now)
 
         // 4) 分类：优先 MerchantMeta 经验库，未命中按关键词猜
@@ -602,10 +607,12 @@ struct RecognizeService {
         var payloads: [BillPayload] = []
         for e in entries {
             // 多账单列表里每条都是独立支付记录：强制放宽金额提取，并直接采用拆分时已定位好的商户。
+            // 列表项时间（如「7月21日15:39」「昨天 19:09」）是支付时间，作为 preferredTimeLine 传入。
             guard let single = localParseBill(text: e.block, in: context,
                                               referenceDate: nil,
                                               preferredMerchant: e.merchant,
-                                              forceAmount: true),
+                                              forceAmount: true,
+                                              preferredTimeLine: e.timeLine),
                   let bills = single.bills, !bills.isEmpty else { continue }
             payloads.append(contentsOf: bills)
         }
@@ -1692,6 +1699,67 @@ struct RecognizeService {
             // 后续 15 行内（覆盖两栏布局中标签与值的远距离错位）
             let nearby = Array(lines[i..<min(i + 16, lines.count)]).joined(separator: "\n")
             if let result = tryExtractDateTime(from: nearby, using: fullPatterns) { return result }
+        }
+
+        return nil
+    }
+
+    /// 解析列表项时间格式：支付列表/服务消息卡片中显示的相对或短日期时间。
+    /// 用户明确声明「列表项时间就是支付时间」，因此在多账单路径中，定位到的 timeLine
+    /// 应作为支付时间使用。
+    /// 支持格式：7月21日15:39、7月21日 15:39、昨天19:09、昨天 19:09、7月21日、今天02:08。
+    /// - Returns: ISO8601 格式字符串，失败返回 nil。
+    private static func parseListItemTime(_ timeLine: String?, referenceDate: Date? = nil) -> String? {
+        guard let text = timeLine, !text.isEmpty else { return nil }
+        let ref = referenceDate ?? Date()
+        let cal = Calendar.current
+        let shanghai = TimeZone(identifier: "Asia/Shanghai")!
+
+        func iso(year: Int, month: Int, day: Int, h: Int, min: Int, s: Int) -> String? {
+            var comps = DateComponents()
+            comps.year = year; comps.month = month; comps.day = day
+            comps.hour = h; comps.minute = min; comps.second = s
+            comps.timeZone = shanghai
+            guard let d = cal.date(from: comps) else { return nil }
+            let f = ISO8601DateFormatter(); f.timeZone = shanghai
+            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return f.string(from: d)
+        }
+
+        let ns = text as NSString
+
+        // 1) M月D日 HH:MM[:SS] / M月D日HH:MM
+        let mdTime = #"(\d{1,2})[月](\d{1,2})[日]?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?"#
+        if let re = try? NSRegularExpression(pattern: mdTime),
+           let m = re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) {
+            let mo = Int(ns.substring(with: m.range(at: 1))) ?? 0
+            let d = Int(ns.substring(with: m.range(at: 2))) ?? 0
+            let h = Int(ns.substring(with: m.range(at: 3))) ?? 0
+            let mi = Int(ns.substring(with: m.range(at: 4))) ?? 0
+            let s = m.numberOfRanges > 5 && m.range(at: 5).location != NSNotFound
+                ? Int(ns.substring(with: m.range(at: 5))) ?? 0 : 0
+            let y = cal.component(.year, from: ref)
+            return iso(year: y, month: mo, day: d, h: h, min: mi, s: s)
+        }
+
+        // 2) 今天/昨天 HH:MM[:SS] / 今天HH:MM
+        let relTime = #"(今天|昨天)\s*(\d{1,2}):(\d{2})(?::(\d{2}))?"#
+        if let re = try? NSRegularExpression(pattern: relTime),
+           let m = re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) {
+            let h = Int(ns.substring(with: m.range(at: 2))) ?? 0
+            let mi = Int(ns.substring(with: m.range(at: 3))) ?? 0
+            let s = m.numberOfRanges > 4 && m.range(at: 4).location != NSNotFound
+                ? Int(ns.substring(with: m.range(at: 4))) ?? 0 : 0
+            let base: Date
+            if ns.substring(with: m.range(at: 1)) == "昨天" {
+                base = cal.date(byAdding: .day, value: -1, to: ref) ?? ref
+            } else {
+                base = ref
+            }
+            let y = cal.component(.year, from: base)
+            let mo = cal.component(.month, from: base)
+            let d = cal.component(.day, from: base)
+            return iso(year: y, month: mo, day: d, h: h, min: mi, s: s)
         }
 
         return nil
