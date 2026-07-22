@@ -257,30 +257,6 @@ struct RecognizeService {
         return localOCR(from: imageData)?.text
     }
 
-    /// 单独 OCR 状态栏区域（顶部约 5%），不受 minimumTextHeight 限制，救回被主 OCR
-    /// 过滤掉的「HH:MM 1」等状态栏时间（定位箭头紧跟时间，主 OCR 误以为是噪点）。
-    /// 失败 / 无文字返回 nil。不会影响主 OCR 逻辑，只把结果作为时间提取的额外输入。
-    static func localOCRStatusBar(from imageData: Data) -> String? {
-        guard let ui = UIImage(data: imageData),
-              let cg = ui.cgImage else { return nil }
-        // 状态栏高度约 44pt；iPhone 截图常见 1280~2796px 高，按 6% 上限 160px / 下限 60px 截顶
-        let topH = max(60, min(160, cg.height / 16))
-        guard let top = cg.cropping(to: CGRect(x: 0, y: 0, width: cg.width, height: topH)) else { return nil }
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = false
-        request.recognitionLanguages = ["zh-Hans", "en"]
-        request.minimumTextHeight = 0.0   // 不过滤状态栏小字
-        let handler = VNImageRequestHandler(cgImage: top, options: [:])
-        do {
-            try handler.perform([request])
-        } catch {
-            return nil
-        }
-        let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
-        return lines.isEmpty ? nil : lines.joined(separator: "\n")
-    }
-
     /// 设备端 OCR：同时返回文字和所有文本块的 bounding box，供营养成分表等需要版面分析的模块使用。
     /// - Parameter customWords: 可选词典偏置（已知商户名/常见商户名），提升易混字识别率。
     private static func localOCR(from imageData: Data,
@@ -920,15 +896,8 @@ struct RecognizeService {
     static func recognizeWithLocalPriority(imageData: Data, in context: ModelContext) async throws -> (result: RecognitionResult, rawText: String, source: RecognitionSource) {
         let tier = AppUserTier.current
         let ocr = localOCR(from: imageData, customWords: merchantBiasWords(in: context))
-        var cleanText = ocr?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let cleanText = ocr?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let observations = ocr?.observations ?? []
-        // 状态栏 OCR：主 OCR 会过滤状态栏小字（minimumTextHeight=0.008），这里单独把状态栏文字
-        // 补回来，主要为了让「HH:MM」时间能被 extractISODateTime 看到（支付宝/微信付款成功页的截图，
-        // 状态栏里的时间就是交易时间）。状态栏通常只有时间/电量/信号，没有 ¥ 金额或商户名，
-        // 不会污染 isAmountLine / isPotentialMerchant。
-        if let statusBarText = localOCRStatusBar(from: imageData) {
-            cleanText = statusBarText + "\n" + cleanText
-        }
 
         var fallbackLocal: RecognitionResult?
         // 提前检测营养成分表标志，后续多处用它跳过账单路径
@@ -1616,16 +1585,21 @@ struct RecognizeService {
     ///   "2026-07-21T13:31:19+08:00"
     ///   "2026年7月21日 13点31分"
     ///   "今天 19:09" / "昨天 10:40" / "7月21日 15:39"
-    /// - Parameter referenceDate: 当 block 内只有时刻（如 "19:09"）时，用参考日期补齐。
+    /// - Parameter referenceDate: 保留参数以兼容调用方；当前实现已不使用（仅靠「支付时间」标签匹配）。
     private static func extractISODateTime(_ text: String, referenceDate: Date? = nil) -> String? {
-        // ── 第 0 优先级：相对日期 + 时刻（支付宝/微信列表页常见）──
-        if let result = extractRelativeDateTime(text, referenceDate: referenceDate) { return result }
+        // 业务规则（2026-07-22 用户明确）：
+        // 1) 优先「支付时间/付款时间/交易时间/创建时间」标签下的时间戳。
+        // 2) 没有就 fallback 到 .now（localParseBill 处理），**绝不**用状态栏时间或裸 HH:MM。
+        // 因此「今天/M月D日/星期X + 时刻」/「纯 HH:MM」等任何不含支付时间标签的相对/裸时间
+        // 都不再参与返回，强制走 .now。
+        _ = referenceDate
 
         // ── 第 1 优先级：带标签的时间行（支付宝/微信账单标准格式）──
-        // 匹配 "支付时间/付款时间/交易时间/创建时间" 后跟的完整时间戳
+        // 匹配 "支付时间/付款时间/交易时间/创建时间" 后跟的完整时间戳。
+        // 注意：day 之后允许可选「日」（如「2026年7月22日 15:31:11」），否则会被 dateOnly 截走。
         let labeledPatterns = [
-            #"(?:支付时间|付款时间|交易时间|创建时间)\s*[:：]?\s*(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})(?:\s+[T\s]?(\d{1,2}):(\d{2})(?::(\d{2}))?)?"#,
-            #"(?:支付时间|付款时间|交易时间|创建时间)\s*[:：]?\s*(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})"#,
+            #"(?:支付时间|付款时间|交易时间|创建时间)\s*[:：]?\s*(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?(?:\s+[T\s]?(\d{1,2}):(\d{2})(?::(\d{2}))?)?"#,
+            #"(?:支付时间|付款时间|交易时间|创建时间)\s*[:：]?\s*(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?"#,
         ]
         if let result = tryExtractDateTime(from: text, using: labeledPatterns) {
             return result
@@ -1666,106 +1640,6 @@ struct RecognizeService {
             if let result = tryExtractDateTime(from: nearby, using: fullPatterns) { return result }
         }
 
-        return nil
-    }
-
-    /// 解析相对日期 + 时刻：今天/昨天 + HH:MM、M月D日 HH:MM、星期X HH:MM、或纯 HH:MM（用参考日期补日期）。
-    /// 用于支付宝/微信「账单列表」截图，这类图常只显示「今天 19:09」「7月21日 15:39」「星期四 18:26」「19:09」。
-    /// - Parameter referenceDate: 文本只含时刻或星期X时，用该日期补齐年月日；默认今天。
-    private static func extractRelativeDateTime(_ text: String, referenceDate: Date? = nil) -> String? {
-        let calendar = Calendar.current
-        let shanghai = TimeZone(identifier: "Asia/Shanghai")!
-        let reference = referenceDate ?? Date()
-
-        // 组装「保留参考日期的 年-月-日 + 给定时刻」并输出 ISO8601(+08:00)
-        func iso(from date: Date, h: Int, min: Int, s: Int) -> String? {
-            var comps = calendar.dateComponents([.year, .month, .day], from: date)
-            comps.hour = h; comps.minute = min; comps.second = s
-            comps.timeZone = shanghai
-            guard let d = calendar.date(from: comps) else { return nil }
-            let f = ISO8601DateFormatter(); f.timeZone = shanghai
-            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            return f.string(from: d)
-        }
-
-        // 1) 今天/昨天 HH:MM[:SS]
-        let relPattern = #"(?:今天|昨天)\s*(\d{1,2}):(\d{2})(?::(\d{2}))?"#
-        if let regex = try? NSRegularExpression(pattern: relPattern, options: []),
-           let m = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) {
-            let ns = text as NSString
-            let h = Int(ns.substring(with: m.range(at: 1))) ?? 0
-            let min = Int(ns.substring(with: m.range(at: 2))) ?? 0
-            let s = m.numberOfRanges > 3 && m.range(at: 3).location != NSNotFound
-                ? Int(ns.substring(with: m.range(at: 3))) ?? 0 : 0
-            let base: Date = text.contains("昨天")
-                ? (calendar.date(byAdding: .day, value: -1, to: reference) ?? reference)
-                : reference
-            if let r = iso(from: base, h: h, min: min, s: s) { return r }
-        }
-
-        // 2) M月D日 HH:MM[:SS]（无年份，按参考日期所在年）
-        let mdPattern = #"(\d{1,2})[月](\d{1,2})[日]?[\s]*(\d{1,2}):(\d{2})(?::(\d{2}))?"#
-        if let regex = try? NSRegularExpression(pattern: mdPattern, options: []),
-           let m = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) {
-            let ns = text as NSString
-            let mo = Int(ns.substring(with: m.range(at: 1))) ?? 0
-            let d = Int(ns.substring(with: m.range(at: 2))) ?? 0
-            let h = Int(ns.substring(with: m.range(at: 3))) ?? 0
-            let min = Int(ns.substring(with: m.range(at: 4))) ?? 0
-            let s = m.numberOfRanges > 5 && m.range(at: 5).location != NSNotFound
-                ? Int(ns.substring(with: m.range(at: 5))) ?? 0 : 0
-            let y = calendar.component(.year, from: reference)
-            var comps = DateComponents(year: y, month: mo, day: d, hour: h, minute: min, second: s)
-            comps.timeZone = shanghai
-            if let date = calendar.date(from: comps) {
-                let f = ISO8601DateFormatter(); f.timeZone = shanghai
-                f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                return f.string(from: date)
-            }
-        }
-
-        // 3) 星期X HH:MM[:SS]：取「不晚于参考日期」最近的那一个星期X
-        let weekdayPattern = #"星期([一二三四五六日天])\s*(\d{1,2}):(\d{2})(?::(\d{2}))?"#
-        let weekdayMap: [String: Int] = ["一":1,"二":2,"三":3,"四":4,"五":5,"六":6,"日":7,"天":7]
-        if let regex = try? NSRegularExpression(pattern: weekdayPattern, options: []),
-           let m = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) {
-            let ns = text as NSString
-            let wdName = ns.substring(with: m.range(at: 1))
-            if let targetWD = weekdayMap[wdName] {
-                let h = Int(ns.substring(with: m.range(at: 2))) ?? 0
-                let min = Int(ns.substring(with: m.range(at: 3))) ?? 0
-                let s = m.numberOfRanges > 4 && m.range(at: 4).location != NSNotFound
-                    ? Int(ns.substring(with: m.range(at: 4))) ?? 0 : 0
-                let refWD = calendar.component(.weekday, from: reference) // 1=周日..7=周六
-                let refWDMon = (refWD == 1) ? 7 : (refWD - 1)             // 转成 周一=1..周日=7
-                var delta = refWDMon - targetWD
-                if delta < 0 { delta += 7 }
-                if let base = calendar.date(byAdding: .day, value: -delta, to: reference),
-                   let r = iso(from: base, h: h, min: min, s: s) { return r }
-            }
-        }
-
-        // 4) 纯 HH:MM[:SS]（独占一行/行首，无日期）：用参考日期补齐年月日
-        //    实测：状态栏常把定位箭头「➤」OCR 成「1」「l」等单字符，紧跟在时间后面
-        //    （如「13:10 1」），原来的 `^...$` 严格匹配会漏掉；这里改为「行首 + 时间 + 空白/行尾」。
-        let lines = text.components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-        let timeHeadPattern = #"^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s|$)"#
-        for line in lines {
-            guard let regex = try? NSRegularExpression(pattern: timeHeadPattern, options: []),
-                  let m = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-                  let r1 = Range(m.range(at: 1), in: line),
-                  let r2 = Range(m.range(at: 2), in: line) else { continue }
-            // 防御：避免把已经被前面 priority 1 标签模式吃过的「支付时间: 13:10」再吃一遍。
-            // 这些带中文标签冒号「：」的行交给上面处理；这里只认纯时刻行（含状态栏「13:10 1」）。
-            if line.contains("：") { continue }
-            let h = Int(line[r1]) ?? 0
-            let min = Int(line[r2]) ?? 0
-            let s = m.numberOfRanges > 3 && m.range(at: 3).location != NSNotFound
-                ? (Range(m.range(at: 3), in: line).flatMap { Int(line[$0]) } ?? 0)
-                : 0
-            if let r = iso(from: reference, h: h, min: min, s: s) { return r }
-        }
         return nil
     }
 
