@@ -76,12 +76,13 @@ const PROVIDERS = {
 };
 
 // 版本标记：发布后 curl 可通过返回值里的 ver 字段确认是否部署了最新代码
-const FN_VERSION = '20260722b-sensenova';
+const FN_VERSION = '20260722c-sensenova';
 
 // 服务端兜底：纯通用回应（不论上下文）强制 types:["none"]，不依赖模型是否听话。
 // 与云端提示词规则 10 双保险，杜绝「好的/可以」被当成记录指令重复建待办。
 // 注意：仅当整条消息几乎只剩一个通用回应词时才拦截；含具体指令的（如"好的帮我改"）不拦，交给模型。
-const GENERIC_ACK = ['好的','好','可以','嗯','行','谢谢','再见','哦','知道了','收到','没问题','好滴','行吧','好嘞','嗯嗯','哦哦'];
+const GENERIC_ACK = ['好的','好','可以','嗯','行','谢谢','再见','哦','知道了','收到','没问题','好滴','行吧','好嘞','嗯嗯','哦哦',
+  '测试','测试一下','试试','试一下','随便','你好','在吗','hi','hello'];
 function isGenericAcknowledgement(text) {
   if (!text || typeof text !== 'string') return false;
   const t = text.trim().replace(/[\s。！？，、；：.!?,;:~\-—…]/g, '');
@@ -306,12 +307,28 @@ async function handleChat(provider, body, apiKey) {
   return { ok: true, reply };
 }
 
-// 有些模型会在 JSON 外面包 ```json 代码块，这里做防御性清洗
+// 有些模型会在 JSON 外面包 ```json 代码块，这里做防御性清洗。
+// 同时兜底解析失败（空 result / 非法 JSON / 缺 types 字段）为 {types:["none"]}，
+// 避免 App 端拿到空 result 后直接崩溃。
 function extractJSON(text) {
-  const t = text.trim();
-  const fenced = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const candidate = fenced ? fenced[1] : t;
-  return JSON.parse(candidate);
+  const t = (text || '').trim();
+  if (!t || t === '{}') {
+    console.log(`[extractJSON] 模型返回空对象`);
+    return { types: ['none'] };
+  }
+  try {
+    const fenced = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fenced ? fenced[1] : t;
+    const parsed = JSON.parse(candidate);
+    if (!parsed || typeof parsed !== 'object' || !parsed.types || !Array.isArray(parsed.types)) {
+      console.log(`[extractJSON] 缺 types 字段: ${t.slice(0, 200)}`);
+      return { types: ['none'] };
+    }
+    return parsed;
+  } catch (e) {
+    console.log(`[extractJSON] 解析失败: ${e.message}, 原文: ${t.slice(0, 200)}`);
+    return { types: ['none'] };
+  }
 }
 
 // 云函数入口
