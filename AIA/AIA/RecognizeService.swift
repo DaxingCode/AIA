@@ -917,7 +917,8 @@ struct RecognizeService {
     }
 
     /// 本地优先识别入口（Data 版，省一次压缩）。
-    /// 链路：本地 OCR → 本地规则（一图多账单 / 营养成分表 / 单账单） → 文本模型（OCR 文字） → 视觉模型兜底。
+    /// 链路：本地 OCR → 营养成分表本地规则 → 文本模型（OCR 文字） → 视觉模型兜底。
+    /// 一图多账单与单账单均走视觉模型（保精度、避免本地误拆），仅营养成分表走本地强规则。
     static func recognizeWithLocalPriority(imageData: Data, in context: ModelContext) async throws -> (result: RecognitionResult, rawText: String, source: RecognitionSource) {
         let tier = AppUserTier.current
         let ocr = localOCR(from: imageData, customWords: merchantBiasWords(in: context))
@@ -932,25 +933,19 @@ struct RecognizeService {
         let isNutritionLabel = hasNutritionTable(in: nutritionLines)
 
         if !cleanText.isEmpty {
-            // 1) 一图多账单：强规则结构化，直接本地胜出（不论档位，省云端）。
-            //    营养成分表内也可能出现多行金额状文本（3.1g/12.0g），但完全不是账单，
-            //    必须跳过——由步骤 2 处理。
-            if !isNutritionLabel,
-               let multi = localParseMultiBillsIfNeeded(text: cleanText, in: context),
-               !multi.billList.isEmpty {
-                print("[识别] 本地 OCR+规则命中一图多账单，共 \(multi.billList.count) 条，跳过云端，source=local")
-                return (multi, cleanText, .local)
+            // 多账单列表检测（仅用于日志与降级判断）：
+            // 2026-07-2X 起「一图多账单」不再本地胜出，统一走视觉模型拆条，保精度、避免本地误拆。
+            let isMultiList = !isNutritionLabel && detectMultiBillList(cleanText)
+            if isMultiList {
+                print("[识别] 检测到一图多账单列表，改为走视觉模型拆条，source=cloud")
             }
-            // 2) 食物包装营养成分表：必须在单账单之前判断，避免包装上的「3.1g / 12.0g」
-            //    被单账单解析误当成金额，导致食物识别成账单。
+            // 2) 食物包装营养成分表：必须在单账单之前判断，避免包装上的「3.1g/12.0g」被单账单解析误当成金额。
             if let food = localParseNutritionTable(observations: observations)
                         ?? localParseNutritionTable(text: cleanText) {
                 print("[识别] 本地 OCR+规则命中营养成分表，跳过云端，source=local")
                 return (food, cleanText, .local)
             }
-
-            // 2.5) 营养成分表检测到但本地解析失败：跳过单账单路径，
-            //     不能把「379kJ」当商户、「3.19」当金额。降级食物供用户手动纠正。
+            // 2.5) 营养成分表检测到但本地解析失败：跳过单账单路径，降级食物供用户手动纠正。
             if isNutritionLabel {
                 print("[识别] 营养成分表检测到但因格式问题本地解析失败，跳过账单路径")
                 let emptyFood = RecognitionResult(
@@ -962,19 +957,16 @@ struct RecognizeService {
                                       action: "create", targetTitle: nil),
                     todo: nil, health: nil
                 )
-                fallbackLocal = emptyFood  // 降级时走食物而非账单
-                // 不设置回退，继续走文本模型 or 视觉兜底。
-                // 文本模型仍可能正确分类为食物并提供结构数据。
-            } else {
-            // 单账单本地规则只作降级备选：不再提前返回，全部走视觉模型保精度。
-            // (2026-07-22 用户明确：所有图片识别走云端视觉模型，本地不能拦下。)
-            if let local = localParseBill(text: cleanText, in: context, candidates: ocr?.candidates ?? []) {
-                fallbackLocal = local   // 仅在视觉模型彻底失败时降级返回
+                fallbackLocal = emptyFood
+            } else if !isMultiList {
+                // 单账单本地规则只作降级备选：不再提前返回，全部走视觉模型保精度。
+                // (2026-07-2X 用户明确：所有图片识别走云端视觉模型，本地不能拦下。)
+                // 注意：多账单列表不走这里——避免把整张列表当单条账单误解析。
+                if let local = localParseBill(text: cleanText, in: context, candidates: ocr?.candidates ?? []) {
+                    fallbackLocal = local   // 仅在视觉模型彻底失败时降级返回
+                }
             }
-            }  // end else: isNutritionLabel 为 false 时才走 localParseBill
-
             // 3) 视觉模型（发图，最准）：本地规则没命中就直接传图给模型。
-            //    (2026-07-22 用户要求：所有图片识别走视觉模型，精度优先，不考虑 tier 限制)
             let vision = try await recognizeResilient(imageData: imageData)
             print("[识别] 视觉模型命中，source=cloud")
             return (vision.result, vision.rawText, .cloud)
