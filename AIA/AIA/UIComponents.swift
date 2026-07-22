@@ -602,7 +602,7 @@ struct AIBottomBar: View {
     @State private var showPicker = false
     /// 共享导航栈：统一走 path 编程式导航（与首页四宫格一致），任何层级的底部栏都推到同一主栈。
     private let router = NavigationRouter.shared
-    private let rowH: CGFloat = 18
+    private let rowH: CGFloat = 21
 
     /// 底部栏图标从左到右的顺序，必须与 HStack 内 Button 顺序一致。
     /// nil 代表中间的输入框胶囊。改图标位置只改这里，箭头自动跟着变。
@@ -640,9 +640,9 @@ struct AIBottomBar: View {
             // 语音按钮（不再有独立圆背景，图标直接浮在胶囊玻璃底色上）
             Button { router.path.append(.chatVoice) } label: {
                 Image(systemName: "mic.fill")
-                    .font(AIATheme.Font.body.weight(.medium))
+                    .font(AIATheme.Font.title3.weight(.medium))
                     .foregroundStyle(AIATheme.sub)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 48, height: 48)
             }
             .buttonStyle(.plain)
 
@@ -652,12 +652,12 @@ struct AIBottomBar: View {
                     Spacer()
                     ZStack(alignment: .center) {
                         Text(displayText(prompts[promptIndex]))
-                            .font(AIATheme.Font.caption)
+                            .font(AIATheme.Font.footnote.weight(.medium))
                             .foregroundStyle(AIATheme.muted)
                             .lineLimit(1)
                             .offset(y: rolling ? -rowH : 0)
                         Text(displayText(prompts[(promptIndex + 1) % max(prompts.count, 1)]))
-                            .font(AIATheme.Font.caption)
+                            .font(AIATheme.Font.footnote.weight(.medium))
                             .foregroundStyle(AIATheme.muted)
                             .lineLimit(1)
                             .offset(y: rolling ? 0 : rowH)
@@ -666,7 +666,7 @@ struct AIBottomBar: View {
                     .clipped()
                     Spacer()
                 }
-                .frame(height: 36)
+                .frame(height: 42)
                 .background(AIATheme.fillSoft)
                 .clipShape(Capsule())
             }
@@ -675,22 +675,22 @@ struct AIBottomBar: View {
             // 拍照按钮
             Button { showCamera = true } label: {
                 Image(systemName: "camera")
-                    .font(AIATheme.Font.body.weight(.medium))
+                    .font(AIATheme.Font.title3.weight(.medium))
                     .foregroundStyle(AIATheme.sub)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 48, height: 48)
             }
             .buttonStyle(.plain)
 
             // 相册按钮
             Button { showPicker = true } label: {
                 Image(systemName: "photo")
-                    .font(AIATheme.Font.body.weight(.medium))
+                    .font(AIATheme.Font.title3.weight(.medium))
                     .foregroundStyle(AIATheme.sub)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 48, height: 48)
             }
             .buttonStyle(.plain)
         }
-        .padding(5)
+        .padding(6)
         // 玻璃胶囊 + 柔阴影 → 真正"悬浮"（不再贴边、不再有顶部分割线）
         .background(
             Capsule()
