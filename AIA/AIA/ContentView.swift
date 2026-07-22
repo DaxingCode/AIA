@@ -574,12 +574,6 @@ struct ContentView: View {
                 .padding(.bottom, 10)
             }
             .background(bg)
-            // 左侧类型色细边：与首页「今日事项预览」气泡左侧色条同款语言，比满宽顶条更轻、整页更统一
-            .overlay(alignment: .leading) {
-                RoundedRectangle(cornerRadius: AIATheme.rLG, style: .continuous)
-                    .fill(accent)
-                    .frame(width: 3)
-            }
             .clipShape(RoundedRectangle(cornerRadius: AIATheme.rLG))
             .contentShape(RoundedRectangle(cornerRadius: AIATheme.rLG))
             .frame(maxWidth: .infinity, minHeight: 165, maxHeight: 165)
