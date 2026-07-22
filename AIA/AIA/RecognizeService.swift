@@ -17,10 +17,12 @@ struct RecognizeService {
         return try await recognizeResilient(imageData: data)
     }
 
-    /// 把图片二进制压缩成可上传的 base64（默认最大边 1024、JPEG 质量 0.8、目标二进制 < 100KB）。
+    /// 把图片二进制压缩成可上传的 base64（默认最大边 1024、JPEG 质量 0.8、目标二进制 < 60KB）。
     /// 快捷指令后台传来的原图（常是整张 PNG 截屏）必须经此压缩，否则会触发 CloudBase 413 超限。
+    /// CloudBase 实际限制的是「请求体总大小」：binary 经 base64 膨胀约 4/3，再加 JSON 包裹，
+    /// 因此目标 binary 控制在 60KB 以下，最终请求体通常 < 90KB，可安全通过。
     /// 可通过 maxSide / targetBytes 在 413 重试时逐级收紧。
-    static func compressedBase64(from imageData: Data, maxSide: CGFloat = 1024, targetBytes: Int = 100 * 1024) -> String? {
+    static func compressedBase64(from imageData: Data, maxSide: CGFloat = 1024, targetBytes: Int = 60 * 1024) -> String? {
         guard let image = UIImage(data: imageData) else { return nil }
         let resized = image.preparingThumbnail(of: CGSize(width: maxSide, height: maxSide)) ?? image
         var quality: CGFloat = 0.8
@@ -40,14 +42,14 @@ struct RecognizeService {
 
     /// 带 413 自动重试的图片识别：
     /// 先用常规压缩上传；若云端返回 413（请求体超限），自动用更小尺寸/更狠压缩重试，
-    /// 最多四级（1024/<120KB → 1024/<80KB → 768/<60KB → 512/<40KB），保证大截屏也不会因超限直接失败。
-    /// 第一档适当放宽到 120KB，提升文字截图（微信聊天、账单等）的 OCR 与意图识别准确率。
+    /// 最多四级（1024/<60KB → 1024/<40KB → 768/<30KB → 512/<20KB），保证大截屏也不会因超限直接失败。
+    /// 第一档保守设为 60KB，避免 binary → base64 → JSON 后再次触发 CloudBase 请求体限制。
     static func recognizeResilient(imageData: Data) async throws -> (result: RecognitionResult, rawText: String) {
         let attempts: [(CGFloat, Int)] = [
-            (1024, 120 * 1024),
-            (1024, 80 * 1024),
-            (768, 60 * 1024),
-            (512, 40 * 1024),
+            (1024, 60 * 1024),
+            (1024, 40 * 1024),
+            (768, 30 * 1024),
+            (512, 20 * 1024),
         ]
         var lastErr: Error?
         for (side, target) in attempts {
@@ -73,7 +75,7 @@ struct RecognizeService {
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.timeoutInterval = 30
+        req.timeoutInterval = 60
 
         let body: [String: Any] = [
             "text": text,
@@ -109,7 +111,7 @@ struct RecognizeService {
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.timeoutInterval = 30
+        req.timeoutInterval = 60
 
         var body: [String: Any] = ["text": text, "provider": "sensenovaText"]
         if !recentMessages.isEmpty {
@@ -141,7 +143,7 @@ struct RecognizeService {
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.timeoutInterval = 30
+        req.timeoutInterval = 60
 
         let body: [String: Any] = [
             "mode": "queryFood",
@@ -180,7 +182,7 @@ struct RecognizeService {
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.timeoutInterval = 30
+        req.timeoutInterval = 60
 
         let body: [String: Any] = ["imageBase64": base64, "provider": "sensenova"]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -208,19 +210,18 @@ struct RecognizeService {
         return (result, rawText)
     }
 
-    // 基于本地数据摘要的 AI 聊天；无法识别为记录意图时 fallback 调用。
+    // Agent 聊天：走云端 mode:"agent"（带工具调用的智能助理）。
+    // 云函数内部失败会自动降级回本地摘要兜底，保证始终有回复。
     static func chat(text: String, context: [String: Any]) async throws -> String {
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.timeoutInterval = 30
+        req.timeoutInterval = 60
 
-        let body: [String: Any] = [
-            "mode": "chat",
-            "text": text,
-            "context": context,
-            "provider": "sensenova"
-        ]
+        // 切到 Agent 模式：mode:"agent" + 注入 userId + 改用商汤 sensechat-turbo。
+        // 其余（超时 60s、错误提示、返回值）保持与原来一致。
+        let request = AgentChatRequest(text: text, context: context)
+        let body: [String: Any] = request.toDictionary()
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (respData, response) = try await URLSession.shared.data(for: req)
@@ -327,7 +328,8 @@ struct RecognizeService {
                                 preferredMerchant: String? = nil,
                                 forceAmount: Bool = false,
                                 candidates: [[(string: String, confidence: Float)]]? = nil,
-                                preferredTimeLine: String? = nil) -> RecognitionResult? {
+                                preferredTimeLine: String? = nil,
+                                defaultListItemYesterday: Bool = false) -> RecognitionResult? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
@@ -402,7 +404,8 @@ struct RecognizeService {
         let timeCands = candidates ?? []
         let isoTime = extractISODateTime(trimmed, referenceDate: referenceDate)
             ?? (timeCands.flatMap { $0 }.isEmpty ? nil : extractISODateTimeCandidates(timeCands, referenceDate: referenceDate))
-            ?? parseListItemTime(preferredTimeLine, referenceDate: referenceDate)
+            ?? parseListItemTime(preferredTimeLine, referenceDate: referenceDate, defaultYesterday: defaultListItemYesterday)
+            ?? (defaultListItemYesterday ? yesterdayStart(referenceDate: referenceDate) : nil)
             ?? ISO8601DateFormatter().string(from: .now)
 
         // 4) 分类：优先 MerchantMeta 经验库，未命中按关键词猜
@@ -451,12 +454,35 @@ struct RecognizeService {
     /// 额外排除：超市/便利店收银小票，避免 1 张小票被拆成 N 笔错账。
     private static func detectMultiBillList(_ text: String) -> Bool {
         if isSupermarketReceipt(text) { return false }
-        // 支付/交易成功页：本质是单笔交易的结果页，金额在状态栏+金额行+同行右栏
-        // 重复出现 2~3 次都是同一笔。强制走单账单路径，避免「同一笔拆 2~3 笔」。
-        if isPaymentSuccessScreen(text) { return false }
+
         let entries = extractBillEntries(text)
         let validMerchants = entries.compactMap { $0.merchant }.filter { !$0.isEmpty }
-        return entries.count >= 2 && Set(validMerchants).count >= 2
+        let distinctMerchants = Set(validMerchants)
+        let hasMultipleBills = entries.count >= 2 && distinctMerchants.count >= 2
+
+        // 强列表信号（如「支付消息」「服务消息」）直接认定为多账单，即使含「付款成功」也不必按单账单排除。
+        // 支付宝「支付消息」页每条记录都带「付款成功」，但它本质是多笔历史记录列表。
+        let strongListSignals = ["支付消息", "服务消息", "支付记录", "账单列表", "我的账单"]
+        if strongListSignals.contains(where: { text.localizedCaseInsensitiveContains($0) }) && entries.count >= 2 {
+            return true
+        }
+
+        // 支付/交易成功页 / 账单详情页：本质是单笔交易的结果页，金额在状态栏+金额行+同行右栏
+        // 重复出现 2~3 次都是同一笔。强制走单账单路径，避免「同一笔拆 2~3 笔」。
+        // 但若能拆出 2 个以上不同商户，说明不是单笔结果页，放行多账单。
+        if isPaymentSuccessScreen(text), distinctMerchants.count < 2 {
+            return false
+        }
+
+        // 强单页信号：「账单详情」且没有列表页信号 → 本质上是单笔详情页，不应拆条。
+        // 配合 isAmountLine 长度限制，防御订单号/交易号被误拆成多笔。
+        let singleDetailSignals = ["账单详情"]
+        if singleDetailSignals.contains(where: { text.localizedCaseInsensitiveContains($0) }),
+           !strongListSignals.contains(where: { text.localizedCaseInsensitiveContains($0) }) {
+            return false
+        }
+
+        return hasMultipleBills
     }
 
     /// 列表页/历史记录页：微信/支付宝「账单」列表、支付宝「交易记录」、美团「我的订单」等。
@@ -508,12 +534,6 @@ struct RecognizeService {
         let rawLines = text.components(separatedBy: .newlines)
         let lines = rawLines.map { $0.trimmingCharacters(in: .whitespaces) }
 
-        let amountIndices = lines.enumerated().compactMap { i, line -> Int? in
-            guard isAmountLine(line), !isSummaryAmountLine(line) else { return nil }
-            return i
-        }
-        guard amountIndices.count >= 2 else { return [] }
-
         let uiNoise: Set<String> = ["全部", "支出", "收入", "转账", "退款", "订单", "筛选", "搜索",
                                      "收支分析", "我的账单", "支付服务", "摇优惠", "服务消息", "支付消息",
                                      "账单", "全部账单", "查找交易", "Q", "X", "说", "出分",
@@ -530,10 +550,19 @@ struct RecognizeService {
             if t.isEmpty { return true }
             if uiNoise.contains(t) { return true }
             if t.hasPrefix("Q ") || t.hasPrefix("搜索") || t.hasPrefix("本月已省") { return true }
-            // 状态栏时间如 "23:35"
-            if t.range(of: #"^\d{1,2}:\d{2}$"#, options: .regularExpression) != nil { return true }
+            // 状态栏 / 悬浮岛时间：23:35、21:021、21.010 等（OCR 把冒号/小数点读混）
+            if t.range(of: #"^\d{1,2}[:\.]\d{2,4}$"#, options: .regularExpression) != nil { return true }
+            // 单个图标 / 符号（悬浮岛 X 读成 IX、圆点读成 ◎、括号等）
+            if t.range(of: #"^[\(\)\[\]\{\}◎◆◇○●□■▢▣◉◈◇◆<＜>＞]+$"#, options: .regularExpression) != nil { return true }
+            if ["IX", "X", "Q", "◎", "◆", "◇"].contains(t) { return true }
             return false
         }
+
+        let amountIndices = lines.enumerated().compactMap { i, line -> Int? in
+            guard isAmountLine(line), !isSummaryAmountLine(line), !isUINoise(line) else { return nil }
+            return i
+        }
+        guard amountIndices.count >= 2 else { return [] }
 
         func isPotentialMerchant(_ line: String) -> Bool {
             if isUINoise(line) { return false }
@@ -551,12 +580,23 @@ struct RecognizeService {
             if line.isEmpty { return false }
             if bankNoise.contains(where: { line.contains($0) }) { return false }
             if categoryWords.contains(where: { line.contains($0) }) { return false }
+            // 订单/交易号上下文：这类长串前面常有标签，整行不能当商户
+            let orderNoise = ["业务交易号", "交易号", "订单号", "订单编号", "商家订单号", "流水号", "流水编号"]
+            if orderNoise.contains(where: { line.localizedCaseInsensitiveContains($0) }) { return false }
             // 超市小票常见噪声：纯重量/规格（400g、0g、1kg、500ml）、计量单位头（件、件数、数量）、商品条码
             let t = line.trimmingCharacters(in: .whitespaces)
             if t.range(of: #"^[\d.oO]+\s*[gG克kg千克ml毫升l升]$"#, options: .regularExpression) != nil { return false }
             if t.range(of: #"^[\d.oO]+\s*(个|件|瓶|包|袋|盒|罐)$"#, options: .regularExpression) != nil { return false }
             if ["件", "件数", "数量", "单位", "规格"].contains(t) { return false }
             if t.range(of: #"^\d{12,}$"#, options: .regularExpression) != nil { return false }
+            // 月份/年份选择器、账单区间标题（如「2026年7月」「7月」「2026/7」）不能当商户
+            if t.range(of: #"^\d{4}年\d{1,2}月(份?)$"#, options: .regularExpression) != nil { return false }
+            if t.range(of: #"^\d{1,2}月(份?)$"#, options: .regularExpression) != nil { return false }
+            if t.range(of: #"^\d{4}[/-]\d{1,2}$"#, options: .regularExpression) != nil { return false }
+            if t.range(of: #"^\d{4}年$"#, options: .regularExpression) != nil { return false }
+            // 绝不允许纯符号/图标成为商户（如悬浮岛读出的 "(" "◎" 等）
+            let meaningful = t.filter { $0.isLetter || $0.isNumber }
+            if meaningful.isEmpty && t.count <= 2 { return false }
             return true
         }
 
@@ -564,19 +604,33 @@ struct RecognizeService {
         for (k, idx) in amountIndices.enumerated() {
             let prevAmountIdx = (k > 0) ? amountIndices[k - 1] : -1
 
-            // 向上扫描：先收集时间，再继续找商户；若有多个候选商户，取最长最完整的。
-            var timeLine: String? = nil
+            // 向上扫描：收集所有时间候选 + 商户候选。
+            var timeCandidates: [String] = []
             var merchantCandidates: [String] = []
             var scanJ = idx - 1
             while scanJ > prevAmountIdx && scanJ >= 0 {
                 let line = lines[scanJ]
-                if isLikelyTime(line) && timeLine == nil {
-                    timeLine = line
+                if isLikelyTime(line) {
+                    timeCandidates.append(line)
                 } else if isPotentialMerchant(line) {
                     merchantCandidates.append(line)
                 }
                 scanJ -= 1
             }
+
+            // 选时间：优先含「昨天/今天/M月D日」等日期信号的时间，再取纯 HH:MM；
+            // 同分组内取最靠近金额行（索引最大）的那一个，避免顶部状态栏时间抢位。
+            let timeLine: String? = {
+                var best: (text: String, score: Int, index: Int)? = nil
+                for (i, t) in timeCandidates.enumerated() {
+                    let hasDateSignal = t.range(of: #"(昨天|今天|明天|\d{1,2}月\d{1,2}日)"#, options: .regularExpression) != nil
+                    let score = (hasDateSignal ? 1000 : 0) + i
+                    if best == nil || score > best!.score {
+                        best = (t, score, i)
+                    }
+                }
+                return best?.text
+            }()
 
         // 选商户：优先最近（紧邻金额的文本最可能是商户），避免把更上方的营销文案（如
         // "+3积分|抢黑人清新双效牙膏"、"领88元余额宝体验金"）错当成商户。
@@ -605,6 +659,11 @@ struct RecognizeService {
         guard detectMultiBillList(text) else { return nil }
         let entries = extractBillEntries(text)
         var payloads: [BillPayload] = []
+        // 支付消息/账单列表多为历史记录，若 OCR 只给出纯 HH:MM 默认用昨天。
+        let hasYesterdaySignal = text.localizedCaseInsensitiveContains("昨天")
+        let strongListSignals = ["支付消息", "服务消息", "支付记录", "账单列表", "我的账单"]
+        let isStrongList = strongListSignals.contains(where: { text.localizedCaseInsensitiveContains($0) })
+        let defaultYesterday = hasYesterdaySignal || isStrongList
         for e in entries {
             // 多账单列表里每条都是独立支付记录：强制放宽金额提取，并直接采用拆分时已定位好的商户。
             // 列表项时间（如「7月21日15:39」「昨天 19:09」）是支付时间，作为 preferredTimeLine 传入。
@@ -612,7 +671,8 @@ struct RecognizeService {
                                               referenceDate: nil,
                                               preferredMerchant: e.merchant,
                                               forceAmount: true,
-                                              preferredTimeLine: e.timeLine),
+                                              preferredTimeLine: e.timeLine,
+                                              defaultListItemYesterday: defaultYesterday),
                   let bills = single.bills, !bills.isEmpty else { continue }
             payloads.append(contentsOf: bills)
         }
@@ -917,100 +977,98 @@ struct RecognizeService {
     }
 
     /// 本地优先识别入口（Data 版，省一次压缩）。
-    /// 链路：本地 OCR → 营养成分表本地规则 → 文本模型（OCR 文字） → 视觉模型兜底。
-    /// 一图多账单与单账单均走视觉模型（保精度、避免本地误拆），仅营养成分表走本地强规则。
+    ///
+    /// 【识别链路 · 2026-07-22 重构，单一清晰路径】
+    ///   ① 本地 OCR（离线、零成本）——仅用于：判断是否营养成分表 + 视觉模型失败时兜底。
+    ///   ② 营养成分表 → 本地版面解析（成分表密集数字视觉模型反而易错，本地更准）。命中即返回 .local。
+    ///   ③ 其它所有图片（单账单 / 多账单 / 食物 / 体检 / 待办 / 普通照片）→ 统一走视觉模型（.cloud）。
+    ///   ④ 视觉模型失败 → 本地规则尽力兜底（多账单/单账单）；都没有则抛错，由上层提示，绝不返回 0.00 空账单。
+    ///
+    /// 设计原则：「全部传图给模型，精度优先」。不再按免费/付费档位拦截视觉；不再让本地规则提前胜出。
+    /// 唯一的本地强规则例外是营养成分表（有专门的版面分析，且零成本更准）。
     static func recognizeWithLocalPriority(imageData: Data, in context: ModelContext) async throws -> (result: RecognitionResult, rawText: String, source: RecognitionSource) {
-        let tier = AppUserTier.current
+        // ① 本地 OCR
         let ocr = localOCR(from: imageData, customWords: merchantBiasWords(in: context))
         let cleanText = ocr?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let observations = ocr?.observations ?? []
 
-        var fallbackLocal: RecognitionResult?
-        // 提前检测营养成分表标志，后续多处用它跳过账单路径
+        // ② 营养成分表快速通道（唯一的本地强规则例外）
         let nutritionLines = cleanText.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        let isNutritionLabel = hasNutritionTable(in: nutritionLines)
-
-        if !cleanText.isEmpty {
-            // 多账单列表检测（仅用于日志与降级判断）：
-            // 2026-07-2X 起「一图多账单」不再本地胜出，统一走视觉模型拆条，保精度、避免本地误拆。
-            let isMultiList = !isNutritionLabel && detectMultiBillList(cleanText)
-            if isMultiList {
-                print("[识别] 检测到一图多账单列表，改为走视觉模型拆条，source=cloud")
-            }
-            // 2) 食物包装营养成分表：必须在单账单之前判断，避免包装上的「3.1g/12.0g」被单账单解析误当成金额。
+        if hasNutritionTable(in: nutritionLines) {
             if let food = localParseNutritionTable(observations: observations)
                         ?? localParseNutritionTable(text: cleanText) {
-                print("[识别] 本地 OCR+规则命中营养成分表，跳过云端，source=local")
+                print("[识别] 营养成分表本地解析命中，source=local")
                 return (food, cleanText, .local)
             }
-            // 2.5) 营养成分表检测到但本地解析失败：跳过单账单路径，降级食物供用户手动纠正。
-            if isNutritionLabel {
-                print("[识别] 营养成分表检测到但因格式问题本地解析失败，跳过账单路径")
-                let emptyFood = RecognitionResult(
+            // 检测到成分表但本地解析失败：先让视觉模型试着读品牌/名称，失败再用占位 food。
+            // 关键：绝不落到账单路径（避免把「3.1g/12.0g」当金额）。
+            print("[识别] 营养成分表检测到但本地解析失败，改走视觉模型，失败则占位 food")
+            do {
+                let vision = try await recognizeResilient(imageData: imageData)
+                return (vision.result, vision.rawText, .cloud)
+            } catch {
+                let placeholderFood = RecognitionResult(
                     types: ["food"], confidence: 0,
                     bill: nil, bills: nil,
                     food: FoodPayload(name: "包装食品", calories: 0,
                                       protein: nil, carbs: nil, fat: nil,
                                       portion: "100克", meal: nil,
                                       action: "create", targetTitle: nil),
-                    todo: nil, health: nil
-                )
-                fallbackLocal = emptyFood
-            } else if !isMultiList {
-                // 单账单本地规则只作降级备选：不再提前返回，全部走视觉模型保精度。
-                // (2026-07-2X 用户明确：所有图片识别走云端视觉模型，本地不能拦下。)
-                // 注意：多账单列表不走这里——避免把整张列表当单条账单误解析。
-                if let local = localParseBill(text: cleanText, in: context, candidates: ocr?.candidates ?? []) {
-                    fallbackLocal = local   // 仅在视觉模型彻底失败时降级返回
-                }
+                    todo: nil, health: nil)
+                return (placeholderFood, cleanText, .local)
             }
-            // 3) 视觉模型（发图，最准）：本地规则没命中就直接传图给模型。
+        }
+
+        // ③ 其它所有图片 → 统一视觉模型
+        // 例外：支付宝/微信「支付消息/服务消息/账单列表」等强列表页，本地拆条对商户/时间的
+        // 识别更稳定（视觉模型对列表常把商户/时间搞错），因此本地优先；本地拆不出 ≥2 笔再回退视觉。
+        let strongListSignals = ["支付消息", "服务消息", "支付记录", "账单列表", "我的账单"]
+        let isStrongList = strongListSignals.contains(where: { cleanText.localizedCaseInsensitiveContains($0) })
+        if isStrongList, !cleanText.isEmpty {
+            if let localMulti = localParseMultiBillsIfNeeded(text: cleanText, in: context),
+               let bills = localMulti.bills, bills.count >= 2 {
+                print("[识别] 强列表信号命中，本地多账单拆条优先，source=local")
+                return (localMulti, cleanText, .local)
+            }
+        }
+
+        do {
             let vision = try await recognizeResilient(imageData: imageData)
             print("[识别] 视觉模型命中，source=cloud")
+
+            // ③-1 视觉模型返回 none / 空账单，但本地 OCR 明显能拆出账单时，用本地结果补救。
+            // 典型情况：支付消息列表、账单详情等截图因构图/质量被模型误判为 none。
+            let types = vision.result.types ?? []
+            let hasBill = vision.result.billList.contains { $0.amount != nil }
+            if (types.contains("none") || types.isEmpty || !hasBill), !cleanText.isEmpty {
+                if let localMulti = localParseMultiBillsIfNeeded(text: cleanText, in: context) {
+                    print("[识别] 视觉模型返回 none，本地多账单拆条补救命中，source=local")
+                    return (localMulti, cleanText, .local)
+                }
+                if let local = localParseBill(text: cleanText, in: context, candidates: ocr?.candidates ?? []) {
+                    print("[识别] 视觉模型返回 none，本地单账单规则补救命中，source=local")
+                    return (local, cleanText, .local)
+                }
+            }
             return (vision.result, vision.rawText, .cloud)
-
-        } else if tier == .free {
-            // 完全无 OCR 文本：免费用户禁止视觉兜底，直接降级本地-only。
-            return degrade(fallback: nil, raw: "")
+        } catch {
+            // ④ 视觉失败 → 本地规则尽力兜底（有 OCR 文本时）
+            print("[识别] 视觉模型失败，尝试本地兜底：\(error)")
+            if !cleanText.isEmpty {
+                if let localMulti = localParseMultiBillsIfNeeded(text: cleanText, in: context) {
+                    print("[识别] 视觉失败，本地多账单拆条兜底命中，source=local")
+                    return (localMulti, cleanText, .local)
+                }
+                if let local = localParseBill(text: cleanText, in: context, candidates: ocr?.candidates ?? []) {
+                    print("[识别] 视觉失败，本地单账单规则兜底命中，source=local")
+                    return (local, cleanText, .local)
+                }
+            }
+            // 本地也兜不住：抛错让上层提示「识别失败，请重试」，绝不返回 0.00 空账单。
+            throw error
         }
-
-        // 有图但未进上方分支（极少条件分支兜底）：同上视觉模型。
-        let vision = try await recognizeResilient(imageData: imageData)
-        return (vision.result, vision.rawText, .cloud)
-    }
-
-    /// 本地结果是否「高置信」可本地胜出（按档位）。
-    private static func localWins(_ r: RecognitionResult, rawText: String,
-                                  tier: UserTier, context: ModelContext) -> Bool {
-        guard let first = r.billList.first,
-              let amount = first.amount, amount > 0 else { return false }
-        if tier == .paid {
-            return true   // 付费宽松：金额存在即赢（错了还有视觉兜底救）
-        }
-        // 超市/便利店收银小票是强结构化场景：店名+交易时间+应收/实收，免费用户也直接本地胜出。
-        if isSupermarketReceipt(rawText) { return true }
-        // 免费严格：商户必须是已知库（MerchantMeta 精确命中）才算高置信。
-        if let merchant = first.merchant, !merchant.isEmpty {
-            return MerchantMetaStore.lookup(merchant, in: context) != nil
-        }
-        return false
-    }
-
-    /// 免费用户超额/无视觉兜底时的降级返回：优先本地宽松结果，否则空账单让用户手动录入。
-    private static func degrade(fallback: RecognitionResult?, raw: String) -> (result: RecognitionResult, rawText: String, source: RecognitionSource) {
-        if let f = fallback {
-            print("[识别] 免费降级：返回本地宽松结果（用户可手动纠正），source=local")
-            return (f, raw, .local)
-        }
-        let empty = RecognitionResult(
-            types: ["bill"], confidence: 0, bill: nil,
-            bills: [BillPayload(merchant: nil, amount: nil, currency: nil, category: nil,
-                                time: nil, note: nil, action: "create", targetTitle: nil)],
-            food: nil, todo: nil, health: nil)
-        print("[识别] 免费降级：返回空账单（手动录入），source=local")
-        return (empty, raw, .local)
     }
 
     // MARK: 本地规则解析辅助
@@ -1251,21 +1309,26 @@ struct RecognizeService {
     /// extractISODateTime 严格匹配「支付时间/付款时间/交易时间/创建时间」标签。
     private static func isLikelyTime(_ s: String) -> Bool {
         let t = s.trimmingCharacters(in: .whitespaces)
+        // OCR 常把冒号读成点号（如 19.09），统一按冒号判断；末尾可能带 | 等噪声
+        let tn = t.replacingOccurrences(of: ".", with: ":")
+                  .trimmingCharacters(in: .whitespaces.union(.init(charactersIn: "|〉＞>）)")))
         // 纯时分秒（如 19:11、09:00:30）
-        let timeOnly = t.range(of: #"^\d{1,2}:\d{2}(:\d{2})?$"#, options: .regularExpression) != nil
+        let timeOnly = tn.range(of: #"^\d{1,2}:\d{2}(:\d{2})?$"#, options: .regularExpression) != nil
         // 日期串（含分隔符的 YYYY-MM-DD 或 YYYY-MM-DD HH:MM[:SS]）
         let dateLike = t.range(of: #"^\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}"#, options: .regularExpression) != nil
-        // 今天/昨天 + 时刻（如 今天 19:09、昨天10:40）
-        let relTime = t.range(of: #"^(?:今天|昨天)\s*\d{1,2}:\d{2}(?::\d{2})?$"#, options: .regularExpression) != nil
+        // 今天/昨天 + 时刻（如 今天 19:09、昨天10:40、昨天 19.09）
+        let relTime = tn.range(of: #"^(?:今天|昨天)\s*\d{1,2}:\d{2}(?::\d{2})?$"#, options: .regularExpression) != nil
+        // 今天/昨天 + 无冒号4位/3位时刻（如 昨天1714、昨天909）——支付宝列表常见简写
+        let relShortTime = t.range(of: #"^(?:今天|昨天)\s*\d{3,4}$"#, options: .regularExpression) != nil
         // 星期X + 时刻（如 星期四 18:26、星期四18:37）
-        let weekdayTime = t.range(of: #"^星期[一二三四五六日天]\s*\d{1,2}:\d{2}(?::\d{2})?$"#, options: .regularExpression) != nil
+        let weekdayTime = tn.range(of: #"^星期[一二三四五六日天]\s*\d{1,2}:\d{2}(?::\d{2})?$"#, options: .regularExpression) != nil
         // M月D日 + 时刻（如 7月21日 15:39、7月21日15:39、7月21日 15:39:07）
-        let mdTime = t.range(of: #"^\d{1,2}月\d{1,2}日\s*\d{1,2}:\d{2}(?::\d{2})?$"#, options: .regularExpression) != nil
+        let mdTime = tn.range(of: #"^\d{1,2}月\d{1,2}日\s*\d{1,2}:\d{2}(?::\d{2})?$"#, options: .regularExpression) != nil
         // 纯 M月D日（如 7月21日、07-21）——列表项简写
         let mdOnly = t.range(of: #"^\d{1,2}月\d{1,2}日$"#, options: .regularExpression) != nil
         // MM-DD HH:MM / MM-DD（如 07-21 15:39、07-21）——列表项短格式
         let shortDateTime = t.range(of: #"^\d{1,2}[-/.]\d{1,2}(\s+\d{1,2}:\d{2}(?::\d{2})?)?$"#, options: .regularExpression) != nil
-        return timeOnly || dateLike || relTime || weekdayTime || mdTime || mdOnly || shortDateTime
+        return timeOnly || dateLike || relTime || relShortTime || weekdayTime || mdTime || mdOnly || shortDateTime
     }
 
     /// 判断字符串是否为重量/规格/单位，商户名绝不应是「400g」「0g」「件数」等。
@@ -1284,18 +1347,17 @@ struct RecognizeService {
         // 含冒号不是金额
         if line.contains(":") || line.contains("：") { return false }
         let hasCurrency = line.range(of: #"[¥￥]\s*\d"#, options: .regularExpression) != nil
-        let hasBare = line.range(of: #"^\s*[+-]?\s*\d+(?:\.\d{1,2})?\s*$"#, options: .regularExpression) != nil
+        // 裸金额：限制整数部分最多 7 位，避免把订单号/业务交易号/流水号（通常 ≥10 位）误判为金额行。
+        let hasBare = line.range(of: #"^\s*[+-]?\s*\d{1,7}(?:\.\d{1,2})?\s*$"#, options: .regularExpression) != nil
         return hasCurrency || hasBare
     }
 
     /// 汇总金额行：顶部统计、本月已省、支出/收入合计等，不应被识别为单条账单。
     private static func isSummaryAmountLine(_ line: String) -> Bool {
         let lowered = line.lowercased()
-        if lowered.contains("本月已省") { return true }
-        if lowered.contains("收支统计") { return true }
-        if lowered.contains("本月支出") { return true }
-        if lowered.contains("本月收入") { return true }
-        if lowered.contains("本月总额") { return true }
+        let summaryKeywords = ["本月已省", "收支统计", "本月支出", "本月收入", "本月总额",
+                               "支出合计", "收入合计", "总支出", "总收入", "累计支出", "累计收入"]
+        if summaryKeywords.contains(where: { lowered.contains($0) }) { return true }
         // 同时出现 支出+金额 和 收入+金额 的汇总行
         let hasExpense = line.range(of: #"支出.*\d+(?:\.\d{1,2})?"#, options: .regularExpression) != nil
         let hasIncome = line.range(of: #"收入.*\d+(?:\.\d{1,2})?"#, options: .regularExpression) != nil
@@ -1305,6 +1367,11 @@ struct RecognizeService {
             // 明确是汇总统计：含「较上月」「同比」「今年」「近30天」等统计语境
             let statSignals = ["较上月", "同比", "今年", "近30天", "近7天", "比上月", "统计", "汇总"]
             if statSignals.contains(where: { lowered.contains($0) }) { return true }
+        }
+        // 微信账单顶部常见：「支出 391.35」「收入 254.50」等纯汇总数字（无交易商户）。
+        // 注意：必须含「支出/收入」关键字才判为汇总，避免误伤正常交易金额。
+        if lowered.contains("支出") || lowered.contains("收入") {
+            if line.range(of: #"\d+(?:\.\d{1,2})?"#, options: .regularExpression) != nil { return true }
         }
         return false
     }
@@ -1680,10 +1747,16 @@ struct RecognizeService {
     /// 解析列表项时间格式：支付列表/服务消息卡片中显示的相对或短日期时间。
     /// 用户明确声明「列表项时间就是支付时间」，因此在多账单路径中，定位到的 timeLine
     /// 应作为支付时间使用。
-    /// 支持格式：7月21日15:39、7月21日 15:39、昨天19:09、昨天 19:09、7月21日、今天02:08。
+    /// 支持格式：7月21日15:39、7月21日 15:39、昨天19:09、昨天 19:09、昨天1714、7月21日、今天02:08、纯 HH:MM。
+    /// - Parameter defaultYesterday: 纯 HH:MM 无日期线索时，是否默认昨天（支付消息列表多为历史记录）。
     /// - Returns: ISO8601 格式字符串，失败返回 nil。
-    private static func parseListItemTime(_ timeLine: String?, referenceDate: Date? = nil) -> String? {
-        guard let text = timeLine, !text.isEmpty else { return nil }
+    private static func parseListItemTime(_ timeLine: String?, referenceDate: Date? = nil, defaultYesterday: Bool = false) -> String? {
+        guard let raw = timeLine, !raw.isEmpty else { return nil }
+        // OCR 常把冒号读成点号，末尾可能粘附带状线/箭头（如 19.09|），先归一化
+        let text = raw
+            .replacingOccurrences(of: ".", with: ":")
+            .trimmingCharacters(in: .whitespaces.union(.init(charactersIn: "|〉＞>）)")))
+        guard !text.isEmpty else { return nil }
         let ref = referenceDate ?? Date()
         let cal = Calendar.current
         let shanghai = TimeZone(identifier: "Asia/Shanghai")!
@@ -1735,7 +1808,71 @@ struct RecognizeService {
             return iso(year: y, month: mo, day: d, h: h, min: mi, s: s)
         }
 
+        // 2.5) 今天/昨天 + 无冒号3~4位时刻（如 昨天1714、昨天909）
+        let relShortTime = #"(今天|昨天)\s*(\d{3,4})"#
+        if let re = try? NSRegularExpression(pattern: relShortTime),
+           let m = re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) {
+            let raw = ns.substring(with: m.range(at: 2))
+            let isYesterday = ns.substring(with: m.range(at: 1)) == "昨天"
+            // 3位：HMM；4位：HHMM
+            guard raw.count == 3 || raw.count == 4,
+                  let n = Int(raw) else { return nil }
+            let h: Int
+            let mi: Int
+            if raw.count == 4 {
+                h = n / 100
+                mi = n % 100
+            } else {
+                h = n / 100
+                mi = n % 100
+            }
+            guard (0...23).contains(h), (0...59).contains(mi) else { return nil }
+            let base = isYesterday
+                ? (cal.date(byAdding: .day, value: -1, to: ref) ?? ref)
+                : ref
+            let y = cal.component(.year, from: base)
+            let mo = cal.component(.month, from: base)
+            let d = cal.component(.day, from: base)
+            return iso(year: y, month: mo, day: d, h: h, min: mi, s: 0)
+        }
+
+        // 3) 纯 HH:MM（无日期线索）：支付消息列表多为昨天记录，可按 defaultYesterday 回退。
+        let timeOnly = #"^(\d{1,2}):(\d{2})(?::(\d{2}))?$"#
+        if let re = try? NSRegularExpression(pattern: timeOnly),
+           let m = re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) {
+            let h = Int(ns.substring(with: m.range(at: 1))) ?? 0
+            let mi = Int(ns.substring(with: m.range(at: 2))) ?? 0
+            let s = m.numberOfRanges > 2 && m.range(at: 3).location != NSNotFound
+                ? Int(ns.substring(with: m.range(at: 3))) ?? 0 : 0
+            let base = defaultYesterday
+                ? (cal.date(byAdding: .day, value: -1, to: ref) ?? ref)
+                : ref
+            let y = cal.component(.year, from: base)
+            let mo = cal.component(.month, from: base)
+            let d = cal.component(.day, from: base)
+            return iso(year: y, month: mo, day: d, h: h, min: mi, s: s)
+        }
+
         return nil
+    }
+
+    /// 返回 referenceDate 前一天 00:00:00 的 ISO8601 字符串。
+    /// 用于列表项时间完全缺失、但用户已声明「列表项时间就是支付时间」且截图含「昨天」时的兜底。
+    private static func yesterdayStart(referenceDate: Date? = nil) -> String {
+        let ref = referenceDate ?? Date()
+        let cal = Calendar.current
+        let shanghai = TimeZone(identifier: "Asia/Shanghai")!
+        guard let yesterday = cal.date(byAdding: .day, value: -1, to: ref) else {
+            return ISO8601DateFormatter().string(from: ref)
+        }
+        var comps = cal.dateComponents(in: shanghai, from: yesterday)
+        comps.hour = 0; comps.minute = 0; comps.second = 0
+        guard let d = cal.date(from: comps) else {
+            return ISO8601DateFormatter().string(from: ref)
+        }
+        let f = ISO8601DateFormatter(); f.timeZone = shanghai
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f.string(from: d)
     }
 
     /// 按给定的正则模式数组逐一尝试提取日期时间，第一个成功即返回。

@@ -19,7 +19,8 @@ final class CloudSyncManager: ObservableObject {
     // MARK: - 同步账号（多设备共享同值 = 同一份数据）
     /// 已登录时绑定到登录账号（aia.userId），实现「同账号登录 = 同一份云数据」；
     /// 未登录时回退到设备级随机账号（aia_sync_user_id），仅本机使用。
-    static var userId: String {
+    /// 标记为 nonisolated：它只访问 UserDefaults（线程安全），且被非 MainActor 的调用方（如 AgentChatRequest 默认参数）使用。
+    nonisolated static var userId: String {
         get {
             if UserDefaults.standard.bool(forKey: "aia.isLoggedIn"),
                let authId = UserDefaults.standard.string(forKey: "aia.userId"), !authId.isEmpty {
