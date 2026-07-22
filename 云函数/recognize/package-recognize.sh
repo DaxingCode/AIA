@@ -7,7 +7,7 @@ set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # 命名直接跟随 index.js 里的 FN_VERSION（如 '20260720d' 或 '20260722e-sensenova'），保证 zip 名与代码版本一致，不覆盖、不错位。
-FN=$(grep -oE "FN_VERSION = '[0-9]{8}[a-z]+(-[a-z0-9]+)*'" "$DIR/index.js" | grep -oE "[0-9]{8}[a-z]+(-[a-z0-9]+)*" | head -1)
+FN=$(grep -oE "FN_VERSION = '[0-9]{8}[a-z]+(-[a-z]+)?'" "$DIR/index.js" | grep -oE "[0-9]{8}[a-z]+(-[a-z]+)?" | head -1)
 if [ -z "$FN" ]; then
   echo "错误：无法从 index.js 读取 FN_VERSION，请检查 const FN_VERSION = 'YYYYMMDDx';"
   exit 1
