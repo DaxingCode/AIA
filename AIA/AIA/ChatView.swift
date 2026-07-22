@@ -550,9 +550,75 @@ struct ChatView: View {
         }
     }
 
+    /// 检测常见闲聊/元意图（问候、身份、能力、状态、感谢、再见等），返回更贴合语境的本地回复。
+    /// 返回 nil 表示不是已知元意图，继续走后续领域识别。
+    private func replyForMetaIntent(_ text: String) -> String? {
+        let lower = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !lower.isEmpty else { return nil }
+
+        // 身份
+        let identityKw = ["你是谁", "你叫什么", "你是阿宝", "介绍一下你自己", "你的名字", "你是什么"]
+        if identityKw.contains(where: { lower.contains($0) }) {
+            return "我是阿宝，你的私人专属 AI 助理～可以帮你记饮食、账单、待办，也能看看今天的健康数据。今天想记点什么？"
+        }
+
+        // 能力
+        let capabilityKw = ["你能做什么", "你能帮我", "你会什么", "你会做", "你有什么用", "可以做什么", "能做什么", "功能", "怎么用"]
+        if capabilityKw.contains(where: { lower.contains($0) }) {
+            return "我会帮你打理日常四件事：\n· 记饮食：说一句「早餐吃了碗燕麦粥」就能估算热量；\n· 记账单：拍小票或者说「买咖啡花了28」；\n· 加待办：「晚上8点提醒我开会」；\n· 看健康：步数、体重趋势都能查。\n直接说就行，我帮你归类好。"
+        }
+
+        // 状态 / 在干嘛
+        let statusKw = ["你在干嘛", "在干嘛", "你在做什么", "你在忙什么", "在忙啥", "干啥呢", "在吗"]
+        if statusKw.contains(where: { lower.contains($0) }) {
+            return "正在等你吩咐呀～是想记饮食、账单，还是查今天吃了多少、花了多少？"
+        }
+
+        // 感谢
+        let thanksKw = ["谢谢", "感谢", "多谢", "辛苦了", "谢啦"]
+        if thanksKw.contains(where: { lower.contains($0) }) {
+            return "不客气呀，能帮上忙就好～有需要随时叫我。"
+        }
+
+        // 再见
+        let byeKw = ["再见", "拜拜", "bye", "goodbye", "回头见", "下次见"]
+        if byeKw.contains(where: { lower.contains($0) }) {
+            return "再见啦，有需要随时叫我哦～"
+        }
+
+        // 肯定 / 简单回应（只处理短句，避免误杀带后续内容的句子）
+        let ackKw = ["好的", "嗯嗯", "嗯", "ok", "知道了", "明白", "收到"]
+        if ackKw.contains(where: { lower == $0 || (lower.hasPrefix($0) && lower.count <= 6) }) {
+            return "收到～随时叫我。"
+        }
+
+        // 问候（放在较后，避免误覆盖上面的特定意图；只处理短句减少误伤）
+        let greetingKw = ["你好", "您好", "嗨", "哈喽", "hello", "hi"]
+        if (greetingKw.contains(where: { lower.contains($0) }) || lower == "在吗"), lower.count <= 12 {
+            let cal = Calendar.current
+            let hour = cal.component(.hour, from: Date())
+            let opening: String
+            switch hour {
+            case 5..<11:  opening = "早上好呀"
+            case 11..<14: opening = "中午好"
+            case 14..<18: opening = "下午好"
+            case 18..<23: opening = "晚上好"
+            default:      opening = "这么晚还没休息呀"
+            }
+            return "\(opening)，我是阿宝～今天想记录点什么，还是随便聊聊？"
+        }
+
+        return nil
+    }
+
     /// 云端聊天不可用时的本地兜底回复：基于用户的本地数据组织成自然语句。
     /// 覆盖饮食/账单/待办/健康几类常见问题，其余给友好兜底并提示能做什么。
     private func localReply(for text: String) -> String {
+        // 先处理常见闲聊/元意图，避免把「你是谁」「在干嘛」当成未识别意图给通用兜底。
+        if let metaReply = replyForMetaIntent(text) {
+            return metaReply
+        }
+
         let lower = text.lowercased()
         let cal = Calendar.current
         let now = Date()
@@ -631,8 +697,8 @@ struct ChatView: View {
             return "我暂时还没读到你的健康数据（可能还没授权健康权限）。不过你今天感觉怎么样？"
         }
 
-        // 兜底：没识别到具体意图，给友好引导
-        return "这个我可能还没完全接住～不过我可以帮你记饮食、账单、待办，也能告诉你今天吃了多少、花了多少、还有啥没做。你直接说「记一下……」或者「我今天吃了什么」，我都能帮上忙。"
+        // 兜底：没识别到具体意图，给友好引导（不再道歉式兜底，直接给能力示例）
+        return "我目前最擅长帮你记饮食、账单、待办和看健康数据，比如：\n· 「早餐吃了碗燕麦粥」\n· 「记一笔星巴克35」\n· 「晚上8点提醒我开会」\n直接说就行，我帮你归类好。"
     }
 
     /// 本地兜底创建待办：当云端返回 types:none 但用户明显在新建待办时，直接解析标题和日期并创建。
@@ -672,6 +738,32 @@ struct ChatView: View {
                       "红酒", "早饭", "午饭", "晚饭", "早餐", "午餐", "晚餐", "夜宵", "加餐", "零食",
                       "宵夜", "吃不饱", "吃太撑", "吃撑"]
         return foodKw.contains(where: { lower.contains($0) })
+    }
+
+    /// 二次食物意图判断：在「账单分支已命中」的前提下，判断文本是否仍含食物意图。
+    /// 与 isFoodLike() 的区别是**不检查账单抑制词**（「花了/付了」等），仅检测食物关键词。
+    /// 用于「账单已记、是否还要补一条饮食记录」的二次判定，避免「晚餐吃了汉堡花了10元」漏记饮食。
+    private func hasRawFoodIntent(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        let foodKw = ["吃", "喝", "奶茶", "咖啡", "可乐", "果汁", "饮料", "饭", "面", "粉", "餐", "菜",
+                      "肉", "鱼", "鸡", "鸭", "牛", "羊", "猪", "蛋", "奶", "汤", "粥", "面包", "蛋糕",
+                      "饼干", "点心", "水果", "沙拉", "汉堡", "披萨", "炸鸡", "薯条", "寿司", "拉面",
+                      "火锅", "烧烤", "饺子", "包子", "馒头", "豆浆", "酸奶", "茶", "酒", "啤酒", "白酒",
+                      "红酒", "早饭", "午饭", "晚饭", "早餐", "午餐", "晚餐", "夜宵", "加餐", "零食",
+                      "宵夜", "吃不饱", "吃太撑", "吃撑"]
+        return foodKw.contains(where: { lower.contains($0) })
+    }
+
+    /// 去掉回复文本开头的确认开场白（chatConfirmOpeners 中随机选中的那个 + "："），
+    /// 用于把「账单确认」与「饮食确认」合并成「单开场白 + 多行内容」的自然格式。
+    private func stripOpener(_ text: String) -> String {
+        for op in chatConfirmOpeners {
+            let prefix = op + "："
+            if text.hasPrefix(prefix) {
+                return String(text.dropFirst(prefix.count))
+            }
+        }
+        return text
     }
 
     /// 本地记账（DB 优先、AI 兜底）：解析「记一笔星巴克35」「付了美团28」这类明确账单意图，
@@ -896,6 +988,16 @@ struct ChatView: View {
                      // 副词/语气
                      "还", "又", "也", "刚", "就", "只", "都", "再", "正好", "大概", "差不多"]
         for n in noise { t = t.replacingOccurrences(of: n, with: "") }
+
+        // 去掉账单关键词与金额，避免「晚餐吃了汉堡花了10元」把「花了10元」混入食物名
+        let billNoise = ["花了", "花掉", "付了", "付给", "消费", "支出", "账单", "花销", "开销", "扫码付",
+                         "记一笔", "记账", "买了"]
+        for b in billNoise { t = t.replacingOccurrences(of: b, with: "") }
+        // 去掉残留的数字金额与货币单位
+        t = t.replacingOccurrences(of: #"\d+(\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?"#,
+                                   with: "", options: .regularExpression)
+        // 去掉残留标点与空白，得到干净食物名
+        t = t.replacingOccurrences(of: #"[，。、,.\s]+"#, with: "", options: .regularExpression)
 
         let name = t.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return nil }
@@ -1226,7 +1328,17 @@ struct ChatView: View {
                     }
                     // 2. 本地能解析的明确账单意图（如「记一笔星巴克35」「付了美团28」）直接本地建，复用 MerchantMeta 分类，跳过 AI。
                     else if let localBill = createBillLocally(from: t) {
-                        responseText = localBill
+                        // 账单已创建；若该文本同时含食物意图（如「晚餐吃了汉堡花了10元」），
+                        // 并行补建一条饮食记录：本地营养库命中则直接建，未命中则仅记账单并提示联网查营养。
+                        if hasRawFoodIntent(t) {
+                            if let localFood = createFoodLocally(from: t) {
+                                responseText = localBill + "\n" + stripOpener(localFood)
+                            } else {
+                                responseText = localBill + "\n🍽 饮食部分需要联网查一下营养信息，支出先帮你记好啦～"
+                            }
+                        } else {
+                            responseText = localBill
+                        }
                     }
                     // 3. 食物意图：含「吃/喝/奶茶/咖啡/饭」等词，先尝试本地营养库估算，
                     //    命中则直接创建记录；未命中再走云端专项查询/通用识别，避免模型被上下文误导成账单或闲聊。
@@ -1279,7 +1391,7 @@ struct ChatView: View {
     private func isQuestionLike(_ text: String) -> Bool {
         let t = text.trimmingCharacters(in: .whitespaces)
         let questionMarks = ["?", "？"]
-        let questionWords = ["几点", "多少", "吗", "呢", "怎么", "为什么", "什么", "如何", "好不", "行不", "能不能", "会吗", "好吗", "对吗", "谁", "哪位", "哪里", "哪", "请问", "几"]
+        let questionWords = ["几点", "多少", "吗", "嘛", "呢", "怎么", "为什么", "什么", "如何", "好不", "行不", "能不能", "会吗", "好吗", "对吗", "谁", "哪位", "哪里", "哪", "请问", "几"]
         if questionMarks.contains(where: { t.hasSuffix($0) }) { return true }
         if questionWords.contains(where: { t.contains($0) }) { return true }
         return false
