@@ -7,6 +7,10 @@ import SwiftData
 import MessageUI
 import UniformTypeIdentifiers
 
+/// 本地确认消息的统一开场白池；生成确认消息时随机取一个，避免每条都"记好啦"开头。
+/// 同时被下方"过滤 AI 确认消息不进上下文"的逻辑复用，务必与那个过滤集合保持一致。
+private let chatConfirmOpeners = ["记好啦", "收到～", "好嘞", "搞定", "记下啦", "OK，记上了"]
+
 struct ChatView: View {
     @Query private var foods: [FoodEntry]
     @Query private var bills: [Bill]
@@ -17,6 +21,9 @@ struct ChatView: View {
     @Environment(\.modelContext) private var context
 
     @State private var input = ""
+
+    // 智能问答 Agent 总开关（与「云同步」同组，在设置页控制）。默认关，零污染。
+    @AppStorage("aia.agentEnabled") private var agentEnabled: Bool = false
     @FocusState private var isInputFocused: Bool
     @State private var isParsing = false
     @State private var hasAutoFocused = false
@@ -447,12 +454,13 @@ struct ChatView: View {
             sentences.append("早餐的「\(todayBF.name)」我已经帮你记好啦，开启元气满满的一天。")
         }
 
-        // 习惯 2：今日待办
-        let todayTodos = reminders.filter { r in
-            if let due = r.due { return cal.isDateInToday(due) && !r.done } else { return false }
+        // 习惯 2：今日待办（只引用「今天到期且未完成且还没过期」的待办，避免拿过期待办当示例）
+        let upcomingToday = reminders.filter { r in
+            guard let due = r.due else { return false }
+            return cal.isDateInToday(due) && !r.done && due >= now
         }
-        if let first = todayTodos.first {
-            sentences.append("对了，你今天还有 \(todayTodos.count) 件事没做，像「\(first.title)」这种，需要我到点提醒你吗？")
+        if let next = upcomingToday.min(by: { $0.due! < $1.due! }) {
+            sentences.append("对了，你今天还有 \(upcomingToday.count) 件事没做，像「\(next.title)」这种，需要我到点提醒你吗？")
         }
 
         // 习惯 3：健康步数（仅在已授权读到时展示）
@@ -645,7 +653,8 @@ struct ChatView: View {
         context.insert(r)
         ReminderNotificationManager.schedule(r)
         try? context.save()
-        return "记好啦：已添加待办「\(title)」，我会在 \(formatShortDateTime(due)) 提醒你。"
+        let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
+        return "\(opener)：⏰ 已添加待办「\(title)」，我会在 \(formatShortDateTime(due)) 提醒你。"
     }
 
     /// 判断文本是否为明显饮食意图。包含「吃/喝/奶茶/咖啡/饭/面/餐/早餐/午餐/晚餐」等饮食词，
@@ -676,21 +685,32 @@ struct ChatView: View {
         guard billKw.contains(where: { lower.contains($0) }) else { return nil }
         guard let amount = extractAmount(text) else { return nil }
 
-        // 商户名：去掉金额数字及单位、去掉记账关键词、去掉语气助词后剩下的文本
+        // 商户名：去掉金额数字及单位、去掉记账关键词、去掉时间/饮食动词与语气助词后剩下的文本
         var merchant = text
         merchant = merchant.replacingOccurrences(of: #"\d+(\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?"#,
                                                  with: "", options: .regularExpression)
         for kw in billKw { merchant = merchant.replacingOccurrences(of: kw, with: "") }
+        // 多字词（时间/饮食动词）用分组 Alternation；务必放在单字语气助词之前或与之并列
+        merchant = merchant.replacingOccurrences(of: #"(今晚|今天|明天|早上|上午|中午|下午|晚上|刚才|吃了|喝了|喝|吃|买)"#,
+                                                 with: "", options: .regularExpression)
+        // 单字语气助词
         merchant = merchant.replacingOccurrences(of: #"[的了在给和去个吧啊呢哦嘛]"#,
                                                  with: "", options: .regularExpression)
         merchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
-        if merchant.isEmpty { merchant = "其他消费" }
+        // 清洗后若仍为纯餐次/时间词（非真实商户），回退到"其他消费"
+        let nonMerchantWords: Set<String> = ["晚餐", "早餐", "午饭", "午餐", "夜宵", "加餐", "零食", "宵夜", "饭", "餐"]
+        if merchant.isEmpty || nonMerchantWords.contains(merchant) { merchant = "其他消费" }
 
         // 收入关键词识别（工资/报销/退款等），本地记账场景云端常漏判为支出
         let incomeKeywords = ["工资","薪资","薪水","收入","报销","退款","返现","奖金","分红","利息","红包","补贴","收款","进账","提成","劳务费","兼职"]
         let isIncomeText = incomeKeywords.contains { lower.contains($0) || merchant.contains($0) }
         // DB 优先：本地经验库命中则直接用其分类，跳过 AI
-        let (cat, metaIncome) = MerchantMetaStore.lookup(merchant, in: context) ?? ("其他", false)
+        var (cat, metaIncome) = MerchantMetaStore.lookup(merchant, in: context) ?? ("其他", false)
+        // 经验库未命中时，再用关键词提示兜底：餐次词（晚餐/夜宵/午饭…）应归「餐饮」而非「其他」。
+        // 注意：merchant 清洗后可能是"其他消费"，但原始 text 仍含"晚餐"等餐次词，故同时传入 text 判断。
+        if cat == "其他", let hint = RecognizeService.mealCategoryHint(merchant + " " + text) {
+            cat = hint
+        }
         let isIncome = isIncomeText || metaIncome
         let category = (isIncome && cat == "其他") ? "收入" : cat
         let bill = Bill(merchant: merchant, amount: amount, category: category,
@@ -698,7 +718,9 @@ struct ChatView: View {
         context.insert(bill)
         try? context.save()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
-        return "记好啦：已添加\(isIncome ? "收入" : "支出")「\(merchant)」¥\(String(format: "%.2f", amount))"
+        let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
+        let icon = isIncome ? "💰" : "🧾"
+        return "\(opener)：\(icon) 已添加\(isIncome ? "收入" : "支出")「\(merchant)」¥\(String(format: "%.2f", amount))"
     }
 
     /// 本地创建饮食：食物类文本优先从本地营养库（硬编码 + 用户缓存）估算热量，
@@ -741,7 +763,9 @@ struct ChatView: View {
         context.insert(entry)
         HealthManager.shared.saveCaloriesConsumed(cal, date: .now)
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
-        return "🍽 记好啦：\(meal)「\(name)」\(Int(cal)) kcal（\(portion)）"
+        let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
+        let foodIcon = ["🍽", "🍜", "🍚", "🥗", "🍔", "🍱"].randomElement() ?? "🍽"
+        return "\(opener)：\(foodIcon) \(meal)「\(name)」\(Int(cal)) kcal（\(portion)）"
     }
 
     /// 云端兜底也失败时的「尽力记录」：本地营养库查不到、云端也识别不出时，
@@ -793,7 +817,9 @@ struct ChatView: View {
                 context.insert(entry)
                 HealthManager.shared.saveCaloriesConsumed(cal, date: .now)
                 CloudSyncManager.shared.syncAfterLocalChange(context: context)
-                return "🍽 记好啦：\(meal)「\(name)」\(Int(cal)) kcal（\(portion)）"
+                let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
+                let foodIcon = ["🍽", "🍜", "🍚", "🥗", "🍔", "🍱"].randomElement() ?? "🍽"
+                return "\(opener)：\(foodIcon) \(meal)「\(name)」\(Int(cal)) kcal（\(portion)）"
             }
         } catch {
             print("[queryFood] 失败：\(error)")
@@ -804,7 +830,8 @@ struct ChatView: View {
             let (result, _) = try await RecognizeService.parseText(text, recentMessages: recentMessages)
             let summary = saveFromResult(result, originalText: text, allowedTypes: ["food"])
             if !summary.isEmpty {
-                return "记好啦：\n" + summary.joined(separator: "\n")
+                let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
+                return "\(opener)：\n" + summary.joined(separator: "\n")
             }
         } catch {
             print("[parseText food] 失败：\(error)")
@@ -1142,11 +1169,11 @@ struct ChatView: View {
 
     /// 把最近几条聊天记录整理成云端可理解的上下文，用于识别"这个提醒""改成"等指代。
     /// 过滤掉：
-    /// - AI 的「记好啦：...」确认消息，避免模型把前一笔记录当成模板重复套用；
+    /// - AI 的确认消息（开场白取自 chatConfirmOpeners 池），避免模型把前一笔记录当成模板重复套用；
     /// - 用户的记录操作指令，避免模型把后续"好的好的"当成重复执行。
     private func buildRecentMessages(limit: Int) -> [[String: String]] {
         let recent = messages.suffix(limit).filter { msg in
-            if msg.role == .ai, msg.text.hasPrefix("记好啦") { return false }
+            if msg.role == .ai, chatConfirmOpeners.contains(where: { msg.text.hasPrefix($0) }) { return false }
             if msg.role == .user, ChatView.isRecordOperationMessage(msg.text) { return false }
             return true
         }
@@ -1178,6 +1205,8 @@ struct ChatView: View {
         isParsing = true
         let userMessage = pendingQueue.removeFirst()
         let t = userMessage.text
+        // 登录账户 userId（aia.userId）；未登录为空串 → 云端按"userId 缺失"回落普通 chat。
+        let agentUserId = UserDefaults.standard.string(forKey: "aia.userId") ?? ""
 
         Task { @MainActor in
             do {
@@ -1185,7 +1214,9 @@ struct ChatView: View {
                 let responseText: String
                 if isQuestionLike(t) {
                     let dataContext = buildContext()
-                    let reply = try await RecognizeService.chat(text: t, context: dataContext)
+                    let reply = agentEnabled
+                        ? try await RecognizeService.agentChat(text: t, context: dataContext, userId: agentUserId)
+                        : try await RecognizeService.chat(text: t, context: dataContext)
                     responseText = reply.isEmpty ? localReply(for: t) : reply
                 } else {
                     // 1. 待办意图优先：含「提醒/待办/记得/叫」等明确动词时直接本地建待办，
@@ -1214,14 +1245,19 @@ struct ChatView: View {
                             let summary = saveFromResult(result, originalText: t)
                             if summary.isEmpty {
                                 let dataContext = buildContext()
-                                let reply = try await RecognizeService.chat(text: t, context: dataContext)
+                                let reply = agentEnabled
+                        ? try await RecognizeService.agentChat(text: t, context: dataContext, userId: agentUserId)
+                        : try await RecognizeService.chat(text: t, context: dataContext)
                                 responseText = reply.isEmpty ? localReply(for: t) : reply
                             } else {
-                                responseText = "记好啦：\n" + summary.joined(separator: "\n")
+                                let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
+                                responseText = "\(opener)：\n" + summary.joined(separator: "\n")
                             }
                         } else {
                             let dataContext = buildContext()
-                            let reply = try await RecognizeService.chat(text: t, context: dataContext)
+                            let reply = agentEnabled
+                        ? try await RecognizeService.agentChat(text: t, context: dataContext, userId: agentUserId)
+                        : try await RecognizeService.chat(text: t, context: dataContext)
                             responseText = reply.isEmpty ? localReply(for: t) : reply
                         }
                     }
