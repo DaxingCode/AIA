@@ -50,6 +50,8 @@ struct ContentView: View {
 
     // 后台「无感截图识别」的结果：主 App 打开时先自动入库，再弹确认页（确认页只做覆盖修改）。
     @State private var pendingPresent: RecognitionPresent?
+    // 防止 checkScreenshotPending 被多个通知并发/重复触发时重复 present。
+    @State private var isCheckingScreenshotPending = false
 
     // 目标常量（与记录页保持一致）
     private var calorieGoal: Double { calorieGoalIsCustom ? calorieGoalOverride : tdee }
@@ -207,13 +209,16 @@ struct ContentView: View {
     /// 由用户决定编辑/保留/删除；未命中指纹则正常入库。两者都弹确认页供覆盖修改。
     @MainActor
     private func checkScreenshotPending() {
-        guard pendingPresent == nil else { return }
-        if let p = ScreenshotStore.loadPending() {
-            let img = ScreenshotStore.loadPendingImage()
-            let present = RecognitionSaver.preparePresent(result: p.result, rawText: p.rawText,
-                                                                image: img, context: context, source: p.source ?? .cloud)
-            pendingPresent = present
-        }
+        guard !isCheckingScreenshotPending, pendingPresent == nil else { return }
+        guard let p = ScreenshotStore.loadPending() else { return }
+        isCheckingScreenshotPending = true
+        let img = ScreenshotStore.loadPendingImage()
+        let present = RecognitionSaver.preparePresent(result: p.result, rawText: p.rawText,
+                                                            image: img, context: context,
+                                                            source: p.source ?? .cloud,
+                                                            pendingId: p.id)
+        pendingPresent = present
+        isCheckingScreenshotPending = false
     }
 
     // MARK: - 顶部标题 + 待处理角标
@@ -510,16 +515,6 @@ struct ContentView: View {
     ) -> some View {
         Button { router.path.append(route) } label: {
             VStack(alignment: .leading, spacing: 0) {
-                // 顶部类型色细色条：顶部两角与卡片圆角贴合，靠颜色秒认模块类型
-                UnevenRoundedRectangle(
-                    topLeadingRadius: AIATheme.rLG,
-                    bottomLeadingRadius: 0,
-                    bottomTrailingRadius: 0,
-                    topTrailingRadius: AIATheme.rLG
-                )
-                .fill(accent)
-                .frame(height: 4)
-
                 VStack(alignment: .leading, spacing: 6) {
                     // 标题 + 角标
                 HStack(spacing: 6) {
@@ -579,6 +574,12 @@ struct ContentView: View {
                 .padding(.bottom, 10)
             }
             .background(bg)
+            // 左侧类型色细边：与首页「今日事项预览」气泡左侧色条同款语言，比满宽顶条更轻、整页更统一
+            .overlay(alignment: .leading) {
+                RoundedRectangle(cornerRadius: AIATheme.rLG, style: .continuous)
+                    .fill(accent)
+                    .frame(width: 3)
+            }
             .clipShape(RoundedRectangle(cornerRadius: AIATheme.rLG))
             .contentShape(RoundedRectangle(cornerRadius: AIATheme.rLG))
             .frame(maxWidth: .infinity, minHeight: 165, maxHeight: 165)
