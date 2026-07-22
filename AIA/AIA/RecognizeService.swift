@@ -38,9 +38,14 @@ enum AIAModelProvider: String, CaseIterable, Identifiable {
         case .qianfan:   return "qianfanText"
         }
     }
-    /// 当前用户选择；缺省或非法值回落商汤 SenseNova（向后兼容）
-    static var current: AIAModelProvider {
+    /// 当前问答 / Agent 文本模型；缺省或非法值回落商汤 SenseNova（向后兼容）
+    static var textCurrent: AIAModelProvider {
         let raw = UserDefaults.standard.string(forKey: "aia.modelProvider") ?? "sensenova"
+        return AIAModelProvider(rawValue: raw) ?? .sensenova
+    }
+    /// 当前视觉识别模型；缺省或非法值回落商汤 SenseNova（向后兼容）
+    static var visionCurrent: AIAModelProvider {
+        let raw = UserDefaults.standard.string(forKey: "aia.visionModelProvider") ?? "sensenova"
         return AIAModelProvider(rawValue: raw) ?? .sensenova
     }
 }
@@ -120,7 +125,7 @@ struct RecognizeService {
 
         let body: [String: Any] = [
             "text": text,
-            "provider": AIAModelProvider.current.textProvider, // 显式走文本模型（日日新 SenseChat-Turbo）
+            "provider": AIAModelProvider.textCurrent.textProvider, // 显式走文本模型（日日新 SenseChat-Turbo）
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -154,7 +159,7 @@ struct RecognizeService {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 60
 
-        var body: [String: Any] = ["text": text, "provider": AIAModelProvider.current.textProvider]
+        var body: [String: Any] = ["text": text, "provider": AIAModelProvider.textCurrent.textProvider]
         if !recentMessages.isEmpty {
             body["recentMessages"] = recentMessages
         }
@@ -189,7 +194,7 @@ struct RecognizeService {
         let body: [String: Any] = [
             "mode": "queryFood",
             "foodName": name,
-            "provider": AIAModelProvider.current.textProvider
+            "provider": AIAModelProvider.textCurrent.textProvider
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -225,7 +230,7 @@ struct RecognizeService {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 60
 
-        let body: [String: Any] = ["imageBase64": base64, "provider": AIAModelProvider.current.visionProvider]
+        let body: [String: Any] = ["imageBase64": base64, "provider": AIAModelProvider.visionCurrent.visionProvider]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (respData, response) = try await URLSession.shared.data(for: req)
@@ -261,7 +266,7 @@ struct RecognizeService {
             "mode": "chat",
             "text": text,
             "context": context,
-            "provider": AIAModelProvider.current.textProvider
+            "provider": AIAModelProvider.textCurrent.textProvider
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -298,7 +303,7 @@ struct RecognizeService {
             "text": text,
             "context": context,
             "userId": userId,
-            "provider": AIAModelProvider.current.textProvider
+            "provider": AIAModelProvider.textCurrent.textProvider
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 

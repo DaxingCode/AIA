@@ -18,6 +18,8 @@ struct SettingsView: View {
     @AppStorage("aia.agentEnabled") private var agentEnabled = false
     // 模型供应商选择（云端 PROVIDERS 已配齐四家视觉+文本，前端只传 provider 标识）。默认商汤 SenseNova。
     @AppStorage("aia.modelProvider") private var modelProvider = "sensenova"
+    // 视觉识别模型单独选择（截图理解），默认商汤 SenseNova，与文本模型解耦。
+    @AppStorage("aia.visionModelProvider") private var visionModelProvider = "sensenova"
     @State private var showCopied = false
     @State private var toastText = "已复制同步账号"
     @State private var showShortcutGuide = false
@@ -233,29 +235,48 @@ struct SettingsView: View {
         .card()
     }
 
-    // MARK: - 模型供应商选择（四选一，零污染云端）
+    // MARK: - 模型供应商选择（文本 / 视觉独立切换，零污染云端）
     private var modelProviderCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "cpu")
                     .font(AIATheme.Font.callout.weight(.medium))
                     .foregroundStyle(AIATheme.blue)
-                Text("对话 / 识别模型")
+                Text("AI 模型")
                     .font(AIATheme.Font.subhead.weight(.medium))
                     .foregroundStyle(.primary)
                 Spacer()
             }
-            Text("切换 AI 问答与截图识别使用的模型（默认商汤 SenseNova）。需在云端对应环境变量已配置该供应商 Key。")
+            Text("问答与截图识别可分别选择模型（默认均为商汤 SenseNova）。需在云端对应环境变量已配置该供应商 Key。")
                 .font(AIATheme.Font.micro)
                 .foregroundStyle(AIATheme.muted)
                 .lineSpacing(2)
-            Picker("模型", selection: $modelProvider) {
-                ForEach(AIAModelProvider.allCases) { p in
-                    Text(p.displayName).tag(p.rawValue)
+            // 文本模型（问答 / Agent）
+            VStack(alignment: .leading, spacing: 4) {
+                Text("问答 / Agent 模型")
+                    .font(AIATheme.Font.micro.weight(.medium))
+                    .foregroundStyle(AIATheme.muted)
+                Picker("问答模型", selection: $modelProvider) {
+                    ForEach(AIAModelProvider.allCases) { p in
+                        Text(p.displayName).tag(p.rawValue)
+                    }
                 }
+                .pickerStyle(.menu)
+                .tint(AIATheme.blue)
             }
-            .pickerStyle(.menu)
-            .tint(AIATheme.blue)
+            // 视觉模型（截图识别）
+            VStack(alignment: .leading, spacing: 4) {
+                Text("截图识别模型")
+                    .font(AIATheme.Font.micro.weight(.medium))
+                    .foregroundStyle(AIATheme.muted)
+                Picker("识别模型", selection: $visionModelProvider) {
+                    ForEach(AIAModelProvider.allCases) { p in
+                        Text(p.displayName).tag(p.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(AIATheme.blue)
+            }
         }
         .padding(14)
         .card()
