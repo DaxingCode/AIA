@@ -584,7 +584,9 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, minHeight: 165, maxHeight: 165)
             .clipped()
         }
-        .buttonStyle(.plain)
+        // 按压反馈：整张宫格在按下时轻微缩放下沉 + 阴影抬升，松手 spring 回弹。
+        // 用 ButtonStyle 实现，与 Button 点击共存，不吞点击，且自动遵守「减弱动态效果」。
+        .buttonStyle(PressableCardStyle())
         .overlay(alignment: .center) {
             if isEmpty {
                 HStack(spacing: 4) {

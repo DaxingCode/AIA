@@ -16,6 +16,7 @@ private let wFmt: DateFormatter = {
 struct WeightTrendView: View {
     @Query(sort: \HealthMetric.date, order: .reverse) private var healths: [HealthMetric]
     @State private var toast: String?
+    @State private var chartAppear = false   // 曲线淡入动画开关
 
     private var weights: [(date: Date, value: Double)] {
         healths.compactMap { m -> (Date, Double)? in
@@ -77,6 +78,14 @@ struct WeightTrendView: View {
                     }
                     .frame(height: 120)
                     .chartYAxis(.hidden).chartXAxis(.hidden)
+                    // 曲线进入：透明度 + 轻微缩放淡入。iOS 26 下 Swift Charts 路径描边动画不可靠，
+                    // 用淡入替代真·描边生长，稳定且观感一致；「减弱动态效果」下直接显示。
+                    .opacity(chartAppear ? 1 : 0)
+                    .scaleEffect(chartAppear ? 1 : 0.96, anchor: .leading)
+                    .onAppear {
+                        if AIATheme.motionReduce { chartAppear = true }
+                        else { withAnimation(.easeOut(duration: 0.6)) { chartAppear = true } }
+                    }
                 }
 
                 SectionTitle(text: "记录方式")

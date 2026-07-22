@@ -191,6 +191,25 @@ extension View {
     }
 }
 
+// MARK: - 按压反馈样式（卡片/按钮按下时轻微缩放下沉 + 阴影抬升）
+/// 用于可点卡片与按钮：按下 scaleEffect(0.97) + 阴影抬升，松手 spring 回弹。
+/// 用 ButtonStyle 实现（而非在 .card() 内加手势），可与 Button 点击共存、不吞点击，
+/// 且自动遵守「减弱动态效果」。任何 `Button { } label: { ... .card() }` 把
+/// `.buttonStyle(.plain)` 换成 `.buttonStyle(PressableCardStyle())` 即可获得按压反馈。
+struct PressableCardStyle: ButtonStyle {
+    var pressedScale: CGFloat = 0.97
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? pressedScale : 1)
+            .shadow(
+                color: configuration.isPressed ? AIATheme.cardShadowStrong : .clear,
+                radius: configuration.isPressed ? AIATheme.cardShadowRadius + 6 : 0,
+                y: configuration.isPressed ? AIATheme.cardShadowY + 3 : 0
+            )
+            .animation(AIATheme.motionReduce ? nil : AIATheme.Motion.press, value: configuration.isPressed)
+    }
+}
+
 // MARK: - 科技感渐变（强调色 → 青）
 extension LinearGradient {
     static let techAccent = LinearGradient(
@@ -264,12 +283,13 @@ struct RingView: View {
     var color: Color = AIATheme.blue
     var size: CGFloat = 84
     var lineWidth: CGFloat = 8
+    @State private var drawn: Double = 0   // 描边生长动画的当前进度（0→progress）
 
     var body: some View {
         ZStack {
             Circle().stroke(AIATheme.track, lineWidth: lineWidth)
             Circle()
-                .trim(from: 0, to: CGFloat(min(max(progress, 0), 1)))
+                .trim(from: 0, to: CGFloat(min(max(drawn, 0), 1)))
                 .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
             VStack(spacing: 2) {
@@ -278,6 +298,14 @@ struct RingView: View {
             }
         }
         .frame(width: size, height: size)
+        .onAppear { animateRing() }
+        .onChange(of: progress) { _, _ in animateRing() }
+    }
+
+    /// 进入 / 数据刷新时，让进度环从 0 描边生长到目标值；「减弱动态效果」下直接落位。
+    private func animateRing() {
+        guard !AIATheme.motionReduce else { drawn = progress; return }
+        withAnimation(AIATheme.Motion.draw) { drawn = progress }
     }
 }
 
@@ -286,6 +314,7 @@ struct DonutView: View {
     let segments: [(color: Color, fraction: Double)]
     var size: CGFloat = 96
     var lineWidth: CGFloat = 12
+    @State private var t: Double = 0   // 各扇区从起点描边生长的插值系数（0→1）
 
     private var arcs: [(color: Color, start: Double, end: Double)] {
         let total = segments.reduce(0) { $0 + max($1.fraction, 0) }
@@ -305,12 +334,20 @@ struct DonutView: View {
             ForEach(0..<arcs.count, id: \.self) { i in
                 let arc = arcs[i]
                 Circle()
-                    .trim(from: arc.start, to: arc.end)
+                    .trim(from: arc.start, to: arc.start + (arc.end - arc.start) * t)
                     .stroke(arc.color, lineWidth: lineWidth)
                     .rotationEffect(.degrees(-90))
             }
         }
         .frame(width: size, height: size)
+        .onAppear { animateDonut() }
+    }
+
+    /// 进入时各扇区按占比从起点描边生长；「减弱动态效果」下直接落位。
+    private func animateDonut() {
+        guard !AIATheme.motionReduce else { t = 1; return }
+        t = 0
+        withAnimation(AIATheme.Motion.draw) { t = 1 }
     }
 }
 
@@ -320,6 +357,7 @@ struct MacroCard: View {
     let value: String
     var progress: Double = 0
     var color: Color = AIATheme.blue
+    @State private var drawn: Double = 0   // 进度条生长动画的当前进度（0→progress）
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -329,7 +367,7 @@ struct MacroCard: View {
                 Capsule().fill(AIATheme.track)
                     .overlay(alignment: .leading) {
                         Capsule().fill(color)
-                            .frame(width: geo.size.width * CGFloat(min(max(progress, 0), 1)), height: 4)
+                            .frame(width: geo.size.width * CGFloat(min(max(drawn, 0), 1)), height: 4)
                     }
             }
             .frame(height: 4)
@@ -337,6 +375,14 @@ struct MacroCard: View {
         .padding(10)
         .background(AIATheme.surfaceSecondary)
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+        .onAppear { animateMacro() }
+        .onChange(of: progress) { _, _ in animateMacro() }
+    }
+
+    /// 进入 / 数据刷新时，进度条从左到右生长；「减弱动态效果」下直接落位。
+    private func animateMacro() {
+        guard !AIATheme.motionReduce else { drawn = progress; return }
+        withAnimation(AIATheme.Motion.progress) { drawn = progress }
     }
 }
 
@@ -345,15 +391,25 @@ struct MiniBar: View {
     var value: Double = 0           // 0..1
     var color: Color = AIATheme.green
     var height: CGFloat = 8
+    @State private var drawn: Double = 0   // 进度条生长动画的当前进度（0→value）
+
     var body: some View {
         GeometryReader { geo in
             RoundedRectangle(cornerRadius: height / 2).fill(AIATheme.fillSoft)
                 .overlay(alignment: .leading) {
                     RoundedRectangle(cornerRadius: height / 2).fill(color)
-                        .frame(width: geo.size.width * CGFloat(min(max(value, 0), 1)), height: height)
+                        .frame(width: geo.size.width * CGFloat(min(max(drawn, 0), 1)), height: height)
                 }
         }
         .frame(height: height)
+        .onAppear { animateMini() }
+        .onChange(of: value) { _, _ in animateMini() }
+    }
+
+    /// 进入 / 数据刷新时，进度条从左到右生长；「减弱动态效果」下直接落位。
+    private func animateMini() {
+        guard !AIATheme.motionReduce else { drawn = value; return }
+        withAnimation(AIATheme.Motion.progress) { drawn = value }
     }
 }
 
@@ -635,7 +691,9 @@ struct AIBottomBar: View {
             }
         }
         .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 14)
-        .background(Color(.systemBackground))
+        // 玻璃质感：用系统毛玻璃材质替代纯色背景，底部栏更轻盈、更有层次（自动适配明暗）。
+        // 保持顶部 1px 分隔线，确保与上方内容区有明确边界。
+        .background(.ultraThinMaterial)
         .overlay(alignment: .top) { Divider() }
         .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker)
         // 用 .task 异步循环驱动文案轮滚，绑定视图生命周期，避免 Timer 在底部栏布局下失效。

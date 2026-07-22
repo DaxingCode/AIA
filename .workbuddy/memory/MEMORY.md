@@ -68,11 +68,12 @@ M1 分享扩展导入 → M2 快捷指令无感对接 → M3 食物卡路里(+�
 - 宫格底色须与类型语义色同 hue：`dietBG/healthBG/billBG/todoBG` 分别为 `food/health/bill/todo` 同 hue 的淡 tint。
 - **空状态垂直居中约定（2026-07-22）**：各模块空态的插画+文案+「点击」提示必须落在模块可视区域中央，用 `EmptyStateView` 自带 `Spacer()` + 调用点 `.frame(maxWidth:.infinity, maxHeight:.infinity)` 实现。
 - **底部栏提示箭头自动跟随图标位置（2026-07-22，已代码固化）**：`AIBottomBar` 的提示文案改为结构化 `AIPrompt(text:pointsTo:)`（`pointsTo: .mic/.camera/.album/nil`），箭头方向由 `AIBottomBar.iconOrder`（图标从左到右顺序，含输入框胶囊 `nil`）单一真源推导——目标在输入框左侧→`←`在前、在右侧→`→`在后。**改图标左右顺序只改 `iconOrder` 一处**，箭头自动翻转，切勿在 `text` 里手写 `←`/`→`，也勿在调用点硬编码箭头字符串。HStack 内 Button 顺序必须与 `iconOrder` 保持一致。
+- **动效令牌 + 按压反馈约定（2026-07-22 落地）**：新动效一律走 `AIATheme.Motion`（press=spring(0.32/0.6)、draw=easeOut(0.8)、progress=easeOut(0.6)）+ `AIATheme.motionReduce`（= `UIAccessibility.isReduceMotionEnabled`），禁止散写 `Animation.xxx`。**可点卡片/按钮的按压反馈统一用 `PressableCardStyle`**（已写入 `UIComponents.swift`），把 `.buttonStyle(.plain)` 换成 `.buttonStyle(PressableCardStyle())` 即得「缩放下沉 + 阴影抬升 + spring 回弹」；切勿在 `.card()` 里另加 `Gesture`/`onTapGesture` 做按压（会违反项目铁律吞点击）。图表类（`RingView`/`DonutView`/`MacroCard`/`MiniBar`）用 `@State` 插值 + `onAppear`/`onChange(of:)` 做描边/生长动画；Swift Charts 曲线在 iOS 26 下路径动画不可靠，用「透明度+缩放淡入」替代真·描边生长。
 
 ## 多对话并行协作协议（2026-07-22 起，强制）
 - 本仓库是**多 WorkBuddy 对话并行改同一份代码**，各对话互不知情，同文件会静默覆盖。协调中枢 = 根目录 `多团队协作分工表.md`。
 - **动手前必做**：① 读 `多团队协作分工表.md` 的 §3（共享高危文件）和 §4（文件级占用看板）；② 若目标文件已在 §4 被其他对话占用 → 停下并告知用户「XX 文件正被[对话]占用，请换任务或等其释放」，不硬改；③ 空闲则先把占用写进 §4（文件|对话标识|进行中|预计释放）再动手；④ commit 后清除占用。
-- **本对话唯一标识**：`对话B`（software-company 齐活林小队）。另一个并行对话为「对话A」；占用 §4 时统一用 `对话B`。
+- **对话标识对照**：`对话B` = software-company 齐活林小队（负责 UI 优化、底部栏、识别链路 bug 修复）；`对话C` = 本对话（用户当前对话，负责导航/设置崩溃排查、并行协作协议执行）。占用 §4 时本对话统一用 `对话C`。
 - **§3 高危文件**（`Models`/`AppPersistence`/`AIAMigrationPlan`/`AIATheme`/`UIComponents`/`RecognizeService`）：无论是否被占，动手前都在 §4 标注「锁定中」并提醒用户。
 - SwiftData Schema 变更（`AIAApp.schemaVersion`+1）由 §6 指定责任人集中处理，禁止多对话各自 +1。
 - 小步提交；冲突由后提交方 rebase/解决，不得静默覆盖。
