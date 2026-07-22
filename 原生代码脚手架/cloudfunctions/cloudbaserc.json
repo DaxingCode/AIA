@@ -1,0 +1,13 @@
+{
+  "envId": "cloud1-d1ga55pizf294dbe9-1445590522",
+  "functionRoot": ".",
+  "functions": [
+    {
+      "name": "recognize",
+      "runtime": "Nodejs18.15",
+      "handler": "index.main",
+      "memorySize": 256,
+      "timeout": 30
+    }
+  ]
+}

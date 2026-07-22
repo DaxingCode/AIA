@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+
+# Xcode build artifacts
+DerivedData/
+*.xcuserstate
+*.xcuserdata
+xcuserdata/
+
+# Large archives / deploy bundles (keep out of VCS)
+*.zip
+
+# Secrets / local config (may contain API keys)
+*.csv
+
+# Node
+node_modules/
