@@ -135,6 +135,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UIWindowSceneDelegate, UN
         // 把历史数据（账单/饮食/待办/健康/聊天等）拉回本地，实现「数据还在」。
         if restored, let container = container {
             Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 300_000_000)
                 CloudSyncManager.shared.syncAfterLogin(context: ModelContext(container))
             }
         }
@@ -258,6 +259,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UIWindowSceneDelegate, UN
         // 同时把本机已有数据推到云端；仅已登录时触发。
         Task { @MainActor in
             guard let container = sharedContainer else { return }
+            try? await Task.sleep(nanoseconds: 300_000_000)
             CloudSyncManager.shared.syncAfterLogin(context: ModelContext(container))
         }
     }
@@ -285,6 +287,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UIWindowSceneDelegate, UN
         Self.resetBadgeCount()
         Task { @MainActor in
             guard let container = AppDelegate.sharedContainer else { return }
+            try? await Task.sleep(nanoseconds: 300_000_000)
             CloudSyncManager.shared.autoSyncIfEnabled(context: ModelContext(container))
         }
     }

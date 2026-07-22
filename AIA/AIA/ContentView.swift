@@ -232,6 +232,11 @@ struct ContentView: View {
         HStack(alignment: .firstTextBaseline) {
             Text("\(greeting)，\(userNickname)")
                 .font(AIATheme.Font.title2.weight(.semibold))
+            if sync.isSyncing {
+                ProgressView().scaleEffect(0.6)
+            } else if let _ = sync.lastSyncAt {
+                Circle().fill(Color.green).frame(width: 6, height: 6)
+            }
             Spacer()
             if pendingCount > 0 {
                 Text("\(pendingCount) 项待处理")
