@@ -714,6 +714,10 @@ struct ChatView: View {
         guard hasObject && hasVerb else { return nil }
 
         guard let (title, due) = parseTodoCreate(text) else { return nil }
+        // 防重复：短时间内重复发送同一句话不重复入库
+        if ChatView.checkDuplicateAndRegister(text, type: "todo") {
+            return "这个提醒你刚记过啦，我就不重复记了～"
+        }
         let r = Reminder(title: title, due: due, imageName: nil)
         DefaultReminderSettings.shared.apply(to: r)
         context.insert(r)
@@ -766,27 +770,68 @@ struct ChatView: View {
         return text
     }
 
+    // MARK: - 聊天记账防重复
+    /// 短时间内重复发送同一句话，不重复入库（防止反复测试 / 误点产生重复记录）。
+    /// 仅覆盖本次运行会话内的本地记账路径（账单 / 饮食 / 待办）；图片路径另有 aHash 指纹去重。
+    private static var recentCreations: [(key: String, at: Date)] = []
+    private static let dedupWindow: TimeInterval = 180 // 3 分钟
+
+    /// 计算去重键：去掉金额与记账 / 提醒动词、语气助词后，保留餐次 / 内容词。
+    /// 不同餐次（如「晚餐」vs「午餐」）键不同，不会互相误判；同一句话重复发送则键相同。
+    private static func chatDedupKey(_ text: String, type: String) -> String {
+        var t = text.lowercased()
+        t = t.replacingOccurrences(of: #"\d+(\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?"#,
+                                   with: "", options: .regularExpression)
+        let verbs = ["记一笔","记账","记一下","记个","记下来","帮我记","给我记","添加","增加","创建",
+                     "新建","保存","录入","花了","花掉","付了","付给","买了","消费","支出","账单",
+                     "花销","开销","扫码付","提醒我","提醒","吃了","喝了","喝","吃"]
+        for v in verbs { t = t.replacingOccurrences(of: v, with: "") }
+        t = t.replacingOccurrences(of: #"[的了在给和去个吧啊呢哦嘛]"#, with: "", options: .regularExpression)
+        return "\(type):\(t.trimmingCharacters(in: .whitespacesAndNewlines))"
+    }
+
+    /// 命中最近一次相同内容 → 返回 true（调用方不应再入库）；否则登记并返回 false。
+    private static func checkDuplicateAndRegister(_ text: String, type: String) -> Bool {
+        let now = Date()
+        recentCreations.removeAll { now.timeIntervalSince($0.at) > dedupWindow }
+        let key = chatDedupKey(text, type: type)
+        if recentCreations.contains(where: { $0.key == key }) { return true }
+        recentCreations.append((key, now))
+        return false
+    }
+
     /// 本地记账（DB 优先、AI 兜底）：解析「记一笔星巴克35」「付了美团28」这类明确账单意图，
     /// 商户分类优先查本地 MerchantMeta 经验库，命中即复用、不调 AI；未命中给"其他"。
-    /// 仅当文本含明确记账动词且含金额时才返回非 nil，避免误吞饮食/问句。
+    /// 触发条件：① 含明确记账动词（记一笔/花了/付了…）且含金额；② 含食物词且含「金额+货币单位」（如「午饭吃了碗牛肉面32块」）。
+    /// 纯饮食（无金额，如「喝了一杯奶茶」）仍返回 nil，走 food 路径，避免误吞饮食/问句。
     private func createBillLocally(from text: String) -> String? {
         let lower = text.lowercased()
-        // 防御：明显饮食意图（如「喝了一杯奶茶」）应走 food 路径，不能本地建账单
-        if isFoodLike(text) { return nil }
-        let billKw = ["记一笔", "记账", "花了", "花掉", "付了", "付给", "买了", "消费", "支出", "账单", "花销", "开销", "扫码付"]
-        guard billKw.contains(where: { lower.contains($0) }) else { return nil }
+        // 必须先有金额，否则不是本地可解析的账单（纯饮食/问句等交给其它分支）
         guard let amount = extractAmount(text) else { return nil }
+        // 本地建账单的两种触发条件：
+        // 1) 显式账单关键词（记一笔/花了/付了…）；
+        // 2) 食物+金额（如「午饭吃了碗牛肉面32块」），用户既说了吃什么又给了金额，明确是一笔花费。
+        //    金额需带货币单位（元/块/￥/¥），以排除「1500大卡」这类把热量当金额误建账单的情况。
+        // 纯饮食（如「喝了一杯奶茶」）因无金额已在上面返回 nil，仍走 food 路径，不会误建账单。
+        let billKw = ["记一笔", "记账", "花了", "花掉", "付了", "付给", "买了", "消费", "支出", "账单", "花销", "开销", "扫码付"]
+        let hasExplicitBill = billKw.contains(where: { lower.contains($0) })
+        let hasMoneyUnit = lower.contains("元") || lower.contains("块") || lower.contains("￥") || lower.contains("¥")
+        let isFoodWithAmount = hasRawFoodIntent(text) && hasMoneyUnit
+        guard hasExplicitBill || isFoodWithAmount else { return nil }
 
         // 商户名：去掉金额数字及单位、去掉记账关键词、去掉时间/饮食动词与语气助词后剩下的文本
         var merchant = text
         merchant = merchant.replacingOccurrences(of: #"\d+(\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?"#,
                                                  with: "", options: .regularExpression)
         for kw in billKw { merchant = merchant.replacingOccurrences(of: kw, with: "") }
-        // 多字词（时间/饮食动词）用分组 Alternation；务必放在单字语气助词之前或与之并列
-        merchant = merchant.replacingOccurrences(of: #"(今晚|今天|明天|早上|上午|中午|下午|晚上|刚才|吃了|喝了|喝|吃|买)"#,
+        // 多字词（时间/餐次/饮食动词/食物量词）用分组 Alternation；务必放在单字语气助词之前或与之并列
+        merchant = merchant.replacingOccurrences(of: #"(今晚|今天|明天|早上|上午|中午|下午|晚上|刚才|早饭|午饭|晚饭|早餐|午餐|晚餐|夜宵|加餐|零食|宵夜|吃了|喝了|喝|吃|买|碗|杯|个|盘|份|根|片|串|块|勺)"#,
                                                  with: "", options: .regularExpression)
         // 单字语气助词
         merchant = merchant.replacingOccurrences(of: #"[的了在给和去个吧啊呢哦嘛]"#,
+                                                 with: "", options: .regularExpression)
+        // 去掉残留的数字与标点，得到干净商户名
+        merchant = merchant.replacingOccurrences(of: #"[\d,\.，。、\s]+"#,
                                                  with: "", options: .regularExpression)
         merchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
         // 清洗后若仍为纯餐次/时间词（非真实商户），回退到"其他消费"
@@ -805,6 +850,10 @@ struct ChatView: View {
         }
         let isIncome = isIncomeText || metaIncome
         let category = (isIncome && cat == "其他") ? "收入" : cat
+        // 防重复：短时间内重复发送同一句话不重复入库
+        if ChatView.checkDuplicateAndRegister(text, type: "bill") {
+            return "这笔记过啦，我就不重复记了～"
+        }
         let bill = Bill(merchant: merchant, amount: amount, category: category,
                         time: .now, isIncome: isIncome, imageName: nil)
         context.insert(bill)
@@ -852,6 +901,10 @@ struct ChatView: View {
                               baseCarbs: ref.carbs,
                               baseFat: ref.fat,
                               imageName: nil)
+        // 防重复：短时间内重复发送同一句话不重复入库
+        if ChatView.checkDuplicateAndRegister(text, type: "food") {
+            return "这顿你刚记过啦，我就不重复记了～"
+        }
         context.insert(entry)
         HealthManager.shared.saveCaloriesConsumed(cal, date: .now)
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
