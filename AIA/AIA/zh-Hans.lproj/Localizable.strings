@@ -1,0 +1,129 @@
+/* 简体中文本地化 for AIA（试点：账单/待办） */
+
+// MARK: - 通用
+"common.delete" = "删除";
+"common.other" = "其他";
+"common.cancel" = "取消";
+"common.selectAll" = "全选";
+"common.deselectAll" = "取消全选";
+"common.delete" = "删除";
+"common.none" = "—";
+"common.save" = "保存";
+"common.cancel" = "取消";
+"common.ok" = "好";
+"common.send" = "发送";
+"chat.feedback" = "意见反馈";
+"chat.action.camera" = "拍照";
+"chat.action.album" = "相册";
+"chat.action.file" = "文件";
+"feedback.placeholder" = "请描述您遇到的问题或建议…";
+"feedback.mailUnavailableTitle" = "无法发送邮件";
+"feedback.mailUnavailableMessage" = "您的设备未配置邮件账户。请将反馈发送至 %@，或点击「复制邮箱」。";
+"feedback.copyEmail" = "复制邮箱";
+
+// MARK: - 导航标题
+"tab.bill" = "账单管理";
+"tab.todo" = "待办提醒";
+
+// MARK: - 账单模块 (BillListView)
+"bill.today" = "今日账单";
+"bill.thisMonth" = "本月账单";
+"bill.thisWeek" = "本周账单";
+"bill.thisYear" = "本年账单";
+"bill.noRecords" = "暂无记录";
+"bill.budget" = "预算";
+"bill.monthlyBudget" = "本月预算 ¥%d";
+"bill.budgetUsed" = "已用 %d%%";
+"bill.filter.all" = "全部";
+"bill.filter.month" = "按月查看";
+"bill.filter.calendar" = "在日历查看";
+"bill.monthly.income" = "收入";
+"bill.monthly.expense" = "支出";
+"bill.monthly.balance" = "结余";
+"bill.details" = "账单详情";
+"bill.carousel.hint" = "点击圆环查看详情 / 左右滑动查看更多";
+"bill.empty.title" = "没有%@账单记录";
+"bill.empty.desc" = "截一张付款 / 消费截屏";
+"bill.calendar.selectedDateTitle" = "%@ 的账单";
+"bill.calendar.noBills" = "该日暂无账单";
+"bill.calendar.expenseTotal" = "支出 ¥%.2f";
+"bill.calendar.incomeTotal" = "收入 ¥%.2f";
+"bill.status.confirmed" = "已确认";
+"bill.status.pending" = "待确认";
+"bill.category.food" = "餐饮";
+"bill.category.transport" = "交通";
+"bill.category.shopping" = "购物";
+"bill.custom.startDate" = "开始日期";
+"bill.custom.endDate" = "结束日期";
+
+// MARK: - 待办模块 (ReminderListView)
+"todo.title" = "待办提醒";
+"todo.suggestion.title" = "智能建议";
+"todo.suggestion.desc" = "截屏已识别，建议创建待办";
+"todo.suggestion.add" = "添加";
+"todo.filter.active" = "待办提醒 %d";
+"todo.filter.finished" = "已完成 %d";
+"todo.filter.calendar" = "日历展示";
+"todo.empty.title" = "没有%@待办";
+"todo.empty.desc" = "截一张待办 / 日程截屏";
+"todo.calendar.weekday.sun" = "日";
+"todo.calendar.weekday.mon" = "一";
+"todo.calendar.weekday.tue" = "二";
+"todo.calendar.weekday.wed" = "三";
+"todo.calendar.weekday.thu" = "四";
+"todo.calendar.weekday.fri" = "五";
+"todo.calendar.weekday.sat" = "六";
+"todo.calendar.noTasks" = "当天没有待办";
+"todo.calendar.selectedDateTitle" = "%@ 待办";
+"todo.priority.high" = "高";
+"todo.priority.medium" = "中";
+"todo.priority.low" = "低";
+
+// MARK: - 饮食模块 (FoodListView)
+"food.navTitle" = "饮食记录";
+"food.today" = "今天 · %@ %@";
+"food.netLabel" = "净热量 kcal";
+"food.intakeTdee" = "摄入 %d · TDEE %d";
+"food.belowGoal" = "低于目标，可加餐 🍎";
+"food.overGoal" = "已超目标，注意控制";
+"food.burned" = "今日消耗";
+"food.nutrition" = "营养构成";
+"food.nutritionTarget" = "目标 蛋白%d / 碳水%d / 脂肪%d g";
+"food.macro.protein" = "蛋白质";
+"food.macro.carb" = "碳水";
+"food.macro.fat" = "脂肪";
+"food.macro.fiber" = "膳食纤维";
+"food.last7days" = "近 7 日热量";
+"food.empty.title" = "还没有%@记录";
+"food.empty.desc" = "点底部相机拍照识别";
+"food.recognized" = "识别";
+"food.meal.breakfast" = "早餐";
+"food.meal.lunch" = "午餐";
+"food.meal.dinner" = "晚餐";
+"food.meal.snack" = "加餐";
+
+// MARK: - 健康模块 (HealthListView)
+"health.navTitle" = "健康管理";
+"health.ring.steps" = "步 / 10,000";
+"health.ring.sleep" = "睡眠 / 8h";
+"health.ring.energy" = "能量 / 500";
+"health.ring.exercise" = "运动 / 30m";
+"health.stat.weight" = "体重";
+"health.stat.height" = "身高";
+"health.stat.restingHR" = "静息心率";
+"health.stat.bmi" = "BMI";
+"health.weightTrend" = "体重趋势";
+"health.noWeight" = "暂无体重记录，去首页截一张体重截屏";
+"health.sleepStages" = "睡眠分期 · 昨晚";
+"health.sleep.deep" = "深睡 %.1fh";
+"health.sleep.deepSub" = "占比 %d%%，良好";
+"health.sleep.light" = "浅睡 %.1fh";
+"health.sleep.rem" = "REM %.1fh";
+"health.sleep.remSub" = "快速眼动";
+"health.weekSteps" = "近 7 日步数";
+
+// MARK: - 图表坐标轴共享
+"chart.day" = "日";
+"chart.kcal" = "kcal";
+"chart.kg" = "kg";
+"chart.step" = "步";

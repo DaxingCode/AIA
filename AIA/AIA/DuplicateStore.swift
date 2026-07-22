@@ -1,0 +1,108 @@
+// DuplicateStore.swift
+// 重复识别指纹的侧车存储：不进 SwiftData（避免升 schemaVersion、不动业务库），
+// 仅用 Documents/imageHashes.json 记录「已存记录的图片指纹 + 时间 + 摘要」。
+// 识别入库前比对指纹，命中仅用于「似乎已记录过」警告提示，不再阻断入库；
+// 用户可在确认页编辑/保留/删除，是否真重复由用户决定。
+import Foundation
+import UIKit
+
+/// 一条历史指纹记录（持久化用）。
+struct DuplicateEntry: Codable, Identifiable {
+    var id: String { hash }
+    let hash: String
+    let recognizedAt: Date
+    let types: String      // 逗号分隔类型，如 "bill,todo"
+    let summary: String    // 人类可读摘要，如 "账单 ¥19.96 · 中国电信"
+}
+
+/// 命中重复时携带的上下文：原始识别输入 + 匹配到的原记录信息。
+/// （历史流程：用户点「仍要记录」才真正入库。现改为命中即自动入库，仅作警告参考。）
+struct DuplicatePayload {
+    let result: RecognitionResult
+    let rawText: String
+    let sourceImage: UIImage?
+    let hash: String
+    let recognizedAt: Date   // 原记录时间
+    let summary: String      // 原记录摘要
+    let existingTypes: String
+    /// 识别来源（本地 / 云端），确认页据此展示标签。
+    let source: RecognizeService.RecognitionSource = .cloud
+}
+
+/// 疑似重复提示（已自动入库，仅用于确认页顶部警告横幅）。
+/// 与 DuplicatePayload 不同：这里不阻断入库，只携带原记录元数据供用户参考。
+struct DuplicateHint: Codable {
+    let recognizedAt: Date
+    let summary: String
+    let existingTypes: String
+}
+
+/// 入库决策：当前统一「正常入库」；命中重复指纹时仍入库，仅在 session.duplicateHint 挂警告。
+/// （历史上存在 .duplicate 分支用于「命中即不入库」，现已移除，保留枚举字段无副作用。）
+enum SaveDecision {
+    case saved(SavedSession)
+    case duplicate(DuplicatePayload)
+}
+
+/// 确认页呈现载荷（统一三个入口的驱动状态）。
+enum RecognitionPresent: Identifiable {
+    case saved(SavedSession)
+    case duplicate(DuplicatePayload)
+    var id: String {
+        switch self {
+        case .saved(let s): return "saved-\(s.id.uuidString)"
+        case .duplicate(let d): return "dup-\(d.hash)"
+        }
+    }
+}
+
+extension SaveDecision {
+    var present: RecognitionPresent {
+        switch self {
+        case .saved(let s): return .saved(s)
+        case .duplicate(let d): return .duplicate(d)
+        }
+    }
+}
+
+enum DuplicateStore {
+    /// 汉明距离阈值（0~64），越大越宽松。配合「警告而非硬拦」策略，误判也可由用户补救。
+    private static let threshold = 10
+
+    private static let file: URL = {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("imageHashes.json")
+    }()
+
+    static func load() -> [DuplicateEntry] {
+        guard let data = try? Data(contentsOf: file),
+              let arr = try? JSONDecoder().decode([DuplicateEntry].self, from: data) else { return [] }
+        return arr
+    }
+
+    static func save(_ entries: [DuplicateEntry]) {
+        try? JSONEncoder().encode(entries).write(to: file)
+    }
+
+    /// 返回与给定 hash 汉明距离 ≤ threshold 的最近一条历史；无则 nil。
+    static func match(_ hash: String) -> DuplicateEntry? {
+        var best: DuplicateEntry?
+        var bestDist = Int.max
+        for e in load() {
+            let d = ImageHasher.hammingDistance(hash, e.hash)
+            if d <= threshold, d < bestDist {
+                bestDist = d
+                best = e
+            }
+        }
+        return best
+    }
+
+    /// 登记一条新指纹（同 hash 去重覆盖）。
+    static func add(_ entry: DuplicateEntry) {
+        var entries = load()
+        entries.removeAll { $0.hash == entry.hash }
+        entries.append(entry)
+        save(entries)
+    }
+}

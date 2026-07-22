@@ -1,0 +1,129 @@
+/* English localization for AIA (pilot: Bill & Todo modules) */
+
+// MARK: - Common
+"common.delete" = "Delete";
+"common.other" = "Other";
+"common.cancel" = "Cancel";
+"common.selectAll" = "Select All";
+"common.deselectAll" = "Deselect All";
+"common.delete" = "Delete";
+"common.none" = "—";
+"common.save" = "Save";
+"common.cancel" = "Cancel";
+"common.ok" = "OK";
+"common.send" = "Send";
+"chat.feedback" = "Feedback";
+"chat.action.camera" = "Camera";
+"chat.action.album" = "Album";
+"chat.action.file" = "File";
+"feedback.placeholder" = "Please describe the issue or suggestion…";
+"feedback.mailUnavailableTitle" = "Cannot Send Mail";
+"feedback.mailUnavailableMessage" = "Your device is not configured for email. Please send feedback to %@, or tap Copy Email.";
+"feedback.copyEmail" = "Copy Email";
+
+// MARK: - Navigation titles
+"tab.bill" = "Bills";
+"tab.todo" = "Todos";
+
+// MARK: - Bill module (BillListView)
+"bill.today" = "Today";
+"bill.thisMonth" = "This Month";
+"bill.thisWeek" = "This Week";
+"bill.thisYear" = "This Year";
+"bill.noRecords" = "No records";
+"bill.budget" = "Budget";
+"bill.monthlyBudget" = "Monthly budget ¥%d";
+"bill.budgetUsed" = "Used %d%%";
+"bill.filter.all" = "All";
+"bill.filter.month" = "By Month";
+"bill.filter.calendar" = "Calendar";
+"bill.monthly.income" = "Income";
+"bill.monthly.expense" = "Expense";
+"bill.monthly.balance" = "Balance";
+"bill.details" = "Bill Details";
+"bill.carousel.hint" = "Tap a ring for details / Swipe to see more";
+"bill.empty.title" = "No %@ bill records";
+"bill.empty.desc" = "Take a screenshot of a payment or receipt";
+"bill.calendar.selectedDateTitle" = "Bills on %@";
+"bill.calendar.noBills" = "No bills on this day";
+"bill.calendar.expenseTotal" = "Expense ¥%.2f";
+"bill.calendar.incomeTotal" = "Income ¥%.2f";
+"bill.status.confirmed" = "Confirmed";
+"bill.status.pending" = "Pending";
+"bill.category.food" = "Dining";
+"bill.category.transport" = "Transport";
+"bill.category.shopping" = "Shopping";
+"bill.custom.startDate" = "Start Date";
+"bill.custom.endDate" = "End Date";
+
+// MARK: - Todo module (ReminderListView)
+"todo.title" = "Todos";
+"todo.suggestion.title" = "Smart Suggestion";
+"todo.suggestion.desc" = "Screenshot recognized, create a todo?";
+"todo.suggestion.add" = "Add";
+"todo.filter.active" = "Todo %d";
+"todo.filter.finished" = "Done %d";
+"todo.filter.calendar" = "Calendar";
+"todo.empty.title" = "No %@ todos";
+"todo.empty.desc" = "Take a screenshot of a task or schedule";
+"todo.calendar.weekday.sun" = "Sun";
+"todo.calendar.weekday.mon" = "Mon";
+"todo.calendar.weekday.tue" = "Tue";
+"todo.calendar.weekday.wed" = "Wed";
+"todo.calendar.weekday.thu" = "Thu";
+"todo.calendar.weekday.fri" = "Fri";
+"todo.calendar.weekday.sat" = "Sat";
+"todo.calendar.noTasks" = "No tasks for this day";
+"todo.calendar.selectedDateTitle" = "%@ Todos";
+"todo.priority.high" = "High";
+"todo.priority.medium" = "Medium";
+"todo.priority.low" = "Low";
+
+// MARK: - Food module (FoodListView)
+"food.navTitle" = "Diet Log";
+"food.today" = "Today · %@ %@";
+"food.netLabel" = "Net kcal";
+"food.intakeTdee" = "Intake %d · TDEE %d";
+"food.belowGoal" = "Under goal, have a snack 🍎";
+"food.overGoal" = "Over goal, watch your intake";
+"food.burned" = "Burned";
+"food.nutrition" = "Nutrition";
+"food.nutritionTarget" = "Goal Protein %d / Carb %d / Fat %d g";
+"food.macro.protein" = "Protein";
+"food.macro.carb" = "Carb";
+"food.macro.fat" = "Fat";
+"food.macro.fiber" = "Fiber";
+"food.last7days" = "Last 7 Days Calories";
+"food.empty.title" = "No %@ records yet";
+"food.empty.desc" = "Tap the camera at the bottom to scan";
+"food.recognized" = "Recognized";
+"food.meal.breakfast" = "Breakfast";
+"food.meal.lunch" = "Lunch";
+"food.meal.dinner" = "Dinner";
+"food.meal.snack" = "Snack";
+
+// MARK: - Health module (HealthListView)
+"health.navTitle" = "Health";
+"health.ring.steps" = "Steps / 10,000";
+"health.ring.sleep" = "Sleep / 8h";
+"health.ring.energy" = "Energy / 500";
+"health.ring.exercise" = "Exercise / 30m";
+"health.stat.weight" = "Weight";
+"health.stat.height" = "Height";
+"health.stat.restingHR" = "Resting HR";
+"health.stat.bmi" = "BMI";
+"health.weightTrend" = "Weight Trend";
+"health.noWeight" = "No weight records yet. Capture a weight screenshot on Home";
+"health.sleepStages" = "Sleep Stages · Last Night";
+"health.sleep.deep" = "Deep %.1fh";
+"health.sleep.deepSub" = "%.0f%%, good";
+"health.sleep.light" = "Light %.1fh";
+"health.sleep.rem" = "REM %.1fh";
+"health.sleep.remSub" = "Rapid eye movement";
+"health.weekSteps" = "Steps (7d)";
+
+// MARK: - Shared chart axis labels
+"chart.day" = "Day";
+"chart.kcal" = "kcal";
+"chart.kg" = "kg";
+"chart.step" = "Steps";
