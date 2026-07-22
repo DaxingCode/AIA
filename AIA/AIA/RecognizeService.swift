@@ -880,10 +880,18 @@ struct RecognizeService {
         let observations = ocr?.observations ?? []
 
         var fallbackLocal: RecognitionResult?
+        // 提前检测营养成分表标志，后续多处用它跳过账单路径
+        let nutritionLines = cleanText.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let isNutritionLabel = hasNutritionTable(in: nutritionLines)
 
         if !cleanText.isEmpty {
             // 1) 一图多账单：强规则结构化，直接本地胜出（不论档位，省云端）。
-            if let multi = localParseMultiBillsIfNeeded(text: cleanText, in: context),
+            //    营养成分表内也可能出现多行金额状文本（3.1g/12.0g），但完全不是账单，
+            //    必须跳过——由步骤 2 处理。
+            if !isNutritionLabel,
+               let multi = localParseMultiBillsIfNeeded(text: cleanText, in: context),
                !multi.billList.isEmpty {
                 print("[识别] 本地 OCR+规则命中一图多账单，共 \(multi.billList.count) 条，跳过云端，source=local")
                 return (multi, cleanText, .local)
@@ -896,7 +904,23 @@ struct RecognizeService {
                 return (food, cleanText, .local)
             }
 
-            // 3) 单账单：按档位判断本地是否高置信胜出。
+            // 2.5) 营养成分表检测到但本地解析失败：跳过单账单路径，
+            //     不能把「379kJ」当商户、「3.19」当金额。降级食物供用户手动纠正。
+            if isNutritionLabel {
+                print("[识别] 营养成分表检测到但因格式问题本地解析失败，跳过账单路径")
+                let emptyFood = RecognitionResult(
+                    types: ["food"], confidence: 0,
+                    bill: nil, bills: nil,
+                    food: FoodPayload(name: "包装食品", calories: 0,
+                                      protein: nil, carbs: nil, fat: nil,
+                                      portion: "100克", meal: nil,
+                                      action: "create", targetTitle: nil),
+                    todo: nil, health: nil
+                )
+                fallbackLocal = emptyFood  // 降级时走食物而非账单
+                // 不设置回退，继续走文本模型 or 视觉兜底。
+                // 文本模型仍可能正确分类为食物并提供结构数据。
+            } else {
             if let local = localParseBill(text: cleanText, in: context, candidates: ocr?.candidates ?? []) {
                 if localWins(local, rawText: cleanText, tier: tier, context: context) {
                     print("[识别] 本地 OCR+规则高置信命中，source=local")
@@ -904,6 +928,7 @@ struct RecognizeService {
                 }
                 fallbackLocal = local   // 免费用户超额/无视觉兜底时降级返回
             }
+            }  // end else: isNutritionLabel 为 false 时才走 localParseBill
 
             // 4) 文本模型（不发的图，便宜）：免费用户先扣额度，超额则降级本地-only。
             if tier == .free, !AppUserTier.consumeCloudTextQuota() {

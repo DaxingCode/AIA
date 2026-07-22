@@ -151,28 +151,27 @@ enum RecognitionSaver {
             let baseCar = f.carbs ?? 0
             let baseFat = f.fat ?? 0
 
-            // 校验：云端返回的食物名有值但全部营养为零 → 跳过保存空壳记录
-            if baseCal <= 0 && basePro <= 0 && baseCar <= 0 && baseFat <= 0 {
+            // 校验：所有宏量为零 → 跳过保存空壳记录
+            if baseCal > 0 || basePro > 0 || baseCar > 0 || baseFat > 0 {
+                let entry = FoodEntry(name: name,
+                                      calories: baseCal * ratio,
+                                      protein: basePro * ratio,
+                                      carbs: baseCar * ratio,
+                                      fat: baseFat * ratio,
+                                      portion: "\(Int(weight))克",
+                                      meal: defaultMeal(for: .now),
+                                      weightGram: weight,
+                                      baseCalories: baseCal,
+                                      baseProtein: basePro,
+                                      baseCarbs: baseCar,
+                                      baseFat: baseFat,
+                                      imageName: imageName)
+                context.insert(entry)
+                session.food = entry
+                // 卡路里同步放确认时（applyAndSave），避免自动阶段重复累加
+            } else {
                 print("[autoSave] 跳过空壳食物记录：\(name)（所有营养值均为零）")
-                return  // 不保存，session.food 保持 nil
             }
-
-            let entry = FoodEntry(name: name,
-                                  calories: baseCal * ratio,
-                                  protein: basePro * ratio,
-                                  carbs: baseCar * ratio,
-                                  fat: baseFat * ratio,
-                                  portion: "\(Int(weight))克",
-                                  meal: defaultMeal(for: .now),
-                                  weightGram: weight,
-                                  baseCalories: baseCal,
-                                  baseProtein: basePro,
-                                  baseCarbs: baseCar,
-                                  baseFat: baseFat,
-                                  imageName: imageName)
-            context.insert(entry)
-            session.food = entry
-            // 卡路里同步放确认时（applyAndSave），避免自动阶段重复累加
         }
 
         if types.contains("health"),
