@@ -1,7 +1,9 @@
 {
   "name": "recognize",
   "version": "1.0.0",
-  "description": "AI 助理截图识别云函数（通义千问视觉 Qwen-VL 代理）",
+  "description": "AI 助理截图识别云函数（通义千问视觉 Qwen-VL 代理 + Agent 只读查询）",
   "main": "index.js",
-  "dependencies": {}
+  "dependencies": {
+    "@cloudbase/node-sdk": "^2.7.0"
+  }
 }

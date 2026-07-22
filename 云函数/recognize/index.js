@@ -8,6 +8,17 @@
 
 const https = require('https');
 
+// ===== AI 助理 Agent 模式依赖（只读工具 / 工具 Schema / 系统提示）=====
+// agentTools：CloudBase 只读查询封装，4 个工具全部只读，绝不写库。
+const { query_bills, query_foods, query_health, get_summary } = require('./agentTools');
+// agentSchema：供模型 tools 参数使用的 function-calling JSON 定义。
+const { AGENT_TOOLS } = require('./agentSchema');
+// agentPrompt：Agent 系统提示（角色"阿宝" + 只读铁律）。
+const { AGENT_SYSTEM_PROMPT } = require('./agentPrompt');
+
+// 工具名 → 实际执行函数 的映射表（供 Agent 循环按 tool_calls 派发）。
+const AGENT_TOOL_FUNCTIONS = { query_bills, query_foods, query_health, get_summary };
+
 // 不同服务商的调用配置；默认 qwen（通义千问视觉）。
 // 其他三家是预留：将来想对比/回落，只改 event.provider 即可，App 不用动。
 // 注意：API Key 请配置成 CloudBase 的「环境变量」，不要硬编码在这里！
@@ -84,7 +95,7 @@ const PROVIDERS = {
 };
 
 // 版本标记：发布后 curl 可通过返回值里的 ver 字段确认是否部署了最新代码
-const FN_VERSION = '20260722e-sensenova';
+const FN_VERSION = '20260722k-agent-v1';
 
 // 服务端兜底：纯通用回应（不论上下文）强制 types:["none"]，不依赖模型是否听话。
 // 与云端提示词规则 10 双保险，杜绝「好的/可以」被当成记录指令重复建待办。
@@ -131,19 +142,19 @@ const SYSTEM_PROMPT_IMAGE = `你是一个手机截图/照片理解引擎。用�
 3. 金额用数字（如 24.0）；货币默认 "CNY"。
 4. 当前时间：{CURRENT_TIME}。所有相对时间（如"明天""周五""下周三"）必须基于当前时间推算为绝对时间；返回的时间必须是 ISO8601 格式（含时区 +08:00）。
 5. 支持一图多意图：例如"付完款记得交报表"应返回 ["bill","todo"] 两条。
-6. 食物热量是估算值，允许误差；如有包装/外卖图标请尽量准确。营养成分表优先读取每100克数据，portion 写"100克"或整包净含量。calories 字段必须是千卡（kcal）。同时返回 energyRaw（标签原始能量数值）和 energyUnit（kJ 或 kcal）。如果 energyUnit 是 kJ 或 千焦，calories = energyRaw / 4.184；如果 energyUnit 是 kcal 或 千卡，calories = energyRaw。换算结果允许四舍五入到整数。
+6. **食物照片必须识别为 food**：普通食物照片（包括生肉、海鲜、蔬菜、水果、食材、餐盘、外卖、包装食品、零食、饮料等）都必须识别为 food，**不要返回 none**。即使看不清具体种类，也按大致食材估算热量（如肉类≈200 kcal/100g、海鲜≈100 kcal/100g、蔬菜≈30 kcal/100g），name 写"肉类"/"海鲜"/"蔬菜"等概括词，confidence 可适当降低，但绝不允许返回 none。食物热量是估算值，允许误差；如有包装/外卖图标请尽量准确。营养成分表优先读取每100克数据，portion 写"100克"或整包净含量。calories 字段必须是千卡（kcal）。同时返回 energyRaw（标签原始能量数值）和 energyUnit（kJ 或 kcal）。如果 energyUnit 是 kJ 或 千焦，calories = energyRaw / 4.184；如果 energyUnit 是 kcal 或 千卡，calories = energyRaw。换算结果允许四舍五入到整数。
 7. 如果是聊天截图，请提取其中截图或文字里的关键信息；如果聊天内容本身没有明确可记录的 bill/food/todo/health，则返回 types: ["none"]。
 8. 体检预约、检查报告、医疗相关内容优先归为 health；如果内容中包含明确的执行/预约时间（如"8月30日""周五"），必须额外生成一条 todo：title 写具体事项（如"去江南分院体检"），due 填对应的 ISO8601 时间，repeat 默认 "none"，priority 默认 "high"，并让 types 同时包含 "health" 和 "todo"。
 9. 食品包装上的营养成分表属于 food，不属于 health。
-10. **强制识别为账单的截图类型**：如果截图是支付宝/微信「账单详情」「支付成功」「账单列表」「付款记录」「消费明细」「转账记录」等，或线下「超市小票」「便利店小票」「收银小票」「购物小票」「餐饮小票」「外卖订单」等，**都必须识别为 bill**。即使金额显示为负数（如支付宝/微信支出 -18.00）、商户名被脱敏为「**娟(个人)」、或商品说明是「经营码交易」「转账」「生活缴费」等，也绝不要返回 none。
+10. **强制识别为账单的截图类型**：如果截图是支付宝/微信「账单详情」「支付成功」「账单列表」「付款记录」「消费明细」「转账记录」「支付消息」「服务消息」等，或线下「超市小票」「便利店小票」「收银小票」「购物小票」「餐饮小票」「外卖订单」等，**都必须识别为 bill**。即使金额显示为负数（如支付宝/微信支出 -18.00）、商户名被脱敏为「**娟(个人)」、或商品说明是「经营码交易」「转账」「生活缴费」等，也绝不要返回 none。
 11. **支付成功页金额提取**：支付成功页/账单详情页的中心大数字（如 -0.81、-18.00）就是交易金额；负数表示支出，应取绝对值作为 amount。优惠/立减行（如「广发随机立减优惠¥0.19」）不是主交易金额，不要误把优惠金额当主金额。若截图同时出现「原价」「实付」「共支付」等，优先取实际支付金额。
 12. 商户名 cleaning：去掉首尾星号*，去掉「(个人)」「(商户)」等后缀，如「**娟(个人)」→ merchant 填「娟」；小票顶部的店名如「永辉(95HC 南宁盛隆世界店)欢迎您」→ merchant 填「永辉」或「永辉超市」；若收款方只有星号或无法读取，可取「商品说明」「账单」或「超市/便利店」作为 merchant。若无法确定分类，category 可填"其他"，但绝不要返回 none。
-13. **一图多账单（列表）必须拆条输出 `bills` 数组**：如果截图是「账单列表 / 支付记录列表 / 账单详情列表 / 转账记录」等包含**多笔独立交易**的页面，请识别每一笔交易，并输出一个 `bills` 数组，数组的每个元素都是一条完整的账单对象（字段同单条 bill：merchant / amount / currency / category / time / note）。
+13. **一图多账单（列表）必须拆条输出 bills 数组**：如果截图是「账单列表 / 支付记录列表 / 账单详情列表 / 转账记录 / 支付消息 / 服务消息」等包含**多笔独立交易**的页面，请识别每一笔交易，并输出一个 bills 数组，数组的每个元素都是一条完整的账单对象（字段同单条 bill：merchant / amount / currency / category / time / note）。
    - 每一笔都要读取它**自己那一行/那一条**的支付时间作为 time，必须是 ISO8601（含时区 +08:00）；**不要**把截图的拍摄时间或列表顶部状态栏时间当成某笔交易的支付时间。
    - 支出金额为负数时取绝对值作为 amount（如 -18.00 → 18.0）。
    - 即使其中某笔金额/商户看不清，也照常输出能识别的条目，看不清的字段可留空或降低 confidence，但**不要**为了某一条不清就整体返回 none 或只返回一条。
-   - 单笔账单（非列表）仍用单条 `bill` 对象即可；只有「一图多笔」才用 `bills` 数组。
-   - `types` 写 `["bill"]`。`;
+   - 单笔账单（非列表）仍用单条 bill 对象即可；只有「一图多笔」才用 bills 数组。
+   - types 写 ["bill"]。`;
 
 // 文字输入专用系统提示词
 const SYSTEM_PROMPT_TEXT = `你是一个智能生活记录助手。用户会发来一条自然语言消息，请判断它属于饮食/账单/待办中的哪几类（可多选），并提取结构化字段。
@@ -185,10 +196,28 @@ const SYSTEM_PROMPT_TEXT = `你是一个智能生活记录助手。用户会发�
    - 用户说"帮我增加一个7月30日去体检的提醒" → 直接新建，返回 todo: { title:"去体检", due:"2026-07-30T09:00:00+08:00", action:"create" }。
 10. **重要：不要重复执行。如果用户消息是简短通用回应（如"好的"、"可以"、"嗯"、"行"、"谢谢"、"再见"、"嗯嗯"、"哦"、"知道了"），或者与记录无关（如"你是谁"、"你叫什么"、"随便聊聊"），无论上下文如何，都返回 types: ["none"]，不要再次创建、修改或删除任何记录。**
    例如：用户已创建待办「写代码」，随后说"好的" → 返回 types: ["none"]，而不是再建一条"写代码"。
-11. **重要：不要对同一用户消息进行重复响应或自我确认。如果上一条已经是 AI 回复，用户的消息只是简单回应，不要把它理解为"继续执行上一次操作"。**`;
+11. **重要：不要对同一用户消息进行重复响应或自我确认。如果上一条已经是 AI 回复，用户的消息只是简单回应，不要把它理解为"继续执行上一次操作"。**
+12. **一消息/一图多账单：如果输入里包含多笔独立交易（如微信/支付宝账单列表、多条消费记录），必须返回 bills 数组，每笔一个完整对象（merchant / amount / currency / category / time / note / action）。不要只用单个 bill 对象。支出金额若显示为负数（如 -19.90），取绝对值作为 amount。time 取该笔自己的支付时间（列表项时间），不要混用截图时间。**`;
+
+// 食物营养专项查询提示词（mode=queryFood）：查某食物「每100克可食部」的营养基准。
+const SYSTEM_PROMPT_FOOD = `你是一个食物营养数据库查询助手。用户会给你一个食物名称，请你给出该食物「每100克可食部」的营养成分。
+只输出一个 JSON 对象，不要有任何解释文字，格式严格如下：
+{
+  "food": {
+    "name": "食物通用名（如用户给的是「牛肉汤面」，请返回「牛肉汤面」或「牛肉面」这类通用叫法）",
+    "calories": 数字（千卡 kcal，每100克，必须 > 0）,
+    "protein": 数字（克，每100克）,
+    "carbs": 数字（克，每100克）,
+    "fat": 数字（克，每100克）
+  }
+}
+要求：
+1. 数据尽量准确，采用常见食物成分表（如《中国食物成分表》）的熟重/可食部基准；复合菜品（如牛肉面、红烧肉）按整道菜的常见配比估算，不要只取其中单一食材。
+2. 只返回 JSON，不要输出三反引号代码块包裹，也不要任何额外说明。`;
 
 // 调用 OpenAI 兼容接口（Qwen / Doubao / GLM 都支持这种格式）
-function callChatCompletions(provider, { imageBase64, text, recentMessages }, apiKey) {
+// systemOverride：可选，强制覆盖默认图片/文本提示词（如 queryFood 专用提示词）。
+function callChatCompletions(provider, { imageBase64, text, recentMessages, systemOverride }, apiKey) {
   return new Promise((resolve, reject) => {
     const isImage = !!imageBase64;
     const userContent = [];
@@ -213,7 +242,9 @@ function callChatCompletions(provider, { imageBase64, text, recentMessages }, ap
       year: 'numeric', month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit', weekday: 'long'
     }) + ' +08:00';
-    const systemPrompt = (isImage ? SYSTEM_PROMPT_IMAGE : SYSTEM_PROMPT_TEXT)
+    const systemPrompt = (systemOverride
+      ? systemOverride
+      : (isImage ? SYSTEM_PROMPT_IMAGE : SYSTEM_PROMPT_TEXT))
       .replace(/{CURRENT_TIME}/g, currentTime);
 
     const body = JSON.stringify({
@@ -329,6 +360,135 @@ async function handleChat(provider, body, apiKey) {
   return { ok: true, reply };
 }
 
+// 支持 tools（function calling）的模型调用：把工具定义一并下发，
+// 解析响应里的 choices[0].message：可能含 tool_calls（数组）或最终 content。
+function callWithTools(provider, messages, tools, apiKey) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      model: provider.model,
+      messages,
+      tools,
+      tool_choice: 'auto',
+      temperature: 0.7,
+    });
+
+    const u = new URL(provider.endpoint);
+    const req = https.request(
+      {
+        method: 'POST',
+        hostname: u.hostname,
+        path: u.pathname + u.search,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Length': Buffer.byteLength(body),
+        },
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (c) => (data += c));
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(data);
+            const msg = json.choices?.[0]?.message ?? {};
+            resolve({
+              content: msg.content || '',
+              tool_calls: msg.tool_calls || null,
+            });
+          } catch (e) {
+            reject(new Error('解析模型返回失败: ' + e.message));
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+// Agent 主循环：组装 system + 上下文 + 用户问题，带 tools 调用模型；
+// 若模型返回 tool_calls 则执行只读工具、回填结果、再调模型，最多 5 轮；
+// 任何异常（无 userId / 工具或 DB 失败 / 模型异常）都降级回 handleChat，保证"始终有回复"。
+async function handleAgent(provider, body, apiKey) {
+  const userId = body.userId;
+  const context = body.context || {};
+  const text = body.text || '';
+
+  // 无 userId 无法做只读查询 → 直接降级（只读铁律：userId 必填）
+  if (!userId) {
+    console.log('[handleAgent] 缺少 userId，降级到 handleChat');
+    return handleChat(provider, body, apiKey);
+  }
+
+  try {
+    // 注入当前时间到系统提示（角色"阿宝" + 只读铁律，含 {CURRENT_TIME} 占位符）
+    const now = new Date();
+    const currentTime = now.toLocaleString('zh-CN', {
+      timeZone: 'Asia/Shanghai', hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', weekday: 'long'
+    }) + ' +08:00';
+    const system = AGENT_SYSTEM_PROMPT.replace(/{CURRENT_TIME}/g, currentTime);
+
+    // 客户端本地摘要作为降级兜底上下文（也省去部分小查询）
+    const contextText = JSON.stringify(context, null, 2);
+    const messages = [
+      { role: 'system', content: system },
+      { role: 'user', content: '（以下是用户 App 的本地数据摘要，仅供参考；更精确的数据请使用工具查询）\n' + contextText },
+      { role: 'user', content: text },
+    ];
+
+    const toolsUsed = [];
+
+    for (let round = 1; round <= 5; round++) {
+      const res = await callWithTools(provider, messages, AGENT_TOOLS, apiKey);
+
+      // 模型要求调用工具 → 一次性回填 assistant 消息（含全部 tool_calls），再逐条回填 tool 结果
+      if (res.tool_calls && res.tool_calls.length > 0) {
+        messages.push({ role: 'assistant', content: null, tool_calls: res.tool_calls });
+
+        for (const tc of res.tool_calls) {
+          const fnName = tc.function && tc.function.name;
+          const fn = AGENT_TOOL_FUNCTIONS[fnName];
+          let resultData;
+
+          if (!fn) {
+            // 未知工具：返回错误，让模型自行决定如何回复（仍不降级）
+            resultData = { code: -1, message: `未知工具 ${fnName}`, data: null };
+          } else {
+            try {
+              const args = JSON.parse(tc.function.arguments || '{}');
+              // 只读铁律：强制使用服务端透传的 userId，防止模型篡改越权查询他人数据
+              args.userId = userId;
+              const r = await fn(args);
+              resultData = { code: r.code, data: r.data ?? null, message: r.message };
+              toolsUsed.push(fnName);
+            } catch (e) {
+              resultData = { code: -1, message: '工具执行失败: ' + (e && e.message ? e.message : e), data: null };
+            }
+          }
+
+          messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(resultData.data ?? resultData) });
+        }
+        continue; // 进入下一轮，让模型基于工具结果生成最终回复
+      }
+
+      // 模型给出最终文本回复（无 tool_calls）→ 正常返回
+      const reply = res.content || '';
+      return { ok: true, reply, toolsUsed, ver: FN_VERSION };
+    }
+
+    // 5 轮仍未产出最终回复 → 用已收集信息降级
+    console.log('[handleAgent] 达到最大轮数(5)，降级到 handleChat');
+    return handleChat(provider, body, apiKey);
+  } catch (e) {
+    // 任何工具 / DB / 模型异常 → 降级，保证始终有回复
+    console.log('[handleAgent] 异常，降级到 handleChat: ' + (e && e.message ? e.message : e));
+    return handleChat(provider, body, apiKey);
+  }
+}
+
 // 有些模型会在 JSON 外面包 ```json 代码块，这里做防御性清洗。
 // 同时兜底解析失败（空 result / 非法 JSON / 缺 types 字段）为 {types:["none"]}，
 // 避免 App 端拿到空 result 后直接崩溃。
@@ -367,7 +527,7 @@ exports.main = async (event, context) => {
 
     // 服务端兜底：纯通用回应（非聊天、非图片）强制 none，省一次模型调用且确定性生效，
     // 不依赖模型是否听话（提示词规则 10 的双保险）。含具体指令的（如"好的帮我改"）不拦。
-    if (body.mode !== 'chat' && !body.imageBase64 && body.text && isGenericAcknowledgement(body.text)) {
+    if (body.mode !== 'chat' && body.mode !== 'agent' && !body.imageBase64 && body.text && isGenericAcknowledgement(body.text)) {
       return { ok: true, result: { types: ['none'] }, ver: FN_VERSION };
     }
 
@@ -375,6 +535,19 @@ exports.main = async (event, context) => {
     if (body.mode === 'chat') {
       const chatRes = await handleChat(provider, body, apiKey);
       return { ...chatRes, ver: FN_VERSION };
+    }
+
+    // Agent 模式（新增）：带工具调用的智能助理，可查询用户已有数据后作答；
+    // 任何失败（无 userId / 工具异常 / 模型异常）都会在 handleAgent 内部降级回 handleChat。
+    if (body.mode === 'agent') {
+      const agentRes = await handleAgent(provider, body, apiKey);
+      return { ...agentRes, ver: FN_VERSION };
+    }
+
+    // 食物营养专项查询：本地营养库未命中时，联网查某食物每100g营养
+    if (body.mode === 'queryFood') {
+      const qr = await handleQueryFood(body, apiKey);
+      return { ...qr, ver: FN_VERSION };
     }
 
     const result = await callWithFallback(body, apiKey);
@@ -446,6 +619,71 @@ async function callWithFallback(body, apiKey) {
     }
     throw e;  // 无 fallback 可选，继续抛
   }
+}
+
+// 食物营养专项查询：用文本模型查某食物每100克营养，成功返回 { ok, result:{food} }。
+// 文本模型主选 body.provider（通常 sensenovaText），失败回退 qwenText。
+async function handleQueryFood(body, apiKey) {
+  const providerName = body.provider || 'sensenovaText';
+  const primary = PROVIDERS[providerName] || PROVIDERS.sensenovaText || PROVIDERS.qwenText;
+  const primaryKey = apiKey;
+
+  const textFallbackMap = {
+    sensenovaText: 'qwenText',
+    glmText: 'qwenText',
+    qianfanText: 'qwenText',
+    qwenText: null,
+  };
+  const fallbackName = textFallbackMap[providerName] || null;
+  const fallback = fallbackName ? (PROVIDERS[fallbackName] || null) : null;
+  const fallbackKey = fallback ? (process.env[fallback.apiKeyEnv] || primaryKey) : null;
+
+  const foodName = (body.foodName || '').trim();
+  if (!foodName) return { ok: false, error: '缺少 foodName' };
+
+  const text = `查询食物：${foodName}`;
+
+  // 合并 food 字段（兼容模型可能返回 top-level 或嵌套 food）
+  function buildResult(raw) {
+    const food = raw && raw.food ? raw.food : raw;
+    const kcal = Number(food.calories || food.kcal || 0);
+    const name = (food.name || '').trim();
+    if (!name || !(kcal > 0)) return null;
+    return {
+      ok: true,
+      result: {
+        food: {
+          name: name,
+          calories: kcal,
+          protein: Number(food.protein || 0),
+          carbs: Number(food.carbs || 0),
+          fat: Number(food.fat || 0),
+        },
+      },
+    };
+  }
+
+  // 尝试主文本模型
+  try {
+    const r = await callChatCompletions(primary, { text, systemOverride: SYSTEM_PROMPT_FOOD }, primaryKey);
+    const ok = buildResult(r);
+    if (ok) return ok;
+  } catch (e) {
+    console.log(`[queryFood] ${providerName} 失败：${e.message}`);
+  }
+
+  // 回退文本模型
+  if (fallback && fallbackKey) {
+    try {
+      const r = await callChatCompletions(fallback, { text, systemOverride: SYSTEM_PROMPT_FOOD }, fallbackKey);
+      const ok = buildResult(r);
+      if (ok) return ok;
+    } catch (e2) {
+      console.log(`[queryFood] 回退 ${fallbackName} 失败：${e2.message}`);
+    }
+  }
+
+  return { ok: false, error: '未查询到该食物营养', result: { types: ['none'] } };
 }
 
 // 后处理：营养成分表上的能量常以 kJ 标注，而 calories 要求 kcal，统一换算

@@ -1,0 +1,64 @@
+classDiagram
+    class RecognizeFunction {
+        +main(event, context)
+        +handleAgent(provider, body, apiKey) ok_reply
+        +handleChat(provider, body, apiKey) ok_reply
+        -callChatRaw(provider, messages, apiKey) string
+        -callWithTools(provider, messages, tools, apiKey) choice
+        -parseEventBody(event) body
+    }
+
+    class AgentLoop {
+        +run(messages, tools, provider, apiKey) reply
+        -maxIterations: 5
+        -parseToolCalls(msg) ToolCall[]
+        -appendToolResult(messages, call, result)
+    }
+
+    class AgentTools {
+        +ENV_ID: string
+        +db
+        +queryRecords(userId, type, from, to, extraFilter) records
+        +query_bills(userId, from, to, category?) JSON
+        +query_foods(userId, from, to, meal?) JSON
+        +query_health(userId, metric?) JSON
+        +get_summary(userId, range) JSON
+        -aggregateByRange(range) from_to
+    }
+
+    class CloudBaseClient {
+        +collection(name)
+        +where(cond)
+        +get() records
+        +aggregate() pipeline
+    }
+
+    class SenseNovaClient {
+        +endpoint: string
+        +callChatRaw(messages, apiKey) string
+        +callWithTools(messages, tools, apiKey) choice
+    }
+
+    class AgentSchema {
+        +TOOL_DEFINITIONS: JSON[]
+        +query_bills_schema
+        +query_foods_schema
+        +query_health_schema
+        +get_summary_schema
+    }
+
+    class AgentPrompt {
+        +SYSTEM_PROMPT_AGENT: string
+        -enforceReadOnly() string
+    }
+
+    RecognizeFunction ..> AgentLoop : 调用
+    RecognizeFunction ..> AgentPrompt : 取系统提示
+    AgentLoop ..> SenseNovaClient : 调模型
+    AgentLoop ..> AgentTools : 执行工具
+    AgentLoop ..> AgentSchema : 取工具定义
+    AgentTools ..> CloudBaseClient : 只读查询
+    SenseNovaClient ..> AgentSchema : tools 参数
+
+    note for AgentTools "全部只读：\n.where().get() / .aggregate()\n绝不 .add/.update/.set/.remove\n强制 userId + deleted:false"
+    note for AgentLoop "循环上限 5 轮；\n无 tool_calls → 降级 handleChat"
