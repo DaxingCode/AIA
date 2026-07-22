@@ -71,6 +71,7 @@ struct HealthDetailView: View {
             }
             AIBottomBar()
         }
+        .background(Color(.secondarySystemBackground))
         .navigationTitle("健康指标")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showEdit) { EditHealthView(metric: metric) }

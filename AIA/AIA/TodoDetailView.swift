@@ -53,6 +53,7 @@ struct TodoDetailView: View {
             .background(AIATheme.fillSoft)
             AIBottomBar()
         }
+        .background(Color(.secondarySystemBackground))
         .navigationTitle("待办详情")
         .navigationBarTitleDisplayMode(.inline)
         .alert("提示", isPresented: Binding(get: { toast != nil }, set: { if !$0 { toast = nil } })) {

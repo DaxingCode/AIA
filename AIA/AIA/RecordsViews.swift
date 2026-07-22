@@ -277,6 +277,7 @@ struct FoodListView: View {
                 AIPrompt(text: "点相册上传、记录美食", pointsTo: .album)
             ])
         }
+        .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("food.navTitle"))
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -537,6 +538,7 @@ struct HealthListView: View {
             }
             AIBottomBar()
         }
+        .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("health.navTitle"))
     }
 
@@ -888,6 +890,7 @@ struct BillListView: View {
                 AIPrompt(text: "点相册上传，自动记账", pointsTo: .album)
             ])
         }
+        .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("tab.bill"))
         .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker)
         .sheet(isPresented: $showBudgetEditor) {
@@ -1397,6 +1400,7 @@ struct ReminderListView: View {
                 AIPrompt(text: "点相册上传，自动识别待办", pointsTo: .album)
             ])
         }
+        .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("tab.todo"))
     }
 

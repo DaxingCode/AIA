@@ -165,6 +165,7 @@ struct AllRecordsView: View {
             }
             AIBottomBar()
         }
+        .background(Color(.secondarySystemBackground))
         .navigationTitle("全部记录")
         .navigationBarTitleDisplayMode(.inline)
     }

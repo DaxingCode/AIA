@@ -109,6 +109,7 @@ struct WeightTrendView: View {
         }
         AIBottomBar()
     }
+    .background(Color(.secondarySystemBackground))
     .navigationTitle("体重趋势")
         .navigationBarTitleDisplayMode(.inline)
         .alert("提示", isPresented: Binding(get: { toast != nil }, set: { if !$0 { toast = nil } })) {
