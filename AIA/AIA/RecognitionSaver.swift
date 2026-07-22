@@ -195,32 +195,25 @@ enum RecognitionSaver {
         return session
     }
 
-    /// 识别完成后的「入库 + 疑似重复提示」决策：
-    /// - 图片类：先算 aHash 指纹，与历史指纹比对。无论是否命中重复都**正常 autoSave 入库**
-    ///   （命中重复时把原记录摘要挂到 session.duplicateHint，确认页顶部显示「似乎已记录过」警告，
-    ///   由用户决定编辑/保留/删除，不再硬拦）；未命中正常登记指纹。
-    /// - 无图类（语音等）：直接 autoSave（无图则无指纹可比，永不走重复分支）。
+    /// 识别完成后的「检查重复（不入库）+ 生成确认页面」：
+    /// - 图片类：算 aHash 指纹，与历史指纹比对。命中重复→.duplicate（挂警告，不入库）；
+    ///   未命中→.pending（新鲜结果，等待用户保存时才真正入库并登记指纹）。
+    /// - 无图类（语音等）：无指纹可比，永不走重复分支→直接 .pending。
     @MainActor
-    static func saveOrCheckDuplicate(result: RecognitionResult, rawText: String,
-                                     image: UIImage?, context: ModelContext,
-                                     source: RecognizeService.RecognitionSource = .cloud) -> SaveDecision {
+    static func preparePresent(result: RecognitionResult, rawText: String,
+                                image: UIImage?, context: ModelContext,
+                                source: RecognizeService.RecognitionSource = .cloud) -> RecognitionPresent {
         if let img = image, let hash = ImageHasher.aHash(img) {
-            let existing = DuplicateStore.match(hash)
-            let session = autoSave(result: result, rawText: rawText, image: image, context: context)
-            session.source = source
-            DuplicateStore.add(DuplicateEntry(hash: hash, recognizedAt: .now,
-                                              types: (result.types ?? []).joined(separator: ","),
-                                              summary: summary(of: result)))
-            if let existing {
-                session.duplicateHint = DuplicateHint(recognizedAt: existing.recognizedAt,
-                                                      summary: existing.summary,
-                                                      existingTypes: existing.types)
+            if let existing = DuplicateStore.match(hash) {
+                return .duplicate(DuplicatePayload(result: result, rawText: rawText,
+                                                    sourceImage: image,
+                                                    hash: hash,
+                                                    recognizedAt: existing.recognizedAt,
+                                                    summary: existing.summary,
+                                                    existingTypes: existing.types))
             }
-            return .saved(session)
         }
-        let session = autoSave(result: result, rawText: rawText, image: image, context: context)
-        session.source = source
-        return .saved(session)
+        return .pending(result, rawText: rawText, image: image, source: source)
     }
 
     /// 生成人类可读的识别摘要（用于重复警告横幅）。

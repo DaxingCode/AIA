@@ -203,16 +203,16 @@ struct ContentView: View {
     }
 
     /// 检查后台识别留下的待确认结果（截图无感识别链路）：
-    /// 走 saveOrCheckDuplicate —— 命中历史重复指纹也会**自动入库**，仅顶部弹「似乎已记录过」警告，
+    /// 走 preparePresent —— 只做重复检测、不入库；确认页点保存才写入。
     /// 由用户决定编辑/保留/删除；未命中指纹则正常入库。两者都弹确认页供覆盖修改。
     @MainActor
     private func checkScreenshotPending() {
         guard pendingPresent == nil else { return }
         if let p = ScreenshotStore.loadPending() {
             let img = ScreenshotStore.loadPendingImage()
-            let decision = RecognitionSaver.saveOrCheckDuplicate(result: p.result, rawText: p.rawText,
+            let present = RecognitionSaver.preparePresent(result: p.result, rawText: p.rawText,
                                                                 image: img, context: context, source: p.source ?? .cloud)
-            pendingPresent = decision.present
+            pendingPresent = present
         }
     }
 

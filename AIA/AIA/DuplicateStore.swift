@@ -46,12 +46,14 @@ enum SaveDecision {
 
 /// 确认页呈现载荷（统一三个入口的驱动状态）。
 enum RecognitionPresent: Identifiable {
-    case saved(SavedSession)
-    case duplicate(DuplicatePayload)
+    case saved(SavedSession)      // 已自动入库（旧流程，保留兼容）
+    case duplicate(DuplicatePayload)  // 命中重复（尚未入库）
+    case pending(RecognitionResult, rawText: String, image: UIImage?, source: RecognizeService.RecognitionSource)  // 新鲜识别，未入库
     var id: String {
         switch self {
         case .saved(let s): return "saved-\(s.id.uuidString)"
         case .duplicate(let d): return "dup-\(d.hash)"
+        case .pending: return "pending-\(UUID().uuidString)"
         }
     }
 }

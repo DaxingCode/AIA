@@ -562,8 +562,8 @@ func runImageRecognition(image: UIImage,
             let res = output.result
             let rawText = output.rawText
             await MainActor.run {
-                let decision = RecognitionSaver.saveOrCheckDuplicate(result: res, rawText: rawText, image: image, context: context, source: output.source)
-                coverItem.wrappedValue = .present(decision.present)
+                let present = RecognitionSaver.preparePresent(result: res, rawText: rawText, image: image, context: context, source: output.source)
+                coverItem.wrappedValue = .present(present)
             }
         } catch let decoding as DecodingError {
             await MainActor.run {

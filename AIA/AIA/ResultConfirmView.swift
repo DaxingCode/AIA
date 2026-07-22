@@ -1,6 +1,6 @@
 // ResultConfirmView.swift
 // 识别结果确认页。两种来源：
-//  - 正常流程：识别完成即已 autoSave 入库（见 RecognitionSaver.saveOrCheckDuplicate → .saved），
+//  - 正常流程（2026-07-22 起）：识别完成**不入库**，用户点右上角「保存」才调 autoSave 写入。
 //    本页只做「查看 / 覆盖修改」，点「保存」更新已存记录，点「返回」已存结果不变。
 //  - 重复流程：识别结果图片命中历史指纹时**仍自动入库**，本页顶部显示「似乎已记录过」警告，
 //    告知用户可能与已有记录重复；记录已入库，用户可直接编辑/保留，或在对应列表里删除。
@@ -708,9 +708,18 @@ struct ResultConfirmView: View {
         if let existing = existingSession {
             session = existing
         } else {
-            // 重复流程：此刻才真正入库并登记指纹（UI 点击在主线，安全调用 @MainActor）
+            // 新鲜识别 / 重复流程：此刻才真正入库并登记指纹（UI 点击在主线，安全调用 @MainActor）
             session = MainActor.assumeIsolated {
                 let s = RecognitionSaver.autoSave(result: result, rawText: rawText, image: sourceImage, context: ctx)
+                // 如果用户通过新鲜识别点保存，登记指纹供后续去重
+                if let img = sourceImage, let hash = ImageHasher.aHash(img) {
+                    // 命中重复（duplicate 非空）时不上报新指纹 —— 原指纹已在初次保存时登记
+                    if duplicate == nil {
+                        DuplicateStore.add(DuplicateEntry(hash: hash, recognizedAt: .now,
+                                                          types: (result.types ?? []).joined(separator: ","),
+                                                          summary: RecognitionSaver.summary(of: result)))
+                    }
+                }
                 if let d = duplicate {
                     DuplicateStore.add(DuplicateEntry(hash: d.hash, recognizedAt: .now,
                                                       types: types.joined(separator: ","),
@@ -843,7 +852,7 @@ struct ResultConfirmView: View {
     }
 }
 
-/// 工厂：把统一的 RecognitionPresent 转成 ResultConfirmView（含正常/重复两种分支）。
+/// 工厂：把统一的 RecognitionPresent 转成 ResultConfirmView（含正常/重复/新鲜三种分支）。
 func makeResultConfirmView(_ present: RecognitionPresent) -> ResultConfirmView {
     switch present {
     case .saved(let s):
@@ -852,5 +861,8 @@ func makeResultConfirmView(_ present: RecognitionPresent) -> ResultConfirmView {
     case .duplicate(let d):
         return ResultConfirmView(result: d.result, rawText: d.rawText, sourceImage: d.sourceImage,
                                  source: d.source, duplicate: d)
+    case .pending(let result, let rawText, let image, let source):
+        return ResultConfirmView(result: result, rawText: rawText, sourceImage: image,
+                                 source: source, existingSession: nil, duplicate: nil)
     }
 }
