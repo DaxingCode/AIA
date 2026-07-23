@@ -85,23 +85,6 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // AI 头部
-            HStack(spacing: 12) {
-                Image("AIAvatar")
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 40, height: 40)
-                    .clipShape(Circle())
-                    .overlay(Circle().stroke(AIATheme.hairline, lineWidth: 0.5))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("我是阿宝").font(AIATheme.Font.callout.weight(.medium))
-                    Text("你的私人专属AI助理").font(AIATheme.Font.micro).foregroundStyle(AIATheme.muted)
-                }
-                Spacer()
-            }
-            .padding(.horizontal)
-            .padding(.bottom, 14)
-
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
