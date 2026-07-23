@@ -15,7 +15,7 @@ import Foundation
 enum AppPersistence {
     /// 当前 SwiftData schema 版本（仅用于记录，不再参与文件名）。
     /// 每次改 @Model 字段或新增模型：+1 并在 AIAMigrationPlan 加对应 Stage。
-    static let currentSchemaVersion = 7
+    static let currentSchemaVersion = 9
 
     /// 统一 store 文件（不再随版本号变化）。
     static var storeURL: URL {
@@ -31,8 +31,8 @@ enum AppPersistence {
             .appendingPathComponent("Backups")
     }
 
-    /// 当前 schema：从 AIAMigrationPlan 的 v7 版本化 schema 构造，确保迁移计划能识别。
-    static var schema: Schema { Schema(versionedSchema: SchemaVersion7.self) }
+    /// 当前 schema：从 AIAMigrationPlan 的 v9 版本化 schema 构造，确保迁移计划能识别。
+    static var schema: Schema { Schema(versionedSchema: SchemaVersion9.self) }
 
     /// 崩溃安全：磁盘库任何原因初始化失败，回退到内存存储，保证至少能写入（不白屏）。
     static func makeContainer() -> ModelContainer {
@@ -42,16 +42,24 @@ enum AppPersistence {
         let config = ModelConfiguration(schema: schema, url: storeURL)
 
         // 1. 正式迁移：用 MigrationPlan 自动升级 schema 版本元数据
-        if let c = try? ModelContainer(for: schema, migrationPlan: AIAMigrationPlan.self, configurations: [config]) {
+        do {
+            let c = try ModelContainer(for: schema, migrationPlan: AIAMigrationPlan.self, configurations: [config])
+            print("✅ [AppPersistence] 磁盘库打开成功 store=\(storeURL.lastPathComponent) schemaVersion=9")
             return c
+        } catch {
+            print("❌ [AppPersistence] 磁盘库+迁移计划打开失败：\(error.localizedDescription)\n  → 失败原因通常是 schema checksum 不匹配或 v8→v9 迁移无法识别同 model（v8 内嵌 RecurringRule vs v9 外层 RecurringRule 不同 class identity）")
         }
         // 2. 兜底：迁移计划失败时，尝试无迁移计划直接打开（旧 v2 文件元数据异常时的逃生通道）
-        print("⚠️ SwiftData 迁移计划失败，尝试无迁移计划直接打开...")
-        if let c = try? ModelContainer(for: schema, configurations: [config]) {
+        do {
+            let c = try ModelContainer(for: schema, configurations: [config])
+            print("⚠️ [AppPersistence] 跳过迁移计划直接打开成功——这通常意味着 schema 已被识别为 v9，不需要迁移")
             return c
+        } catch {
+            print("❌ [AppPersistence] 跳过迁移也失败：\(error.localizedDescription)\n  → 极可能是 SwiftData 模型类 identity 与 store 不匹配，将回退到内存存储（**冷启动数据会丢**）")
         }
         // 3. 最终兜底：内存存储，保证不白屏
-        print("⚠️ SwiftData 磁盘库初始化失败，回退到内存存储（数据仅本会话有效）")
+        // ⚠️ 重要：内存存储意味着每次冷启动数据全丢，必须在控制台醒目提示
+        print("🔴 [AppPersistence] 最终回退：内存存储！本次会话写入不会持久化，下次冷启动全丢。")
         let mem = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         return (try? ModelContainer(for: schema, configurations: [mem]))!
     }
