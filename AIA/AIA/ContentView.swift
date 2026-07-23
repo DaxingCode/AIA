@@ -90,10 +90,7 @@ struct ContentView: View {
                 }
             }
             .navigationDestination(for: HomeRoute.self) { route in
-                #if DEBUG
-                print("[ContentView] navigationDestination for \(route)")
-                #endif
-                return Group {
+                Group {
                     switch route {
                     case .diet:      FoodListView()
                     case .health:    HealthListView()
@@ -119,6 +116,10 @@ struct ContentView: View {
             #if DEBUG
             print("[ContentView] onAppear, pending=\(quickAction.pending?.rawValue ?? "nil")")
             #endif
+            // 一次性去重：清理重复记录（仅首次启动执行）
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                DataDeduplicator.runOnce(context: context)
+            }
             if let action = quickAction.pending { consume(action) }
             if let route = AppDelegate.pendingNotificationRoute {
                 consumeNotificationRoute(route)
@@ -260,8 +261,7 @@ struct ContentView: View {
             animatedTile(3, tile: todoTile)
         }
         .task {
-            // 延迟一帧，确保 LazyVGrid 首帧以隐藏态渲染，再过渡到可见触发入场动画
-            try? await Task.sleep(nanoseconds: 60_000_000)
+            // 立即进入可见态：杀后台冷启动时不再让人为延迟让用户等 0.8s
             animateTiles = true
         }
         .onDisappear {
