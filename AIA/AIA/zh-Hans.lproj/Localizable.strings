@@ -87,12 +87,16 @@
 "food.belowGoal" = "低于目标，可加餐 🍎";
 "food.overGoal" = "已超目标，注意控制";
 "food.burned" = "今日消耗";
+"food.tdeeLabel" = "TDEE kcal";
+"food.water" = "今日饮水";
 "food.nutrition" = "营养构成";
 "food.nutritionTarget" = "目标 蛋白%d / 碳水%d / 脂肪%d g";
 "food.macro.protein" = "蛋白质";
 "food.macro.carb" = "碳水";
 "food.macro.fat" = "脂肪";
 "food.macro.fiber" = "膳食纤维";
+"food.macro.sugar" = "糖";
+"food.macro.sodium" = "钠";
 "food.last7days" = "近 7 日热量";
 "food.empty.title" = "还没有%@记录";
 "food.empty.desc" = "点底部相机拍照识别";

@@ -273,19 +273,49 @@ struct FoodListView: View {
                     }
                     .padding(.bottom, 4)
 
-                    // 净热量卡 + 今日能量消耗
+                    // 3 列热量指标：净热量 / TDEE / 今日消耗（等宽 + 细竖线分隔）
                     HStack(spacing: 8) {
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("\(Int(net))").font(AIATheme.Font.title3.weight(.semibold)).foregroundStyle(AIATheme.food)
-                                Text(NSLocalizedString("food.netLabel", comment: "")).font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
+                        HStack(spacing: 0) {
+                            // 净热量（英雄数字，食物色突出）
+                            VStack(spacing: 2) {
+                                Text("\(Int(net))")
+                                    .font(AIATheme.Font.title3.weight(.semibold))
+                                    .foregroundStyle(AIATheme.food)
+                                Text(NSLocalizedString("food.netLabel", comment: ""))
+                                    .font(AIATheme.Font.micro)
+                                    .foregroundStyle(AIATheme.sub)
                             }
-                            Divider().frame(height: 32)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(String(format: NSLocalizedString("food.intakeTdee", comment: ""), Int(selectedCalories), Int(tdee))).font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
-                                Text(net < 0 ? NSLocalizedString("food.belowGoal", comment: "") : NSLocalizedString("food.overGoal", comment: "")).font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
+                            .frame(maxWidth: .infinity)
+
+                            Rectangle()
+                                .fill(AIATheme.hairline)
+                                .frame(width: 0.5, height: 32)
+
+                            // TDEE（基础能量消耗，ink 色中性）
+                            VStack(spacing: 2) {
+                                Text("\(Int(tdee))")
+                                    .font(AIATheme.Font.title3.weight(.semibold))
+                                    .foregroundStyle(AIATheme.ink)
+                                Text(NSLocalizedString("food.tdeeLabel", comment: ""))
+                                    .font(AIATheme.Font.micro)
+                                    .foregroundStyle(AIATheme.sub)
                             }
-                            Spacer()
+                            .frame(maxWidth: .infinity)
+
+                            Rectangle()
+                                .fill(AIATheme.hairline)
+                                .frame(width: 0.5, height: 32)
+
+                            // 今日消耗（活动能量，ink 色中性）
+                            VStack(spacing: 2) {
+                                Text("\(Int(health.activeEnergyToday))")
+                                    .font(AIATheme.Font.title3.weight(.semibold))
+                                    .foregroundStyle(AIATheme.ink)
+                                Text(NSLocalizedString("food.burned", comment: "") + " kcal")
+                                    .font(AIATheme.Font.micro)
+                                    .foregroundStyle(AIATheme.sub)
+                            }
+                            .frame(maxWidth: .infinity)
                         }
                         .padding(12)
                         .background(AIATheme.billBG)

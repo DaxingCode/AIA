@@ -87,12 +87,16 @@
 "food.belowGoal" = "Under goal, have a snack 🍎";
 "food.overGoal" = "Over goal, watch your intake";
 "food.burned" = "Burned";
+"food.tdeeLabel" = "TDEE kcal";
+"food.water" = "Water";
 "food.nutrition" = "Nutrition";
 "food.nutritionTarget" = "Goal Protein %d / Carb %d / Fat %d g";
 "food.macro.protein" = "Protein";
 "food.macro.carb" = "Carb";
 "food.macro.fat" = "Fat";
 "food.macro.fiber" = "Fiber";
+"food.macro.sugar" = "Sugar";
+"food.macro.sodium" = "Sodium";
 "food.last7days" = "Last 7 Days Calories";
 "food.empty.title" = "No %@ records yet";
 "food.empty.desc" = "Tap the camera at the bottom to scan";
