@@ -1103,6 +1103,47 @@ struct ChatView: View {
         return "\(opener)：已记录「\(name)」～如需修改可在饮食记录页面调整。"
     }
 
+    /// 用户只说食物名（不记录）时，回复每 100g 营养数据。
+    /// 本地营养库命中直接回复；未命中则联网 queryFood 并缓存到 FoodMetaStore。
+    private func handleFoodQuery(_ text: String) async -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 排除有明确记录/查询意图外的其他词（如「好的」「知道了」）
+        let nonFoodSignals = ["好的", "知道了", "嗯嗯", "谢谢", "收到", "哈", "哈哈", "没问题", "可以", "ok", "okay", "知道"]
+        if nonFoodSignals.contains(trimmed.lowercased()) { return nil }
+
+        // 尝试匹配本地营养库
+        let ref: FoodRef
+        if let local = NutritionLibrary.shared.match(trimmed) {
+            ref = local
+        } else if let meta = FoodMetaStore.lookup(trimmed, in: context) {
+            ref = FoodRef(name: meta.displayName.isEmpty ? trimmed : meta.displayName,
+                          kcal: meta.kcal, protein: meta.protein, carbs: meta.carbs, fat: meta.fat,
+                          fiber: meta.fiber, sugar: meta.sugar, sodium: meta.sodium)
+        } else {
+            // 本地无数据 → 联网查询
+            guard let cloudRef = try? await RecognizeService.queryFood(name: trimmed) else { return nil }
+            // 缓存到本地，下次直接命中
+            FoodMetaStore.upsert(name: trimmed, displayName: cloudRef.name,
+                                 kcal: cloudRef.kcal, protein: cloudRef.protein,
+                                 carbs: cloudRef.carbs, fat: cloudRef.fat,
+                                 fiber: cloudRef.fiber, sugar: cloudRef.sugar, sodium: cloudRef.sodium,
+                                 source: "cloud", in: context)
+            ref = cloudRef
+        }
+
+        let kcal = String(format: "%.0f", ref.kcal)
+        let carb = String(format: "%.1f", ref.carbs)
+        let pro  = String(format: "%.1f", ref.protein)
+        let fat  = String(format: "%.1f", ref.fat)
+        let fib  = String(format: "%.1f", ref.fiber)
+        let sug  = String(format: "%.1f", ref.sugar)
+        let sod  = String(format: "%.0f", ref.sodium)
+
+        return "阿宝帮你查到「\(ref.name)」每100克" +
+               "热量\(kcal)kcal，碳水\(carb)g，蛋白质\(pro)g，脂肪\(fat)g，" +
+               "膳食纤维\(fib)g，糖\(sug)g，钠\(sod)mg，数据仅供参考。"
+    }
+
     /// 云端兜底也失败时的「尽力记录」：本地营养库查不到、云端也识别不出时，
     /// 仍把食物名+份量落库，热量记为 0 并提示用户稍后补全，避免被静默丢弃。
     /// 典型场景：云端 provider 配置缺失导致纯文字被发到视觉模型、识别成 none —— 食物绝不能因此消失。
@@ -1949,7 +1990,15 @@ struct ChatView: View {
                             responseText = await createFoodFromCloud(text: t, recentMessages: recentMessages)
                         }
                     } else {
-                        // 兜底：只有文本本身带有明确记录/创建意图，才走 parseText 保存记录；
+                        // 4. 食物查询：用户只说食物名（如「苹果」「米饭」「牛肉的热量」），
+                        //    不记录，只回复每100克营养数据。本地命中最快，未命中则联网查并缓存。
+                        var handled = false
+                        if let queryReply = await handleFoodQuery(t) {
+                            responseText = queryReply
+                            handled = true
+                        }
+                        if !handled {
+                            // 兜底：只有文本本身带有明确记录/创建意图，才走 parseText 保存记录；
                         // 否则（如"好的好的""嗯嗯""知道了"）强制走 AI 聊天，避免被上下文污染导致重复创建。
                         let hasCreateIntent = ChatView.hasExplicitCreateIntent(t)
                         if hasCreateIntent {
@@ -1972,7 +2021,8 @@ struct ChatView: View {
                         : try await RecognizeService.chat(text: t, context: dataContext)
                             responseText = reply.isEmpty ? localReply(for: t) : reply
                         }
-                    }
+                        }  // if !handled
+                    }  // 兜底 else
                 }
                 let aiMessage = ChatMessage(role: .ai, text: responseText, createdAt: userMessage.createdAt.addingTimeInterval(0.1))
                 context.insert(aiMessage)
