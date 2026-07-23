@@ -170,6 +170,10 @@ struct ContentView: View {
             checkScreenshotPending()
             // 回到前台时也补生成周期账单（长期未开 App 会补齐中间月份）
             RecurringBillManager.generateDue(context: context)
+            // 回到前台立即同步一次云端 → 4 宫格立刻显示最新数据，不再等 60s
+            if UserDefaults.standard.bool(forKey: "aia.isLoggedIn") {
+                sync.autoSyncIfEnabled(context: context)
+            }
             guard quickAction.pending != nil else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 if let p = quickAction.pending { consume(p) }
@@ -650,10 +654,18 @@ struct ContentView: View {
                 height: 5)
     }
 
-    // MARK: - 定时同步器（60 秒一次，作为前后台同步的补充）
+    // MARK: - 定时同步器（首次 0.3s 触发让首页先渲染，之后 60s 一次）
     private func startPeriodicSync() {
         syncTimer?.invalidate()
         guard UserDefaults.standard.bool(forKey: "aia.isLoggedIn") else { return }
+        // 首次同步：延迟 0.3s 让首页 @Query 先把本地空态渲染一帧，避免和首帧渲染抢资源；
+        // 然后立即从云端拉真实数据写回本地，4 宫格会随后自动刷新。
+        // 关键：之前 60s 干等的版本会让用户在 60s 内看到「全 0」的假数据，体验非常糟。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak sync] in
+            print("[ContentView] 首次同步触发（0.3s 延迟后）")
+            sync?.autoSyncIfEnabled(context: context)
+        }
+        // 之后每 60s 增量同步一次
         syncTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak sync] _ in
             print("[ContentView] 定时同步触发")
             sync?.autoSyncIfEnabled(context: context)
