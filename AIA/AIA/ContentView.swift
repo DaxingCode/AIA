@@ -35,6 +35,8 @@ struct ContentView: View {
     @State private var showCamera = false
     @State private var showPicker = false
     @State private var animateTiles = false
+    /// 阿宝头像呼吸脉冲动画开关
+    @State private var abaoPulse = false
     /// 账单宫格隐私遮罩：@AppStorage 自动持久化到 UserDefaults，重启 App 保持
     @AppStorage("billHidden") private var billHidden = false
 
@@ -265,7 +267,9 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .center, spacing: 8) {
+            abaoAvatar
+
             Text("\(Self.greetingEmoji) \(greeting)，\(userNickname)")
                 .font(AIATheme.Font.title2.weight(.semibold))
             Spacer()
@@ -278,13 +282,40 @@ struct ContentView: View {
                     .clipShape(Capsule())
             }
         }
-        .padding(.leading, 6)
+        .padding(.leading, 2)
     }
 
     /// 问候语随机 emoji（每次启动从池中随机选一个，不随界面刷新变化）
     private static let greetingEmoji: String = {
         ["👋", "😊", "🌟", "☀️", "✨", "🎉", "💪", "🫡", "👍", "🔥", "🌸", "🍀", "🥳", "😎"].randomElement() ?? "👋"
     }()
+
+    /// 阿宝头像：笑脸 SF Symbol + 琥珀淡底圆 + 呼吸脉冲动画（2.5s 循环胀缩）
+    private var abaoAvatar: some View {
+        Button {
+            // 未来：跳转阿宝聊天页
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(AIATheme.dietBG)
+                    .frame(width: 36, height: 36)
+                    .overlay(
+                        Circle().stroke(AIATheme.food.opacity(0.3), lineWidth: 1)
+                    )
+                Image(systemName: "face.smiling")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(AIATheme.food)
+                    .scaleEffect(abaoPulse ? 1.12 : 1.0)
+            }
+        }
+        .frame(width: 44, height: 44)
+        .buttonStyle(.plain)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 2.5).repeatForever(autoreverses: true)) {
+                abaoPulse = true
+            }
+        }
+    }
 
     /// 冷启动同步指示器：仅当本地无数据且首次同步尚未完成时显示。
     /// 告诉用户「数据正在路上，请稍等片刻」，避免看到空数据时感到疑惑。
