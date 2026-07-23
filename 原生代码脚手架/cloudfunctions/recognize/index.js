@@ -88,7 +88,7 @@ const PROVIDERS = {
 };
 
 // 版本标记：发布后 curl 可通过返回值里的 ver 字段确认是否部署了最新代码
-const FN_VERSION = '20260723a-reldate';
+const FN_VERSION = '20260723c-multifood';
 
 // 服务端兜底：纯通用回应（不论上下文）强制 types:["none"]，不依赖模型是否听话。
 // 与云端提示词规则 10 双保险，杜绝「好的/可以」被当成记录指令重复建待办。
@@ -125,7 +125,13 @@ const SYSTEM_PROMPT_IMAGE = `你是一个手机截图/照片理解引擎。用�
     { "merchant":"滴滴出行", "amount":24.0,  "currency":"CNY", "category":"交通", "time":"2026-07-16T09:10:00+08:00", "note":"" },
     { "merchant":"瑞幸咖啡", "amount":19.9,  "currency":"CNY", "category":"餐饮", "time":"2026-07-15T14:05:00+08:00", "note":"" }
   ],
-  "food":   { "name":"伊利畅轻风味发酵乳", "calories":100, "energyRaw":417, "energyUnit":"kJ", "protein":2.7, "carbs":14.0, "fat":3.6, "portion":"100克" },
+  "food":   { "name":"伊利畅轻风味发酵乳", "calories":100, "energyRaw":417, "energyUnit":"kJ", "protein":2.7, "carbs":14.0, "fat":3.6, "fiber":0, "sugar":12.0, "sodium":60, "portion":"100克" },
+  "foods":  [
+    { "name":"招牌白切隔山肉", "calories":350, "protein":22, "carbs":3, "fat":28, "portion":"150克" },
+    { "name":"青菜", "calories":50, "protein":4, "carbs":8, "fat":0.5, "portion":"200克" },
+    { "name":"米饭", "calories":200, "protein":4, "carbs":42, "fat":0.5, "portion":"1碗" },
+    { "name":"例汤", "calories":40, "protein":2, "carbs":4, "fat":1, "portion":"1碗" }
+  ],
   "todo":   { "title":"交月度报表", "due":"2026-07-16T18:00:00+08:00", "repeat":"none", "priority":"high" },
   "health": { "metric":"体检预约", "value":"2026-08-30", "unit":"", "note":"南宁江南分院，含空腹血糖" }
 }
@@ -136,7 +142,8 @@ const SYSTEM_PROMPT_IMAGE = `你是一个手机截图/照片理解引擎。用�
 4. 当前时间：{CURRENT_TIME}。所有相对时间（如"明天""周五""下周三""昨天""前天""星期二"）必须基于当前时间推算为绝对时间；返回的时间必须是 ISO8601 格式（含时区 +08:00）。
    - **支付宝/微信账单常见相对日期必须转换**："昨天 12:58" → "2026-07-22T12:58:00+08:00"，"星期二 19:09" → 取最近一个周二的绝对日期，"前天 15:30" → 前天对应时刻。**绝不能原样返回中文相对日期**。
 5. 支持一图多意图：例如"付完款记得交报表"应返回 ["bill","todo"] 两条。
-6. 食物热量是估算值，允许误差；如有包装/外卖图标请尽量准确。营养成分表优先读取每100克数据，portion 写"100克"或整包净含量。calories 字段必须是千卡（kcal）。同时返回 energyRaw（标签原始能量数值）和 energyUnit（kJ 或 kcal）。如果 energyUnit 是 kJ 或 千焦，calories = energyRaw / 4.184；如果 energyUnit 是 kcal 或 千卡，calories = energyRaw。换算结果允许四舍五入到整数。
+6. 食物热量是估算值，允许误差；如有包装/外卖图标请尽量准确。营养成分表优先读取每100克数据，portion 写"100克"或整包净含量。calories 字段必须是千卡（kcal）。同时返回 energyRaw（标签原始能量数值）和 energyUnit（kJ 或 kcal）。如果 energyUnit 是 kJ 或 千焦，calories = energyRaw / 4.184；如果 energyUnit 是 kcal 或 千卡，calories = energyRaw。换算结果允许四舍五入到整数。**除 calories/protein/carbs/fat 外，还必须返回 fiber（膳食纤维 g/100g）、sugar（糖 g/100g）、sodium（钠 mg/100g）三项**——这三项是用户每日摄入追踪的关键指标，缺一即视为识别不完整。如果图片/包装上没标注，可按常见食物的典型值估算（如白米饭 fiber≈0.3、sugar≈0.1、sodium≈1），绝不能默认 0 或省略字段。
+7. **一图多食物必须拆条输出「foods」数组**：如果图片包含**多种独立食物**（如「招牌白切隔山肉+青菜+米饭+例汤」「三菜一汤」等套餐/多品餐食），必须识别每一种食物并输出一个「foods」数组，数组的每个元素是一条独立的食物对象（字段同单条 food：name/calories/protein/carbs/fat/portion）。即使其中某种食物营养价值低或份量小，也照常输出，**不要**为了省事合并成一条。单种食物（/纯米饭/单一菜品）仍用单条「food」对象即可，只有一图多种食物才用「foods」数组。「types」写 ["food"]。
 7. 如果是聊天截图，请提取其中截图或文字里的关键信息；如果聊天内容本身没有明确可记录的 bill/food/todo/health，则返回 types: ["none"]。
 8. 体检预约、检查报告、医疗相关内容优先归为 health；如果内容中包含明确的执行/预约时间（如"8月30日""周五"），必须额外生成一条 todo：title 写具体事项（如"去江南分院体检"），due 填对应的 ISO8601 时间，repeat 默认 "none"，priority 默认 "high"，并让 types 同时包含 "health" 和 "todo"。
 9. 食品包装上的营养成分表属于 food，不属于 health。
@@ -163,7 +170,7 @@ const SYSTEM_PROMPT_TEXT = `你是一个智能生活记录助手。用户会发�
   "types": ["bill"],
   "confidence": 0.92,
   "bill": { "merchant":"滴滴出行", "amount":24.0, "currency":"CNY", "category":"交通", "time":"2026-07-16T09:10:00+08:00", "note":"", "action":"create", "targetTitle":"" },
-  "food": { "name":"伊利畅轻风味发酵乳", "calories":100, "protein":2.7, "carbs":14.0, "fat":3.6, "portion":"100克", "meal":"早餐", "action":"create", "targetTitle":"" },
+  "food": { "name":"伊利畅轻风味发酵乳", "calories":100, "protein":2.7, "carbs":14.0, "fat":3.6, "fiber":0, "sugar":12.0, "sodium":60, "portion":"100克", "meal":"早餐", "action":"create", "targetTitle":"" },
   "todo": { "title":"交月度报表", "due":"2026-07-16T18:00:00+08:00", "repeat":"none", "priority":"high", "action":"create", "targetTitle":"" }
 }
 规则：
@@ -172,7 +179,7 @@ const SYSTEM_PROMPT_TEXT = `你是一个智能生活记录助手。用户会发�
 3. 金额用数字；货币默认 "CNY"。收入类关键词（工资、报销、退款、奖金、转账收入、投资收益）金额记为正数。
 4. 当前时间：{CURRENT_TIME}。所有相对时间（如"明天""下午3点""周五""下周三""7月30日"）必须基于当前时间推算为绝对时间；如未说明日期，默认是最近的一个未来时间点。返回的时间必须是 ISO8601 格式（含时区 +08:00）。
 5. 支持一消息多意图：例如"付完款记得交报表"应返回 ["bill","todo"]。
-6. 食物返回的是用户所描述分量的总热量与总营养（不是每100克），calories 字段必须是千卡（kcal），protein/carbs/fat 是总克数。portion 写用户描述的分量，如"1个""1杯""100克"。**meal 字段根据用户消息里的餐次关键词推断：早餐/早饭→早餐、午餐/午饭→午餐、晚餐/晚饭/夜宵→晚餐、加餐/点心/零食→加餐；如用户未提及则省略该字段。**
+6. 食物返回的是用户所描述分量的总热量与总营养（不是每100克），calories 字段必须是千卡（kcal），protein/carbs/fat/fiber/sugar 是总克数，sodium 是总毫克数。portion 写用户描述的分量，如"1个""1杯""100克"。**meal 字段根据用户消息里的餐次关键词推断：早餐/早饭→早餐、午餐/午饭→午餐、晚餐/晚饭/夜宵→晚餐、加餐/点心/零食→加餐；如用户未提及则省略该字段。**
 7. 如果无法判断，返回 types: ["none"]。
 8. **重要：区分「提问」与「记录指令」。如果用户只是在提问（消息包含"？"、"几点"、"多少"、"吗"、"呢"、"怎么"、"为什么"、"什么"、"如何"、"谁"、"哪里"、"哪位"、"请问"等疑问词，或以问号结尾），不要把它当作待办/饮食/账单。请返回 types: ["none"]，不要生成任何 payload。**
    例如："今晚几点睡？"是提问，应返回 types: ["none"]；"帮我设置一个22:00的睡觉提醒"才是记录指令，应返回 types: ["todo"]。
