@@ -139,11 +139,9 @@ struct ChatView: View {
                     scrollToBottom(proxy: proxy, delay: 0.03)
                 }
                 .onChange(of: isInputFocused) { _, focused in
-                    // 键盘弹出时把最新消息滚入可见区，避免被输入栏/键盘遮挡。
-                    // 延迟 0.30s 等键盘动画完成，否则 scrollTo 会被弹出的键盘压住。
-                    if focused {
-                        scrollToBottom(proxy: proxy, delay: 0.30)
-                    }
+                    // 键盘弹出/收起时都把最新消息滚入可见区，避免被输入栏/键盘遮挡。
+                    // 双向都延迟 0.30s 等键盘动画完成（弹/收），否则 scrollTo 会被键盘插值压住。
+                    scrollToBottom(proxy: proxy, delay: 0.30)
                 }
             }
         }
