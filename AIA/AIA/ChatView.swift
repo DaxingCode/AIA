@@ -72,6 +72,10 @@ struct ChatView: View {
     // 这样新消息时间更晚，会自然把招呼顶上去，而不是永远钉在底部。
     @State private var greetingMessage: ChatMessage?
 
+    /// 用户说了食物但没给重量时，暂存食物名与餐次，等用户回复重量。
+    /// 非 nil 时 app 先问「你大概吃了多少重量呀？」，收到重量回复后再结合入库。
+    @State private var pendingWeightFood: (name: String, meal: String)?
+
     private var displayedMessages: [ChatMessage] {
         if let g = greetingMessage {
             return (messages + [g]).sorted { $0.createdAt < $1.createdAt }
@@ -1010,6 +1014,13 @@ struct ChatView: View {
         let items = ChatView.parseFoodItems(from: text)
         guard !items.isEmpty else { return nil }
 
+        // 如果用户没给重量/份量，先追问不急着入库
+        if !ChatView.hasWeightInfo(text) {
+            let firstItem = items[0]
+            pendingWeightFood = (firstItem.name, meal)
+            return nil
+        }
+
         // 所有项必须都能本地命中才走本地直存；任一缺营养就交给云端查询路径。
         var entries: [FoodEntry] = []
         var summaries: [String] = []
@@ -1078,6 +1089,18 @@ struct ChatView: View {
         return summaries.count == 1
             ? "\(opener)：\(summaries[0])" + disclaimer
             : "\(opener)：\n" + summaries.joined(separator: "\n") + disclaimer
+    }
+
+    /// 用户回复了重量后，组合成完整的食物文本再走正常创建流程。
+    private func createFoodWithWeight(name: String, text: String, meal: String) -> String {
+        // 构建合成文本让 createFoodLocally 复用同一套解析逻辑
+        let syntheticText = "\(meal)吃了\(text)\(name)"
+        if let result = createFoodLocally(from: syntheticText) {
+            return result
+        }
+        // 兜底：即使合成文本也解析失败，至少记下食物名（让用户知道已处理）
+        let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
+        return "\(opener)：已记录「\(name)」～如需修改可在饮食记录页面调整。"
     }
 
     /// 云端兜底也失败时的「尽力记录」：本地营养库查不到、云端也识别不出时，
@@ -1894,11 +1917,34 @@ struct ChatView: View {
                     else if let waterMsg = createWaterIntake(from: t) {
                         responseText = waterMsg
                     }
+                    // 2.6. 等待重量回复：之前有食物待补充重量（如用户说了「吃了苹果」没给重量）
+                    else if let pending = pendingWeightFood {
+                        pendingWeightFood = nil  // 先清 pending，后续根据回复决定是否重设
+                        if let (w, p) = ChatView.parseWeightOnly(t) {
+                            // 用户明确回复了重量 → 组合创建
+                            responseText = createFoodWithWeight(name: pending.name, text: p, meal: pending.meal)
+                        } else if isFoodLike(t) {
+                            // 用户说了一个新食物 → 替代 pending，走正常食物分支
+                            if let localFood = createFoodLocally(from: t) {
+                                responseText = localFood
+                            } else if let newPending = self.pendingWeightFood {
+                                responseText = "你大概吃了多少\(newPending.name)呀？"
+                            } else {
+                                responseText = await createFoodFromCloud(text: t, recentMessages: recentMessages)
+                            }
+                        } else {
+                            // 用户说的不是重量也不是食物 → 再问一次
+                            responseText = "没明白你说的，你大概吃了多少\(pending.name)呀？（比如\"两个\"或\"200克\"）😊"
+                        }
+                    }
                     // 3. 食物意图：含「吃/喝/奶茶/咖啡/饭」等词，先尝试本地营养库估算，
-                    //    命中则直接创建记录；未命中再走云端专项查询/通用识别，避免模型被上下文误导成账单或闲聊。
+                    //    命中则直接创建记录；未命中且非 pending 再走云端查询，避免模型被上下文误导。
                     else if isFoodLike(t) {
                         if let localFood = createFoodLocally(from: t) {
                             responseText = localFood
+                        } else if let pending = pendingWeightFood {
+                            // createFoodLocally 识别到食物但用户没给重量 → 追问
+                            responseText = "你大概吃了多少\(pending.name)呀？😊"
                         } else {
                             responseText = await createFoodFromCloud(text: t, recentMessages: recentMessages)
                         }
@@ -2016,6 +2062,28 @@ struct ChatView: View {
         let lower = text.lowercased()
         let completeWords = ["完成", "完成了", "搞定", "搞定了", "做完了", "标记完成", "已完成", "done"]
         return completeWords.contains { lower.contains($0) }
+    }
+
+    /// 用户文本中是否包含明确的重量/份量信息。
+    /// 用于判断「吃了苹果」vs「吃了 200 克苹果」——前者没重量，需要追问。
+    private static func hasWeightInfo(_ text: String) -> Bool {
+        let pattern = #"(?:\d+|[一二两三四五六七八九十半]+)\s*(?:克|g|斤|公斤|毫克|kg|两|碗|杯|瓶|罐|个|份|片|块|串|根|盘|勺|粒|颗|只|包|盒|袋|条)"#
+        return text.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    /// 从纯重量回复中提取份量（如「200克」「两个」「一碗」「5个」），返回 (weight_g: Double, portionString)。
+    /// 只处理简短重量型文本，不含食物名。用于用户回复阿宝的「你吃了多少」追问。
+    private static func parseWeightOnly(_ text: String) -> (Double, String)? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 取消意图
+        let cancelWords = ["不吃了", "不要了", "算了", "不用了", "没吃", "取消"]
+        if cancelWords.contains(trimmed) { return nil }
+
+        // 直接复用 parseFoodNameAndWeight 提取份量
+        if let (_, w, p) = parseFoodNameAndWeight(trimmed) {
+            return (w, p)
+        }
+        return nil
     }
 
     // 保存云解析结果，返回用于 AI 回复的摘要数组。
