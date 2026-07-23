@@ -370,7 +370,7 @@ struct ContentView: View {
     private var dietTile: some View {
         tile(bg: AIATheme.dietBG, accent: AIATheme.food, icon: "fork.knife", route: .diet,
              title: "饮食记录",
-             badge: TileBadge(text: "已记 \(todayFoods.count) 餐", warn: false),
+             badge: TileBadge(text: "今日 \(todayFoods.count) 条", warn: false),
              number: "\(Int(todayCalories))", unit: "kcal",
              isEmpty: foods.isEmpty) {
             VStack(alignment: .leading, spacing: 8) {
