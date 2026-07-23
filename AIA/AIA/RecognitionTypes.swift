@@ -60,13 +60,109 @@ struct HealthPayload: Codable, Sendable {
     let unit: String?
 }
 
-// 工具：把模型给的 ISO8601 时间字符串转成 Date
+// 工具：把模型给的时间字符串转成 Date
+// 支持三种格式：
+//   1. ISO8601（标准，如 "2026-07-22T12:58:00+08:00"）
+//   2. 中文相对日期（如 "昨天 12:58"、"星期二 19:09"、"前天 15:30"）→ 以今天倒推绝对日期
+//   3. 纯时间（如 "12:58"、"19:09"）→ 当天该时刻
+//
 // 注意：iso 为 nil 或解析失败时返回 nil，绝不回退 Date()/当前时刻，
 // 否则支付宝截图会错误地记录为截图拍摄时间（如 15:41）而非真实支付时间。
 extension RecognitionResult {
-    static func date(from iso: String?) -> Date? {
-        guard let iso else { return nil }
-        return ISO8601DateFormatter().date(from: iso)
+    static func date(from raw: String?) -> Date? {
+        guard let raw = raw, !raw.isEmpty else { return nil }
+
+        // 1) 标准 ISO8601 → 直接解析
+        if let d = ISO8601DateFormatter().date(from: raw) { return d }
+
+        // 2) 中文相对日期 / 星期几 / 纯时间 → 倒推为绝对日期
+        return parseRelativeDateTime(raw)
+    }
+
+    /// 解析中文相对日期表达式，返回绝对 Date。
+    /// 支持格式：
+    /// - "昨天 12:58" / "昨天下午3点" / "昨天"          → 昨天
+    /// - "前天 15:30" / "前天"                          → 前天
+    /// - "大前天"                                       → 大前天
+    /// - "今天 09:00" / "今天"                          → 今天
+    /// - "星期二 19:09" / "周二 19:09" / "周二"         → 最近的一个周二
+    /// - "12:58" / "19:09:30"                           → 今天该时刻（纯时间无日期词）
+    private static func parseRelativeDateTime(_ text: String) -> Date? {
+        let cal = Calendar.current
+        let now = Date()
+        let tz = TimeZone(identifier: "Asia/Shanghai") ?? cal.timeZone
+
+        // ---- 提取时间分量（HH:MM[:SS] 或 中文时间词）----
+        var hour = 0, minute = 0, second = 0
+        if let r = text.range(of: #"(\d{1,2}):(\d{2})(?::(\d{2}))?"#, options: .regularExpression) {
+            let parts = String(text[r]).components(separatedBy: ":").compactMap { Int($0) }
+            hour = parts[0]
+            minute = parts.count > 1 ? parts[1] : 0
+            second = parts.count > 2 ? parts[2] : 0
+        } else if text.contains("中午") { hour = 12; minute = 0 }
+        else if text.contains("下午") || text.contains("傍晚") { hour = 18; minute = 0 }
+        else if text.contains("晚上") || text.contains("夜间") { hour = 20; minute = 0 }
+        else if text.contains("早上") || text.contains("早晨") || text.contains("清晨") { hour = 8; minute = 0 }
+        else if text.contains("上午") { hour = 10; minute = 0 }
+        // 无时间词且无数字时间 → 默认 00:00（仅取日期）
+
+        // ---- 判断目标日期 ----
+        var targetDate: Date?
+
+        if text.contains("昨天") {
+            targetDate = cal.date(byAdding: .day, value: -1, to: now)
+        } else if text.contains("前天") && !text.contains("大前") {
+            targetDate = cal.date(byAdding: .day, value: -2, to: now)
+        } else if text.contains("大前天") {
+            targetDate = cal.date(byAdding: .day, value: -3, to: now)
+        } else if text.contains("今天") {
+            targetDate = now
+        } else if let wd = extractWeekday(text) {
+            // 星期X / 周X → 找最近的一个该星期几
+            let todayWd = cal.component(.weekday, from: now)
+            var diff = wd - todayWd
+            // 如果是今天或未来几天（如今天周四、文字说"周五"），则取上周的
+            if diff >= 0 { diff -= 7 }
+            targetDate = cal.date(byAdding: .day, value: diff, to: now)
+        } else if hasTimeOnly(text) {
+            // 纯时间无任何日期关键词（如 "12:58"、"19:09"）→ 默认今天
+            targetDate = now
+        }
+
+        guard let base = targetDate else { return nil }
+
+        // 在目标日期上设置提取到的时间
+        var comps = cal.dateComponents([.year, .month, .day], from: base)
+        comps.hour = hour
+        comps.minute = minute
+        comps.second = second
+        comps.timeZone = tz
+        return cal.date(from: comps)
+    }
+
+    /// 从中文文本中提取 weekday（1=Sunday ... 7=Saturday）
+    private static func extractWeekday(_ text: String) -> Int? {
+        let patterns: [(String, Int)] = [
+            ("周日", 1), ("星期日", 1), ("星期天", 1),
+            ("周一", 2), ("星期一", 2),
+            ("周二", 3), ("星期二", 3),
+            ("周三", 4), ("星期三", 4),
+            ("周四", 5), ("星期四", 5),
+            ("周五", 6), ("星期五", 6),
+            ("周六", 7), ("星期六", 7),
+        ]
+        for (pat, val) in patterns {
+            if text.contains(pat) { return val }
+        }
+        return nil
+    }
+
+    /// 判断文本是否只含时间不含日期词（用于区分 "19:09" 和 "昨天 19:09"）
+    private static func hasTimeOnly(_ text: String) -> Bool {
+        let dateKeywords = ["昨天", "前天", "大前天", "今天", "星期", "周", "月", "号", "日"]
+        let hasDateKeyword = dateKeywords.contains { text.contains($0) }
+        let hasTimePattern = text.range(of: #"(\d{1,2}):(\d{2})"#, options: .regularExpression) != nil
+        return hasTimePattern && !hasDateKeyword
     }
 
     /// 统一账单列表：优先用新的 bills 数组；兼容旧云函数返回的单条 bill（包成数组）。
