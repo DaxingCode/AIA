@@ -146,6 +146,8 @@ struct FoodListView: View {
     private var macros: (p: Double, c: Double, f: Double) {
         selectedFoods.reduce((0, 0, 0)) { ($0.0 + $1.protein, $0.1 + $1.carbs, $0.2 + $1.fat) }
     }
+    /// 今日饮水（ml）。目前未接入数据源，先占位 0，后续可接入 HealthKit 或用户手动记录。
+    private var waterIntakeToday: Double { 0 }
 
     private var weekData: [ChartPoint] {
         let cal = Calendar.current
@@ -262,15 +264,15 @@ struct FoodListView: View {
                         .background(AIATheme.billBG)
                         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
 
-                        // 今日能量消耗
+                        // 今日饮水
                         VStack(spacing: 2) {
-                            Text("\(Int(health.activeEnergyToday))")
+                            Text("\(Int(waterIntakeToday))")
                                 .font(AIATheme.Font.title3.weight(.semibold))
                                 .foregroundStyle(AIATheme.health)
-                            Text("kcal")
+                            Text("ml")
                                 .font(AIATheme.Font.micro)
                                 .foregroundStyle(AIATheme.sub)
-                            Text(NSLocalizedString("food.burned", comment: ""))
+                            Text(NSLocalizedString("food.water", comment: ""))
                                 .font(AIATheme.Font.micro)
                                 .foregroundStyle(AIATheme.sub)
                         }
@@ -282,11 +284,13 @@ struct FoodListView: View {
 
                     SectionTitle(text: NSLocalizedString("food.nutrition", comment: ""),
                                  trailing: String(format: NSLocalizedString("food.nutritionTarget", comment: ""), 75, 220, 55))
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                        MacroCard(title: NSLocalizedString("food.macro.protein", comment: ""), value: "\(Int(macros.p))g", progress: macros.p / 75, color: AIATheme.blue)
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                         MacroCard(title: NSLocalizedString("food.macro.carb", comment: ""), value: "\(Int(macros.c))g", progress: macros.c / 220, color: AIATheme.amber)
+                        MacroCard(title: NSLocalizedString("food.macro.protein", comment: ""), value: "\(Int(macros.p))g", progress: macros.p / 75, color: AIATheme.blue)
                         MacroCard(title: NSLocalizedString("food.macro.fat", comment: ""), value: "\(Int(macros.f))g", progress: macros.f / 55, color: AIATheme.green)
                         MacroCard(title: NSLocalizedString("food.macro.fiber", comment: ""), value: "—", progress: 0, color: AIATheme.health)
+                        MacroCard(title: NSLocalizedString("food.macro.sugar", comment: ""), value: "—g", progress: 0, color: AIATheme.food)
+                        MacroCard(title: NSLocalizedString("food.macro.sodium", comment: ""), value: "—mg", progress: 0, color: AIATheme.todo)
                     }
 
                     if !foods.isEmpty {
@@ -1688,7 +1692,7 @@ struct ReminderListView: View {
 
 }
 
-// MARK: - 饮食喜好页（Top 5 / 记录来源 / 各餐次记录）
+// MARK: - 饮食喜好页（严格按 AIATheme 令牌：hero + Top 5 + 来源 + 餐次）
 private struct DietPreferencesView: View {
     @Query(filter: #Predicate { !$0.syncDeleted }, sort: \FoodEntry.date, order: .reverse)
     private var foods: [FoodEntry]
@@ -1711,52 +1715,122 @@ private struct DietPreferencesView: View {
     /// 各餐次记录：4 个固定餐次，缺数据时 count=0（仍显示卡片，不隐藏）
     private var mealCounts: [DietMealCount] {
         [
-            DietMealCount(meal: "早餐", icon: "sun.rise", count: foods.filter { $0.meal == "早餐" }.count),
-            DietMealCount(meal: "午餐", icon: "sun.max",  count: foods.filter { $0.meal == "午餐" }.count),
-            DietMealCount(meal: "晚餐", icon: "moon",     count: foods.filter { $0.meal == "晚餐" }.count),
-            DietMealCount(meal: "加餐", icon: "leaf",      count: foods.filter { $0.meal == "加餐" }.count)
+            DietMealCount(meal: "早餐", icon: "sunrise.fill",   count: foods.filter { $0.meal == "早餐" }.count),
+            DietMealCount(meal: "午餐", icon: "sun.max.fill",   count: foods.filter { $0.meal == "午餐" }.count),
+            DietMealCount(meal: "晚餐", icon: "moon.fill",      count: foods.filter { $0.meal == "晚餐" }.count),
+            DietMealCount(meal: "加餐", icon: "leaf.fill",      count: foods.filter { $0.meal == "加餐" }.count)
         ]
+    }
+
+    /// 累计热量（kcal）— hero 大数字
+    private var totalCalories: Int {
+        Int(foods.reduce(0) { $0 + $1.calories })
     }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                // Top 5
+            VStack(alignment: .leading, spacing: 14) {
+                // 1. Hero 摘要卡：满宽、dietBG 底、icon+label+大数字（对齐首页 4 宫格的视觉语言）
+                DietPreferencesHero(total: foods.count, calories: totalCalories)
+
+                // 2. Top 5
                 SectionTitle(text: "最常吃的食物 Top 5", trailing: nil)
-                VStack(spacing: 0) {
-                    if topFoods.isEmpty {
-                        Text("暂无记录")
-                            .font(AIATheme.Font.footnote)
-                            .foregroundStyle(AIATheme.muted)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 18)
-                    } else {
+                if topFoods.isEmpty {
+                    DietPreferencesEmptyCard(text: "还没有食物记录\n先去「饮食记录」页拍一张试试")
+                } else {
+                    VStack(spacing: 0) {
                         ForEach(topFoods) { rank in
                             DietRankRow(rank: rank)
                             if rank.id != topFoods.last?.id {
-                                Divider().padding(.leading, 44)
+                                Divider().padding(.leading, 48)
                             }
                         }
                     }
+                    .card(radius: AIATheme.rMD, shadow: false)
                 }
-                .background(AIATheme.surface)
-                .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
 
-                // 记录来源
+                // 3. 记录来源
                 SectionTitle(text: "记录来源", trailing: nil)
                 HStack(spacing: 8) {
-                    DietSourceCard(title: "AI 识别",  icon: "camera",   count: sourceBreakdown.aiCount,    color: AIATheme.food)
-                    DietSourceCard(title: "手动输入", icon: "pencil",   count: sourceBreakdown.manualCount, color: AIATheme.health)
+                    DietTintedCard(
+                        icon: "camera.fill", title: "AI 识别", count: sourceBreakdown.aiCount,
+                        color: AIATheme.food, bg: AIATheme.dietBG
+                    )
+                    DietTintedCard(
+                        icon: "pencil", title: "手动输入", count: sourceBreakdown.manualCount,
+                        color: AIATheme.health, bg: AIATheme.healthBG
+                    )
                 }
 
-                // 各餐次记录
+                // 4. 各餐次记录
                 SectionTitle(text: "各餐次记录", trailing: nil)
                 HStack(spacing: 8) {
-                    ForEach(mealCounts) { DietMealCard(item: $0) }
+                    ForEach(mealCounts) { item in
+                        DietTintedCard(
+                            icon: item.icon, title: item.meal, count: item.count,
+                            color: AIATheme.food, bg: AIATheme.dietBG
+                        )
+                    }
                 }
+
+                // 底部留白，避免被悬浮胶囊压住
+                Color.clear.frame(height: 80)
             }
-            .padding()
+            .padding(12)
         }
+    }
+}
+
+/// 饮食喜好：Hero 摘要（满宽，dietBG 底，icon+label+大数字）
+private struct DietPreferencesHero: View {
+    let total: Int
+    let calories: Int
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "fork.knife.circle.fill")
+                    .font(AIATheme.Font.title3)
+                    .foregroundStyle(AIATheme.food)
+                Text("我的饮食记录")
+                    .font(AIATheme.Font.footnote.weight(.medium))
+                    .foregroundStyle(AIATheme.sub)
+                Spacer()
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("\(total)")
+                    .font(AIATheme.Font.ultra.weight(.semibold))
+                    .foregroundStyle(AIATheme.food)
+                Text("条")
+                    .font(AIATheme.Font.footnote)
+                    .foregroundStyle(AIATheme.sub)
+                Spacer()
+                Text("累计 \(calories) kcal")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AIATheme.dietBG)
+        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+    }
+}
+
+/// 饮食喜好：空态卡（白底，居中提示，对齐 EmptyStateView 风格但更紧凑）
+private struct DietPreferencesEmptyCard: View {
+    let text: String
+    var body: some View {
+        VStack(spacing: 4) {
+            ForEach(text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init), id: \.self) { line in
+                Text(line)
+                    .font(AIATheme.Font.footnote)
+                    .foregroundStyle(AIATheme.muted)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 22)
+        .card(radius: AIATheme.rMD, shadow: false)
     }
 }
 
@@ -1772,7 +1846,7 @@ private struct DietRankRow: View {
                     .font(AIATheme.Font.caption.weight(.semibold))
                     .foregroundStyle(isTopThree ? .white : AIATheme.muted)
             }
-            .frame(width: 22, height: 22)
+            .frame(width: 24, height: 24)
             Text(rank.name)
                 .font(AIATheme.Font.footnote.weight(.medium))
                 .foregroundStyle(AIATheme.ink)
@@ -1782,59 +1856,38 @@ private struct DietRankRow: View {
                 .font(AIATheme.Font.footnote.weight(.medium))
                 .foregroundStyle(isTopThree ? AIATheme.food : AIATheme.muted)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
     }
 }
 
-/// 饮食喜好：记录来源卡片（AI 识别 / 手动输入）
-private struct DietSourceCard: View {
-    let title: String
+/// 饮食喜好：来源/餐次通用染色卡（icon+label+大数字，带 hue-tint 背景）
+private struct DietTintedCard: View {
     let icon: String
+    let title: String
     let count: Int
     let color: Color
+    let bg: Color
     var body: some View {
         VStack(spacing: 6) {
             Image(systemName: icon)
                 .font(AIATheme.Font.body.weight(.medium))
                 .foregroundStyle(color)
+            Text("\(count)")
+                .font(AIATheme.Font.title2.weight(.semibold))
+                .foregroundStyle(color)
             Text(title)
                 .font(AIATheme.Font.micro)
                 .foregroundStyle(AIATheme.sub)
-            Text("\(count) 次")
-                .font(AIATheme.Font.subhead.weight(.medium))
-                .foregroundStyle(color)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        .background(AIATheme.surface)
+        .padding(.vertical, 12)
+        .background(bg)
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
     }
 }
 
-/// 饮食喜好：各餐次卡片（早餐/午餐/晚餐/加餐）
-private struct DietMealCard: View {
-    let item: DietMealCount
-    var body: some View {
-        VStack(spacing: 4) {
-            Image(systemName: item.icon)
-                .font(AIATheme.Font.body)
-                .foregroundStyle(AIATheme.food)
-            Text(item.meal)
-                .font(AIATheme.Font.micro)
-                .foregroundStyle(AIATheme.sub)
-            Text("\(item.count)")
-                .font(AIATheme.Font.subhead.weight(.medium))
-                .foregroundStyle(AIATheme.food)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
-        .background(AIATheme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
-    }
-}
-
-// MARK: - 饮食分析页（周期切换 + 记录概况 + 平均每日营养摄入）
+// MARK: - 饮食分析页（严格按 AIATheme 令牌：周期选择 + hero + 3 列概况 + 3 列营养网格）
 private struct DietAnalysisView: View {
     @Query(filter: #Predicate { !$0.syncDeleted }, sort: \FoodEntry.date, order: .reverse)
     private var foods: [FoodEntry]
@@ -1846,11 +1899,17 @@ private struct DietAnalysisView: View {
         return foods.filter { $0.date >= s && $0.date < e }
     }
 
-    /// 记录概况：去重天数 / 总条数 / 饮水（饮水未建模，固定 0）
-    private var overview: (days: Int, total: Int, water: Int) {
+    /// 周期汇总：去重天数 / 总条数 / 餐次种类数
+    private var overview: (days: Int, total: Int, meals: Int) {
         let cal = Calendar.current
         let days = Set(periodFoods.map { cal.startOfDay(for: $0.date) }).count
-        return (days, periodFoods.count, 0)
+        let mealSet = Set(periodFoods.map { $0.meal }.filter { !$0.isEmpty })
+        return (days, periodFoods.count, mealSet.count)
+    }
+
+    /// 周期总热量（kcal），hero 大数字
+    private var totalCalories: Int {
+        Int(periodFoods.reduce(0) { $0 + $1.calories })
     }
 
     /// 8 维平均每日营养：4 项已建模（cal/protein/carbs/fat）+ 4 项未建模（纤维/糖/钠/饮水）= "—"
@@ -1863,69 +1922,105 @@ private struct DietAnalysisView: View {
         }
         let d = Double(dayCount)
         return [
-            ("热量(kcal)",      String(format: "%.0f", sum.cal / d), AIATheme.food),
-            ("蛋白质(g)",       String(format: "%.1f", sum.p   / d), AIATheme.blue),
-            ("碳水(g)",         String(format: "%.1f", sum.c   / d), AIATheme.amber),
-            ("脂肪(g)",         String(format: "%.1f", sum.f   / d), AIATheme.green),
-            ("膳食纤维(g)",     "—", AIATheme.muted),
-            ("糖(g)",           "—", AIATheme.muted),
-            ("钠(mg)",          "—", AIATheme.muted),
-            ("饮水(ml)",        "—", AIATheme.muted)
+            ("热量(kcal)",  String(format: "%.0f", sum.cal / d), AIATheme.food),
+            ("蛋白质(g)",   String(format: "%.1f", sum.p   / d), AIATheme.blue),
+            ("碳水(g)",     String(format: "%.1f", sum.c   / d), AIATheme.amber),
+            ("脂肪(g)",     String(format: "%.1f", sum.f   / d), AIATheme.green),
+            ("膳食纤维(g)", "—", AIATheme.muted),
+            ("糖(g)",       "—", AIATheme.muted),
+            ("钠(mg)",      "—", AIATheme.muted),
+            ("饮水(ml)",    "—", AIATheme.muted)
         ]
     }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                // 周期选择
+            VStack(alignment: .leading, spacing: 14) {
+                // 1. 周期选择（项目自带 SegmentedPicker）
                 SegmentedPicker(
                     options: DietPeriod.allCases.map { (value: $0, label: $0.label) },
                     selection: $period
                 )
 
-                // 记录概况
+                // 2. Hero 周期摘要：满宽、dietBG 底、大数字（与饮食喜好 hero 同款语言）
+                DietAnalysisHero(period: period, total: overview.total, calories: totalCalories)
+
+                // 3. 记录概况：3 列染色卡
                 SectionTitle(text: "记录概况", trailing: nil)
                 HStack(spacing: 8) {
-                    DietStatCard(title: "记录天数",   value: "\(overview.days)")
-                    DietStatCard(title: "总记录条数", value: "\(overview.total)")
-                    DietStatCard(title: "总饮水(次)", value: "\(overview.water)")
+                    DietTintedCard(
+                        icon: "calendar", title: "记录天数", count: overview.days,
+                        color: AIATheme.food, bg: AIATheme.dietBG
+                    )
+                    DietTintedCard(
+                        icon: "list.bullet", title: "总记录条数", count: overview.total,
+                        color: AIATheme.health, bg: AIATheme.healthBG
+                    )
+                    DietTintedCard(
+                        icon: "fork.knife", title: "餐次种类", count: overview.meals,
+                        color: AIATheme.bill, bg: AIATheme.billBG
+                    )
                 }
 
-                // 平均每日营养摄入
-                SectionTitle(text: "平均每日营养摄入", trailing: nil)
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                // 4. 平均每日营养摄入：3 列网格（与饮食记录页 MacroCard 网格列数一致）
+                SectionTitle(text: "平均每日营养摄入", trailing: "基于周期内记录自动计算")
+                LazyVGrid(columns: [
+                    GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())
+                ], spacing: 8) {
                     ForEach(0..<nutritionCards.count, id: \.self) { i in
                         let c = nutritionCards[i]
                         DietNutritionCard(label: c.label, value: c.value, color: c.color)
                     }
                 }
+
+                // 底部留白
+                Color.clear.frame(height: 80)
             }
-            .padding()
+            .padding(12)
         }
     }
 }
 
-/// 饮食分析：记录概况单格（大数字 + 小标签）
-private struct DietStatCard: View {
-    let title: String
-    let value: String
+/// 饮食分析：Hero 摘要（满宽，dietBG 底，周期 + 大数字 + 总条数 + 累计热量）
+private struct DietAnalysisHero: View {
+    let period: DietPeriod
+    let total: Int
+    let calories: Int
     var body: some View {
-        VStack(spacing: 4) {
-            Text(value)
-                .font(AIATheme.Font.title2.weight(.semibold))
-                .foregroundStyle(AIATheme.food)
-            Text(title)
-                .font(AIATheme.Font.micro)
-                .foregroundStyle(AIATheme.sub)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "chart.bar.xaxis")
+                    .font(AIATheme.Font.title3)
+                    .foregroundStyle(AIATheme.food)
+                Text("\(period.label)饮食分析")
+                    .font(AIATheme.Font.footnote.weight(.medium))
+                    .foregroundStyle(AIATheme.sub)
+                Spacer()
+                Text("共 \(total) 条")
+                    .font(AIATheme.Font.micro.weight(.medium))
+                    .foregroundStyle(AIATheme.muted)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("\(calories)")
+                    .font(AIATheme.Font.ultra.weight(.semibold))
+                    .foregroundStyle(AIATheme.food)
+                Text("kcal")
+                    .font(AIATheme.Font.footnote)
+                    .foregroundStyle(AIATheme.sub)
+                Spacer()
+                Text("周期总摄入")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        .background(AIATheme.surface)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AIATheme.dietBG)
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
     }
 }
 
-/// 饮食分析：营养摄入单格（左对齐大数字 + 标签；"—" 走 muted 弱化）
+/// 饮食分析：营养摄入单格（左对齐大数字 + 标签；"—" 走 muted 弱化；与饮食记录页 MacroCard 同款语法）
 private struct DietNutritionCard: View {
     let label: String
     let value: String
@@ -1933,7 +2028,7 @@ private struct DietNutritionCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(value)
-                .font(AIATheme.Font.title3.weight(.medium))
+                .font(AIATheme.Font.subhead.weight(.semibold))
                 .foregroundStyle(value == "—" ? AIATheme.muted : color)
             Text(label)
                 .font(AIATheme.Font.micro)
@@ -1941,7 +2036,11 @@ private struct DietNutritionCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(AIATheme.surfaceSecondary)
+        .background(AIATheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+        .overlay(
+            RoundedRectangle(cornerRadius: AIATheme.rMD)
+                .stroke(AIATheme.hairline, lineWidth: 0.5)
+        )
     }
 }
