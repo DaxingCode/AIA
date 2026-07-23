@@ -1959,22 +1959,32 @@ struct ChatView: View {
                         responseText = waterMsg
                     }
                     // 2.6. 等待重量回复：之前有食物待补充重量（如用户说了「吃了苹果」没给重量）
+                    // 注意：pendingWeightFood 不在分支开头清空，失败时保留以便用户重试
                     else if let pending = pendingWeightFood {
-                        pendingWeightFood = nil  // 先清 pending，后续根据回复决定是否重设
-                        if let (w, p) = ChatView.parseWeightOnly(t) {
-                            // 用户明确回复了重量 → 组合创建
+                        // 取消意图
+                        let cancelWords = ["不吃了", "不要了", "算了", "不用了", "没吃", "取消"]
+                        if cancelWords.contains(t.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                            pendingWeightFood = nil
+                            responseText = "好嘞，那就不记「\(pending.name)」啦～"
+                        }
+                        // 用户明确回复了重量 → 组合创建
+                        else if let (w, p) = ChatView.parseWeightOnly(t) {
+                            pendingWeightFood = nil  // 成功才清
                             responseText = createFoodWithWeight(name: pending.name, text: p, meal: pending.meal)
-                        } else if isFoodLike(t) {
-                            // 用户说了一个新食物 → 替代 pending，走正常食物分支
+                        }
+                        // 用户说了一个新食物 → 替代 pending，走正常食物分支
+                        else if isFoodLike(t) {
+                            pendingWeightFood = nil
                             if let localFood = createFoodLocally(from: t) {
                                 responseText = localFood
                             } else if let newPending = self.pendingWeightFood {
-                                responseText = "你大概吃了多少\(newPending.name)呀？"
+                                responseText = "你大概吃了多少\(newPending.name)呀？😊"
                             } else {
                                 responseText = await createFoodFromCloud(text: t, recentMessages: recentMessages)
                             }
-                        } else {
-                            // 用户说的不是重量也不是食物 → 再问一次
+                        }
+                        // 什么都没解析到 → 不清 pending，让用户重试
+                        else {
                             responseText = "没明白你说的，你大概吃了多少\(pending.name)呀？（比如\"两个\"或\"200克\"）😊"
                         }
                     }
@@ -2121,18 +2131,61 @@ struct ChatView: View {
         return text.range(of: pattern, options: .regularExpression) != nil
     }
 
-    /// 从纯重量回复中提取份量（如「200克」「两个」「一碗」「5个」），返回 (weight_g: Double, portionString)。
-    /// 只处理简短重量型文本，不含食物名。用于用户回复阿宝的「你吃了多少」追问。
+    /// 从纯重量回复中提取份量（如「100克」「200g」「两个」「一碗」「半斤」），返回 (weight_g: Double, portionString)。
+    /// 只处理简短重量型文本，不含食物名——用于用户回复阿宝的「你吃了多少」追问。
+    /// 不复用 parseFoodNameAndWeight 是因为后者要求文本必须含食物名，单独「100克」会返回 nil。
     private static func parseWeightOnly(_ text: String) -> (Double, String)? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         // 取消意图
         let cancelWords = ["不吃了", "不要了", "算了", "不用了", "没吃", "取消"]
         if cancelWords.contains(trimmed) { return nil }
 
-        // 直接复用 parseFoodNameAndWeight 提取份量
-        if let (_, w, p) = parseFoodNameAndWeight(trimmed) {
-            return (w, p)
+        // 单位 → 克的映射（与 parseFoodNameAndWeight / NutritionLibrary 一致）
+        let unitToG: [(String, Double)] = [
+            ("克", 1), ("g", 1), ("千克", 1000), ("kg", 1000), ("公斤", 1000),
+            ("两", 50), ("斤", 500),
+            ("碗", 300), ("杯", 250), ("瓶", 500), ("罐", 330),
+            ("个", 50), ("份", 200), ("块", 50), ("片", 30),
+            ("串", 100), ("根", 100), ("盘", 300), ("勺", 15),
+            ("粒", 5), ("颗", 5), ("只", 50), ("包", 100),
+            ("盒", 200), ("袋", 100), ("条", 50)
+        ]
+        let cnNum: [String: Double] = ["一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
+                                       "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
+                                       "半": 0.5, "两": 2]
+
+        let units = unitToG.map { NSRegularExpression.escapedPattern(for: $0.0) }.joined(separator: "|")
+
+        // 阿拉伯数字：100克 / 200.5g / 1.5kg
+        let arPattern = "(\\d+(?:\\.\\d+)?)\\s*(\(units))"
+        if let regex = try? NSRegularExpression(pattern: arPattern) {
+            let range = NSRange(location: 0, length: (trimmed as NSString).length)
+            if let match = regex.firstMatch(in: trimmed, range: range) {
+                let numStr = (trimmed as NSString).substring(with: match.range(at: 1))
+                let unit = (trimmed as NSString).substring(with: match.range(at: 2))
+                if let unitEntry = unitToG.first(where: { $0.0 == unit }),
+                   let num = Double(numStr) {
+                    let grams = num * unitEntry.1
+                    if grams > 0 { return (grams, "\(numStr)\(unit)") }
+                }
+            }
         }
+
+        // 中文数字：两个 / 一碗 / 半斤
+        let cnPattern = "([一二两三四五六七八九十半]+)\\s*(\(units))"
+        if let regex = try? NSRegularExpression(pattern: cnPattern) {
+            let range = NSRange(location: 0, length: (trimmed as NSString).length)
+            if let match = regex.firstMatch(in: trimmed, range: range) {
+                let numStr = (trimmed as NSString).substring(with: match.range(at: 1))
+                let unit = (trimmed as NSString).substring(with: match.range(at: 2))
+                if let unitEntry = unitToG.first(where: { $0.0 == unit }),
+                   let num = cnNum[numStr] {
+                    let grams = num * unitEntry.1
+                    if grams > 0 { return (grams, "\(numStr)\(unit)") }
+                }
+            }
+        }
+
         return nil
     }
 
