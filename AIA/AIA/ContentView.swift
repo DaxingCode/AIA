@@ -35,6 +35,8 @@ struct ContentView: View {
     @State private var showCamera = false
     @State private var showPicker = false
     @State private var animateTiles = false
+    /// 账单宫格隐私遮罩：@AppStorage 自动持久化到 UserDefaults，重启 App 保持
+    @AppStorage("billHidden") private var billHidden = false
 
     // 气泡转轴滚动调度：每 2 秒只让「当前轮到的那一条」滚动，四条依次轮流。
     @State private var rollSlot = 0
@@ -350,25 +352,50 @@ struct ContentView: View {
 
     // MARK: 账单
     private var billTile: some View {
-        tile(bg: AIATheme.billBG, accent: AIATheme.bill, icon: "creditcard.fill", route: .bill,
+        // 隐私遮罩：隐藏时所有金额显示 ¥•••，颜色降级为 muted（避免被猜出正负/位数）
+        let hiddenText = "¥•••"
+        let numberTxt = billHidden ? hiddenText : "¥\(Int(todayExpense))"
+        let incomeTxt = billHidden ? hiddenText : "¥\(Int(monthIncome))"
+        let expenseTxt = billHidden ? hiddenText : "¥\(Int(monthExpense))"
+        let budgetTxt = billHidden ? hiddenText : "¥\(Int(monthlyBudget))"
+        let balanceTxt = billHidden ? hiddenText : "¥\(Int(monthBalance))"
+        let balanceColor: Color = billHidden
+            ? AIATheme.muted
+            : (monthBalance >= 0 ? AIATheme.income : AIATheme.expense)
+
+        return tile(bg: AIATheme.billBG, accent: AIATheme.bill, icon: "creditcard.fill", route: .bill,
              title: "账单管理",
              badge: TileBadge(text: "", warn: false),
-             number: "¥\(Int(todayExpense))", unit: "今日支出",
+             number: numberTxt, unit: "今日支出",
              isEmpty: bills.isEmpty,
-             headerMode: .titleLine) {
+             headerMode: .titleLine,
+             titleTrailing: privacyEyeButton) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
-                    billMetric("本月收入", "¥\(Int(monthIncome))", AIATheme.income)
-                    billMetric("本月支出", "¥\(Int(monthExpense))", AIATheme.expense)
+                    billMetric("本月收入", incomeTxt, billHidden ? AIATheme.muted : AIATheme.income)
+                    billMetric("本月支出", expenseTxt, billHidden ? AIATheme.muted : AIATheme.expense)
                 }
                 HStack(spacing: 8) {
-                    billMetric("本月预算", "¥\(Int(monthlyBudget))", AIATheme.sub)
-                    billMetric("本月结余", "¥\(Int(monthBalance))",
-                               monthBalance >= 0 ? AIATheme.income : AIATheme.expense)
+                    billMetric("本月预算", budgetTxt, AIATheme.sub)
+                    billMetric("本月结余", balanceTxt, balanceColor)
                 }
             }
             .padding(.top, 4)
         }
+    }
+
+    /// 账单宫格右上角隐私按钮：眼睛/闭眼切换，30×30 hit area 不吞父卡片点击
+    private var privacyEyeButton: AnyView {
+        AnyView(
+            Button { billHidden.toggle() } label: {
+                Image(systemName: billHidden ? "eye.slash" : "eye")
+                    .font(AIATheme.Font.micro.weight(.semibold))
+                    .foregroundStyle(billHidden ? AIATheme.bill : AIATheme.muted)
+                    .frame(width: 30, height: 30)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        )
     }
 
     private func billMetric(_ label: String, _ value: String, _ valueColor: Color) -> some View {
@@ -511,6 +538,7 @@ struct ContentView: View {
         bg: Color, accent: Color, icon: String, route: HomeRoute, title: String, badge: TileBadge,
         number: String, unit: String, isEmpty: Bool,
         headerMode: TileHeaderMode = .bigNumber,
+        titleTrailing: AnyView? = nil,
         @ViewBuilder details: () -> Content
     ) -> some View {
         Button { router.path.append(route) } label: {
@@ -538,6 +566,7 @@ struct ContentView: View {
                             .lineLimit(1)
                     }
                     Spacer(minLength: 0)
+                    if let titleTrailing { titleTrailing }
                 }
                 // 主标题：大数字模式 / 标题行模式
                 switch headerMode {
