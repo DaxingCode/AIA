@@ -2002,37 +2002,34 @@ struct ChatView: View {
                     } else {
                         // 4. 食物查询：用户只说食物名（如「苹果」「米饭」「牛肉的热量」），
                         //    不记录，只回复每100克营养数据。本地命中最快，未命中则联网查并缓存。
-                        var handled = false
                         if let queryReply = await handleFoodQuery(t) {
                             responseText = queryReply
-                            handled = true
-                        }
-                        if !handled {
+                        } else {
                             // 兜底：只有文本本身带有明确记录/创建意图，才走 parseText 保存记录；
-                        // 否则（如"好的好的""嗯嗯""知道了"）强制走 AI 聊天，避免被上下文污染导致重复创建。
-                        let hasCreateIntent = ChatView.hasExplicitCreateIntent(t)
-                        if hasCreateIntent {
-                            let (result, _) = try await RecognizeService.parseText(t, recentMessages: recentMessages)
-                            let summary = saveFromResult(result, originalText: t)
-                            if summary.isEmpty {
+                            // 否则（如"好的好的""嗯嗯""知道了"）强制走 AI 聊天，避免被上下文污染导致重复创建。
+                            let hasCreateIntent = ChatView.hasExplicitCreateIntent(t)
+                            if hasCreateIntent {
+                                let (result, _) = try await RecognizeService.parseText(t, recentMessages: recentMessages)
+                                let summary = saveFromResult(result, originalText: t)
+                                if summary.isEmpty {
+                                    let dataContext = buildContext()
+                                    let reply = agentEnabled
+                            ? try await RecognizeService.agentChat(text: t, context: dataContext, userId: agentUserId)
+                            : try await RecognizeService.chat(text: t, context: dataContext)
+                                    responseText = reply.isEmpty ? localReply(for: t) : reply
+                                } else {
+                                    let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
+                                    responseText = "\(opener)：\n" + summary.joined(separator: "\n")
+                                }
+                            } else {
                                 let dataContext = buildContext()
                                 let reply = agentEnabled
-                        ? try await RecognizeService.agentChat(text: t, context: dataContext, userId: agentUserId)
-                        : try await RecognizeService.chat(text: t, context: dataContext)
+                            ? try await RecognizeService.agentChat(text: t, context: dataContext, userId: agentUserId)
+                            : try await RecognizeService.chat(text: t, context: dataContext)
                                 responseText = reply.isEmpty ? localReply(for: t) : reply
-                            } else {
-                                let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
-                                responseText = "\(opener)：\n" + summary.joined(separator: "\n")
                             }
-                        } else {
-                            let dataContext = buildContext()
-                            let reply = agentEnabled
-                        ? try await RecognizeService.agentChat(text: t, context: dataContext, userId: agentUserId)
-                        : try await RecognizeService.chat(text: t, context: dataContext)
-                            responseText = reply.isEmpty ? localReply(for: t) : reply
                         }
-                        }  // if !handled
-                    }  // 兜底 else
+                    }
                 }
                 let aiMessage = ChatMessage(role: .ai, text: responseText, createdAt: userMessage.createdAt.addingTimeInterval(0.1))
                 context.insert(aiMessage)
