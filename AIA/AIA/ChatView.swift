@@ -4,7 +4,6 @@
 // 真 LLM 对话未接入（API Key 走云端代理的后续迭代）。
 import SwiftUI
 import SwiftData
-import MessageUI
 import UniformTypeIdentifiers
 
 /// 本地确认消息的统一开场白池；生成确认消息时随机取一个，避免每条都"记好啦"开头。
@@ -21,6 +20,9 @@ private struct PendingFoodConfirm: Codable {
     let protein: Double
     let carbs: Double
     let fat: Double
+    let fiber: Double            // 膳食纤维（克）
+    let sugar: Double            // 糖（克）
+    let sodium: Double           // 钠（毫克）
     let amount: Double?
     let originalText: String
 }
@@ -49,11 +51,6 @@ struct ChatView: View {
     var autostartVoice = false
     /// 从空态 CTA 进入时，自动填入输入框并延迟发送的文本。
     var prefill: String?
-
-    // 意见反馈
-    @State private var showMailComposer = false
-    @State private var mailBody = ""
-    @State private var showMailUnavailableAlert = false
 
     // 输入栏扩展功能（拍照/相册/文件）
     @State private var showInputActions = false
@@ -343,22 +340,6 @@ struct ChatView: View {
             }
         }
         .onDisappear { recognizer.stop() }
-        .sheet(isPresented: $showMailComposer) {
-            MailComposer(
-                recipient: "754727942@qq.com",
-                subject: "阿宝AI管家 用户反馈",
-                body: mailBody
-            )
-        }
-        .alert(NSLocalizedString("feedback.mailUnavailableTitle", comment: ""),
-               isPresented: $showMailUnavailableAlert) {
-            Button(NSLocalizedString("feedback.copyEmail", comment: "")) {
-                UIPasteboard.general.string = "754727942@qq.com"
-            }
-            Button(NSLocalizedString("common.ok", comment: ""), role: .cancel) { }
-        } message: {
-            Text(String(format: NSLocalizedString("feedback.mailUnavailableMessage", comment: ""), "754727942@qq.com"))
-        }
         .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker)
         .fileImporter(isPresented: $showFileImporter,
                       allowedContentTypes: [.image],
@@ -475,6 +456,9 @@ struct ChatView: View {
         let baseProtein  = ratio > 0 ? pending.protein / ratio : pending.protein
         let baseCarbs    = ratio > 0 ? pending.carbs / ratio : pending.carbs
         let baseFat      = ratio > 0 ? pending.fat / ratio : pending.fat
+        let baseFiber    = ratio > 0 ? pending.fiber / ratio : pending.fiber
+        let baseSugar    = ratio > 0 ? pending.sugar / ratio : pending.sugar
+        let baseSodium   = ratio > 0 ? pending.sodium / ratio : pending.sodium
 
         let entry = FoodEntry(
             name: pending.name,
@@ -482,6 +466,9 @@ struct ChatView: View {
             protein: pending.protein,
             carbs: pending.carbs,
             fat: pending.fat,
+            fiber: pending.fiber,
+            sugar: pending.sugar,
+            sodium: pending.sodium,
             portion: pending.portion,
             meal: pending.meal,
             weightGram: pending.weight,
@@ -489,6 +476,9 @@ struct ChatView: View {
             baseProtein: baseProtein,
             baseCarbs: baseCarbs,
             baseFat: baseFat,
+            baseFiber: baseFiber,
+            baseSugar: baseSugar,
+            baseSodium: baseSodium,
             imageName: nil
         )
         context.insert(entry)
@@ -621,12 +611,7 @@ struct ChatView: View {
     private var feedbackChip: some View {
         Button {
             isInputFocused = false
-            if MFMailComposeViewController.canSendMail() {
-                mailBody = ""
-                showMailComposer = true
-            } else {
-                showMailUnavailableAlert = true
-            }
+            postContactMessage()
         } label: {
             Text(NSLocalizedString("chat.feedback", comment: ""))
                 .font(AIATheme.Font.micro)
@@ -636,6 +621,16 @@ struct ChatView: View {
                 .clipShape(Capsule())
         }
         .buttonStyle(.plain)
+    }
+
+    /// 「联系我们」chip 点击：直接以阿宝身份发送一条带联系方式的 AI 消息进聊天流。
+    private func postContactMessage() {
+        let body = "如果你需要帮助，或想给我们提供建议，欢迎通过以下方式联系我们😊\n\n微信/Wechat：754727942\n\n邮箱/Email：754727942@qq.com\n\n长按本消息，可复制"
+        let aiMessage = ChatMessage(role: .ai, text: body, createdAt: Date())
+        context.insert(aiMessage)
+        try? context.save()
+        // 关掉输入栏焦点，让用户立刻看到阿宝的回复
+        isInputFocused = false
     }
 
     private func inputActionButton(icon: String, title: String, action: @escaping () -> Void) -> some View {
@@ -845,6 +840,10 @@ struct ChatView: View {
         if ChatView.checkDuplicateAndRegister(text, type: "todo") {
             return "这个提醒你刚记过啦，我就不重复记了～"
         }
+        // 内容级去重：检查 24h 内是否有同标题待办
+        if DataDeduplicator.isDuplicateReminder(title: title, context: context) {
+            return "这个提醒你刚记过啦，我就不重复记了～"
+        }
         let r = Reminder(title: title, due: due, imageName: nil)
         DefaultReminderSettings.shared.apply(to: r)
         context.insert(r)
@@ -901,7 +900,7 @@ struct ChatView: View {
     /// 短时间内重复发送同一句话，不重复入库（防止反复测试 / 误点产生重复记录）。
     /// 仅覆盖本次运行会话内的本地记账路径（账单 / 饮食 / 待办）；图片路径另有 aHash 指纹去重。
     private static var recentCreations: [(key: String, at: Date)] = []
-    private static let dedupWindow: TimeInterval = 180 // 3 分钟
+    private static let dedupWindow: TimeInterval = 86400 // 24 小时（原 3 分钟，但用户测试间隔可能更长）
 
     /// 计算去重键：去掉金额与记账 / 提醒动词、语气助词后，保留餐次 / 内容词。
     /// 不同餐次（如「晚餐」vs「午餐」）键不同，不会互相误判；同一句话重复发送则键相同。
@@ -984,6 +983,10 @@ struct ChatView: View {
         if ChatView.checkDuplicateAndRegister(text, type: "bill") {
             return "这笔记过啦，我就不重复记了～"
         }
+        // 内容级去重：检查 24h 内是否有同商户 + 同金额
+        if DataDeduplicator.isDuplicateBill(merchant: merchant, amount: amount, time: .now, context: context) {
+            return "这笔记过啦，我就不重复记了～"
+        }
         let bill = Bill(merchant: merchant, amount: amount, category: category,
                         time: .now, isIncome: isIncome, imageName: nil)
         context.insert(bill)
@@ -1004,43 +1007,76 @@ struct ChatView: View {
             return nil
         }
         let meal = ChatView.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
-        guard let (name, weight, portion) = ChatView.parseFoodNameAndWeight(text) else { return nil }
+        let items = ChatView.parseFoodItems(from: text)
+        guard !items.isEmpty else { return nil }
 
-        // 1) 先查硬编码内置库；2) 未命中查本地 FoodMeta 缓存（云端之前沉淀的营养）。
-        let ref: FoodRef
-        if let builtin = NutritionLibrary.shared.match(name) {
-            ref = builtin
-        } else if let meta = FoodMetaStore.lookup(name, in: context) {
-            ref = FoodRef(name: meta.displayName.isEmpty ? name : meta.displayName,
-                          kcal: meta.kcal, protein: meta.protein, carbs: meta.carbs, fat: meta.fat)
-        } else {
-            return nil
+        // 所有项必须都能本地命中才走本地直存；任一缺营养就交给云端查询路径。
+        var entries: [FoodEntry] = []
+        var summaries: [String] = []
+        var totalCal: Double = 0
+        let foodIcon = ["🍽", "🍜", "🍚", "🥗", "🍔", "🍱"].randomElement() ?? "🍽"
+
+        for (name, weight, portion) in items {
+            let ref: FoodRef
+            if let builtin = NutritionLibrary.shared.match(name) {
+                ref = builtin
+            } else if let meta = FoodMetaStore.lookup(name, in: context) {
+                ref = FoodRef(name: meta.displayName.isEmpty ? name : meta.displayName,
+                              kcal: meta.kcal, protein: meta.protein, carbs: meta.carbs, fat: meta.fat,
+                              fiber: meta.fiber, sugar: meta.sugar, sodium: meta.sodium)
+            } else {
+                return nil
+            }
+
+            let ratio = weight / 100.0
+            let cal = ref.kcal * ratio
+            let protein = ref.protein * ratio
+            let carbs = ref.carbs * ratio
+            let fat = ref.fat * ratio
+            let fiber = ref.fiber * ratio
+            let sugar = ref.sugar * ratio
+            let sodium = ref.sodium * ratio
+
+            let entry = FoodEntry(name: name, calories: cal, protein: protein, carbs: carbs, fat: fat,
+                                  fiber: fiber, sugar: sugar, sodium: sodium,
+                                  portion: portion, meal: meal,
+                                  weightGram: weight,
+                                  baseCalories: ref.kcal,
+                                  baseProtein: ref.protein,
+                                  baseCarbs: ref.carbs,
+                                  baseFat: ref.fat,
+                                  baseFiber: ref.fiber,
+                                  baseSugar: ref.sugar,
+                                  baseSodium: ref.sodium,
+                                  imageName: nil)
+            entries.append(entry)
+            totalCal += cal
+            // 展示全部 7 项营养：热量/蛋白/碳水/脂肪/膳食纤维/糖/钠
+            // 用「·」串联避免挤在一行；macro 值保留 1 位小数（钠 0 位），0 值也显示以让用户看到全貌
+            let macros = String(format: "蛋白 %.1fg · 碳水 %.1fg · 脂肪 %.1fg · 纤维 %.1fg · 糖 %.1fg · 钠 %.0fmg",
+                                protein, carbs, fat, fiber, sugar, sodium)
+            summaries.append("\(foodIcon) \(meal)「\(name)」\(Int(cal)) kcal（\(portion)）\n  \(macros)")
         }
 
-        let ratio = weight / 100.0
-        let cal = ref.kcal * ratio
-        let protein = ref.protein * ratio
-        let carbs = ref.carbs * ratio
-        let fat = ref.fat * ratio
-
-        let entry = FoodEntry(name: name, calories: cal, protein: protein, carbs: carbs, fat: fat,
-                              portion: portion, meal: meal,
-                              weightGram: weight,
-                              baseCalories: ref.kcal,
-                              baseProtein: ref.protein,
-                              baseCarbs: ref.carbs,
-                              baseFat: ref.fat,
-                              imageName: nil)
-        // 防重复：短时间内重复发送同一句话不重复入库
+        // 防重复：以整句话做 key（短期窗口）
         if ChatView.checkDuplicateAndRegister(text, type: "food") {
             return "这顿你刚记过啦，我就不重复记了～"
         }
-        context.insert(entry)
-        HealthManager.shared.saveCaloriesConsumed(cal, date: .now)
+        // 内容级去重：检查 24h 内是否有同名 + 同份量记录
+        for entry in entries {
+            if DataDeduplicator.isDuplicateFood(name: entry.name, date: entry.date, portion: entry.portion, context: context) {
+                return "这顿你刚记过啦，我就不重复记了～"
+            }
+        }
+        for entry in entries {
+            context.insert(entry)
+        }
+        HealthManager.shared.saveCaloriesConsumed(totalCal, date: .now)
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
         let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
-        let foodIcon = ["🍽", "🍜", "🍚", "🥗", "🍔", "🍱"].randomElement() ?? "🍽"
-        return "\(opener)：\(foodIcon) \(meal)「\(name)」\(Int(cal)) kcal（\(portion)）"
+        return summaries.count == 1
+            ? "\(opener)：\(summaries[0])"
+            : "\(opener)：\n" + summaries.joined(separator: "\n")
     }
 
     /// 云端兜底也失败时的「尽力记录」：本地营养库查不到、云端也识别不出时，
@@ -1048,68 +1084,104 @@ struct ChatView: View {
     /// 典型场景：云端 provider 配置缺失导致纯文字被发到视觉模型、识别成 none —— 食物绝不能因此消失。
     private func createFoodLocallyFallback(from text: String) -> String? {
         let meal = ChatView.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
-        guard let (name, weight, portion) = ChatView.parseFoodNameAndWeight(text), !name.isEmpty else { return nil }
-        let entry = FoodEntry(name: name, calories: 0, protein: 0, carbs: 0, fat: 0,
-                              portion: portion, meal: meal,
-                              weightGram: weight,
-                              baseCalories: 0, baseProtein: 0, baseCarbs: 0, baseFat: 0,
-                              imageName: nil)
-        context.insert(entry)
+        let items = ChatView.parseFoodItems(from: text)
+        guard !items.isEmpty else { return nil }
+
+        var names: [String] = []
+        for (name, weight, portion) in items {
+            let entry = FoodEntry(name: name, calories: 0, protein: 0, carbs: 0, fat: 0,
+                                  fiber: 0, sugar: 0, sodium: 0,
+                                  portion: portion, meal: meal,
+                                  weightGram: weight,
+                                  baseCalories: 0, baseProtein: 0, baseCarbs: 0, baseFat: 0,
+                                  baseFiber: 0, baseSugar: 0, baseSodium: 0,
+                                  imageName: nil)
+            context.insert(entry)
+            names.append("「\(name)」\(portion)")
+        }
         try? context.save()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
-        return "🍽 已记下「\(name)」\(portion)，但暂时没查到热量，点开这条记录可以补全哦～"
+        let joined = names.joined(separator: "、")
+        return "🍽 已记下 \(joined)，但暂时没查到热量，点开记录可以补全哦～"
     }
 
     /// 账单已记且本地营养库未命中时，异步联网查营养并在聊天中发送确认卡片。
     /// 用户点击"确认记录"后才创建 FoodEntry；查询失败则仅提示，保留账单。
+    /// 支持一句话里多个食物：每个食物独立一张确认卡片。
     private func sendFoodConfirmCard(text: String) async {
         let meal = ChatView.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
-        guard let (name, weight, portion) = ChatView.parseFoodNameAndWeight(text), !name.isEmpty else { return }
+        let items = ChatView.parseFoodItems(from: text)
+        guard !items.isEmpty else { return }
 
-        do {
-            if let ref = try await RecognizeService.queryFood(name: name) {
-                let ratio = weight / 100.0
-                let cal = ref.kcal * ratio
-                let protein = ref.protein * ratio
-                let carbs = ref.carbs * ratio
-                let fat = ref.fat * ratio
+        let amount = extractAmount(text)
+        var anySent = false
 
-                FoodMetaStore.upsert(name: name, displayName: ref.name,
-                                     kcal: ref.kcal, protein: ref.protein, carbs: ref.carbs, fat: ref.fat,
-                                     source: "cloud", in: context)
+        for (name, weight, portion) in items {
+            do {
+                if let ref = try await RecognizeService.queryFood(name: name) {
+                    let ratio = weight / 100.0
+                    let cal = ref.kcal * ratio
+                    let protein = ref.protein * ratio
+                    let carbs = ref.carbs * ratio
+                    let fat = ref.fat * ratio
+                    let fiber = ref.fiber * ratio
+                    let sugar = ref.sugar * ratio
+                    let sodium = ref.sodium * ratio
 
-                let pending = PendingFoodConfirm(
-                    meal: meal,
-                    name: ref.name,
-                    portion: portion,
-                    weight: weight,
-                    cal: cal,
-                    protein: protein,
-                    carbs: carbs,
-                    fat: fat,
-                    amount: extractAmount(text),
-                    originalText: text
-                )
-                guard let data = try? JSONEncoder().encode(pending),
-                      let json = String(data: data, encoding: .utf8) else { return }
-                let confirmText = "__FOOD_CONFIRM__" + json
-                let aiMessage = ChatMessage(role: .ai, text: confirmText, createdAt: Date().addingTimeInterval(0.2))
-                context.insert(aiMessage)
-                try? context.save()
-            } else {
+                    FoodMetaStore.upsert(name: name, displayName: ref.name,
+                                         kcal: ref.kcal, protein: ref.protein, carbs: ref.carbs, fat: ref.fat,
+                                         fiber: ref.fiber, sugar: ref.sugar, sodium: ref.sodium,
+                                         source: "cloud", in: context)
+
+                    let pending = PendingFoodConfirm(
+                        meal: meal,
+                        name: ref.name,
+                        portion: portion,
+                        weight: weight,
+                        cal: cal,
+                        protein: protein,
+                        carbs: carbs,
+                        fat: fat,
+                        fiber: fiber,
+                        sugar: sugar,
+                        sodium: sodium,
+                        amount: amount,
+                        originalText: text
+                    )
+                    guard let data = try? JSONEncoder().encode(pending),
+                          let json = String(data: data, encoding: .utf8) else { continue }
+                    let confirmText = "__FOOD_CONFIRM__" + json
+                    let aiMessage = ChatMessage(role: .ai, text: confirmText, createdAt: Date().addingTimeInterval(0.2))
+                    context.insert(aiMessage)
+                    try? context.save()
+                    anySent = true
+                } else {
+                    let aiMessage = ChatMessage(
+                        role: .ai,
+                        text: "🍽 没查到「\(name)」的营养信息，支出已经记下啦，你可以稍后手动补录饮食哦～",
+                        createdAt: Date().addingTimeInterval(0.2)
+                    )
+                    context.insert(aiMessage)
+                    try? context.save()
+                    anySent = true
+                }
+            } catch {
+                print("[sendFoodConfirmCard] 失败：\(error)")
                 let aiMessage = ChatMessage(
                     role: .ai,
-                    text: "🍽 没查到「\(name)」的营养信息，支出已经记下啦，你可以稍后手动补录饮食哦～",
+                    text: "🍽 联网查「\(name)」时出错了，支出已经记下啦，稍后再试吧～",
                     createdAt: Date().addingTimeInterval(0.2)
                 )
                 context.insert(aiMessage)
                 try? context.save()
+                anySent = true
             }
-        } catch {
-            print("[sendFoodConfirmCard] 失败：\(error)")
+        }
+
+        if !anySent {
             let aiMessage = ChatMessage(
                 role: .ai,
-                text: "🍽 联网查营养时出错了，支出已经记下啦，稍后再试吧～",
+                text: "🍽 没查到这些食物的营养信息，支出已经记下啦，你可以稍后手动补录饮食哦～",
                 createdAt: Date().addingTimeInterval(0.2)
             )
             context.insert(aiMessage)
@@ -1117,47 +1189,97 @@ struct ChatView: View {
         }
     }
 
-    /// 本地营养库未命中时，走云端专项食物营养查询；仍失败则兜底通用识别。
-    private func createFoodFromCloud(text: String, recentMessages: [[String: String]]) async -> String {
+    /// 聊天记录饮水量：直接创建一条 FoodEntry，仅 waterIntake 有值，营养全 0。
+    /// 走 `parseWaterIntake` 解析；返回消息（成功确认/失败提示）。
+    private func createWaterIntake(from text: String) -> String? {
+        guard let (ml, display) = ChatView.parseWaterIntake(text) else { return nil }
         let meal = ChatView.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
-        let parsed = ChatView.parseFoodNameAndWeight(text)
-        let name = parsed?.name ?? text
-        let weight = parsed?.weight ?? 100.0
-        let portion = parsed?.portion ?? "100克"
 
-        // 1) 优先专项查询食物营养（更可靠，不易被上下文带偏）
-        do {
-            if let ref = try await RecognizeService.queryFood(name: name) {
-                let ratio = weight / 100.0
-                let cal = ref.kcal * ratio
-                let protein = ref.protein * ratio
-                let carbs = ref.carbs * ratio
-                let fat = ref.fat * ratio
-
-                FoodMetaStore.upsert(name: name, displayName: ref.name,
-                                     kcal: ref.kcal, protein: ref.protein, carbs: ref.carbs, fat: ref.fat,
-                                     source: "cloud", in: context)
-
-                let entry = FoodEntry(name: name, calories: cal, protein: protein, carbs: carbs, fat: fat,
-                                      portion: portion, meal: meal,
-                                      weightGram: weight,
-                                      baseCalories: ref.kcal,
-                                      baseProtein: ref.protein,
-                                      baseCarbs: ref.carbs,
-                                      baseFat: ref.fat,
-                                      imageName: nil)
-                context.insert(entry)
-                HealthManager.shared.saveCaloriesConsumed(cal, date: .now)
-                CloudSyncManager.shared.syncAfterLocalChange(context: context)
-                let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
-                let foodIcon = ["🍽", "🍜", "🍚", "🥗", "🍔", "🍱"].randomElement() ?? "🍽"
-                return "\(opener)：\(foodIcon) \(meal)「\(name)」\(Int(cal)) kcal（\(portion)）"
-            }
-        } catch {
-            print("[queryFood] 失败：\(error)")
+        // 防重复
+        if ChatView.checkDuplicateAndRegister(text, type: "water") {
+            return "这杯水我刚记过啦～"
         }
 
-        // 2) 专项查询失败：兜底通用文本识别
+        let entry = FoodEntry(
+            name: "饮用水",
+            calories: 0, protein: 0, carbs: 0, fat: 0,
+            fiber: 0, sugar: 0, sodium: 0,
+            waterIntake: ml,
+            portion: display,
+            meal: meal,
+            imageName: nil
+        )
+        context.insert(entry)
+        CloudSyncManager.shared.syncAfterLocalChange(context: context)
+
+        let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
+        return "\(opener)：💧 \(meal)喝了 \(display)（\(Int(ml)) ml）"
+    }
+
+    /// 聊天记录食物入口：本地营养库未命中时，走云端专项食物营养查询；仍失败则兜底通用识别。
+    /// 支持一句话里多个食物，逐项查询并分别建 FoodEntry。
+    private func createFoodFromCloud(text: String, recentMessages: [[String: String]]) async -> String {
+        let meal = ChatView.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
+        let items = ChatView.parseFoodItems(from: text)
+        guard !items.isEmpty else { return localReply(for: text) }
+
+        // 1) 优先专项查询每个食物的营养（更可靠，不易被上下文带偏）
+        var entries: [FoodEntry] = []
+        var summaries: [String] = []
+        var totalCal: Double = 0
+        let foodIcon = ["🍽", "🍜", "🍚", "🥗", "🍔", "🍱"].randomElement() ?? "🍽"
+
+        for (name, weight, portion) in items {
+            do {
+                if let ref = try await RecognizeService.queryFood(name: name) {
+                    let ratio = weight / 100.0
+                    let cal = ref.kcal * ratio
+                    let protein = ref.protein * ratio
+                    let carbs = ref.carbs * ratio
+                    let fat = ref.fat * ratio
+                    let fiber = ref.fiber * ratio
+                    let sugar = ref.sugar * ratio
+                    let sodium = ref.sodium * ratio
+
+                    FoodMetaStore.upsert(name: name, displayName: ref.name,
+                                         kcal: ref.kcal, protein: ref.protein, carbs: ref.carbs, fat: ref.fat,
+                                         fiber: ref.fiber, sugar: ref.sugar, sodium: ref.sodium,
+                                         source: "cloud", in: context)
+
+                    let entry = FoodEntry(name: ref.name, calories: cal, protein: protein, carbs: carbs, fat: fat,
+                                          fiber: fiber, sugar: sugar, sodium: sodium,
+                                          portion: portion, meal: meal,
+                                          weightGram: weight,
+                                          baseCalories: ref.kcal,
+                                          baseProtein: ref.protein,
+                                          baseCarbs: ref.carbs,
+                                          baseFat: ref.fat,
+                                          baseFiber: ref.fiber,
+                                          baseSugar: ref.sugar,
+                                          baseSodium: ref.sodium,
+                                          imageName: nil)
+                    entries.append(entry)
+                    totalCal += cal
+                    summaries.append("\(foodIcon) \(meal)「\(ref.name)」\(Int(cal)) kcal（\(portion)）")
+                }
+            } catch {
+                print("[queryFood] 失败：\(error)")
+            }
+        }
+
+        if !entries.isEmpty {
+            for entry in entries {
+                context.insert(entry)
+            }
+            HealthManager.shared.saveCaloriesConsumed(totalCal, date: .now)
+            CloudSyncManager.shared.syncAfterLocalChange(context: context)
+            let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
+            return summaries.count == 1
+                ? "\(opener)：\(summaries[0])"
+                : "\(opener)：\n" + summaries.joined(separator: "\n")
+        }
+
+        // 2) 专项查询全部失败：兜底通用文本识别
         do {
             let (result, _) = try await RecognizeService.parseText(text, recentMessages: recentMessages)
             let summary = saveFromResult(result, originalText: text, allowedTypes: ["food"])
@@ -1169,7 +1291,7 @@ struct ChatView: View {
             print("[parseText food] 失败：\(error)")
         }
 
-        // 3) 都失败：落一条热量为0的记录，避免食物被静默丢失
+        // 3) 都失败：落多条热量为0的记录，避免食物被静默丢失
         if let fb = createFoodLocallyFallback(from: text) {
             return fb + "\n（云端暂时没查到营养，已先帮你记下来）"
         }
@@ -1308,6 +1430,122 @@ struct ChatView: View {
         if isPureEnergyDesc || name.isEmpty { return nil }
 
         return (name, weight ?? 100.0, portion)
+    }
+
+    /// 从文本中拆出多个食物项。
+    /// 优先按「数量+单位」切分；没有量词时退回整句解析，或按常见连词/标点切分。
+    /// 示例：「早餐吃了两个鸡蛋一碗燕麦粥」→ [(鸡蛋, 100, "2个"), (燕麦粥, 300, "1碗")]
+    private static func parseFoodItems(from text: String) -> [(name: String, weight: Double, portion: String)] {
+        let unitWeights: [(String, Double)] = [
+            ("碗", 300), ("杯", 250), ("瓶", 500), ("罐", 330),
+            ("个", 50), ("片", 30), ("份", 200), ("块", 50),
+            ("串", 100), ("根", 100), ("盘", 300), ("勺", 15),
+            ("两", 50),
+            ("克", 1), ("g", 1)
+        ]
+        let unitPattern = unitWeights.map { NSRegularExpression.escapedPattern(for: $0.0) }.joined(separator: "|")
+        let quantityPattern = "([\\d一二两三四五六七八九十]+)?\\s*(\(unitPattern))"
+
+        guard let regex = try? NSRegularExpression(pattern: quantityPattern) else { return [] }
+        let ns = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
+
+        var items: [(name: String, weight: Double, portion: String)] = []
+
+        // 按量词「开始位置」切分：中文习惯「数量+单位+食物名」，
+        // 每项从当前量词开始，到下一量词开始之前结束。
+        for (idx, match) in matches.enumerated() {
+            let start = match.range(at: 0).location
+            let end: Int
+            if idx + 1 < matches.count {
+                end = matches[idx + 1].range(at: 0).location
+            } else {
+                end = ns.length
+            }
+            let segmentRange = NSRange(location: start, length: end - start)
+            let segment = ns.substring(with: segmentRange)
+            if let parsed = parseFoodNameAndWeight(segment) {
+                items.append(parsed)
+            }
+        }
+
+        // 按量词切出至少一项时直接返回，避免把 trailing 语气词/场景词当成食物。
+        if !items.isEmpty {
+            return items
+        }
+
+        // 没有量词：先尝试整句
+        if let parsed = parseFoodNameAndWeight(text) {
+            return [parsed]
+        }
+
+        // 再按常见连词/标点切分
+        let separatorSet = CharacterSet(charactersIn: ",，、和与以及还有")
+        let parts = text.components(separatedBy: separatorSet)
+        for part in parts where !part.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let parsed = parseFoodNameAndWeight(part) {
+                items.append(parsed)
+            }
+        }
+        return items
+    }
+
+    /// 解析文本中的饮水量。返回 (amount_ml, displayText)。
+    /// 命中条件：含「水」+ 含喝类动词（喝/饮/灌） + 不含其他真实食物词。
+    /// 单位映射：升/L→1000、毫升/ml→1、杯→250、瓶→500、壶→1000、碗→300。
+    /// 示例：
+    ///   "喝了 1 升水"    → (1000, "1升水")
+    ///   "喝了 500ml 水"  → (500,  "500ml水")
+    ///   "喝了两杯水"     → (500,  "2杯水")
+    ///   "喝了 1.5 升水"  → (1500, "1.5升水")
+    ///   "喝水"           → (250,  "1杯水")
+    private static func parseWaterIntake(_ text: String) -> (ml: Double, display: String)? {
+        // 必须含「水」+ 喝类动词
+        let hasWater = text.contains("水") || text.contains("汤") // 汤也走这条罕见 case
+        let hasDrinkVerb = text.contains("喝") || text.contains("饮") || text.contains("灌")
+        guard hasWater, hasDrinkVerb else { return nil }
+
+        // 排除「汤/糖水」以外的「其他真实食物」：含蛋/饭/面/菜/肉/鱼/鸡/奶/粥/麦/汤 等就当复合饮食场景，不走水路径
+        let foodKeywords = ["蛋", "饭", "面", "菜", "肉", "鱼", "鸡", "鸭", "牛", "羊", "猪", "奶",
+                            "粥", "麦", "汤", "果", "豆", "瓜", "薯", "汤圆", "面包", "饼", "燕"]
+        for kw in foodKeywords where text.contains(kw) {
+            // "水" 在末尾时允许（如 "喝了 1 碗汤 1 杯水"），否则整句有食物就走食物路径
+            // 这里保守处理：含食物词就直接放弃水路径，避免「喝了 1 碗燕麦粥 1 杯水」漏记食物
+            return nil
+        }
+
+        // 单位 → 毫升映射（按常见容量排序，确保长的先匹配，避免「ml」被「m」截胡）
+        let units: [(String, Double)] = [
+            ("毫升", 1), ("mL", 1), ("ML", 1), ("ml", 1),
+            ("升", 1000), ("L", 1000), ("l", 1000),
+            ("杯", 250),
+            ("瓶", 500),
+            ("壶", 1000),
+            ("碗", 300),
+        ]
+
+        let ns = text as NSString
+        // 1) 优先匹配「数量+单位」组合
+        for (unit, mlPerUnit) in units {
+            let escaped = NSRegularExpression.escapedPattern(for: unit)
+            let pattern = "([\\d.]+|[一二两三四五六七八九十百千]+)\\s*\(escaped)"
+            if let regex = try? NSRegularExpression(pattern: pattern),
+               let m = regex.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)) {
+                let numStr = ns.substring(with: m.range(at: 1))
+                let count: Double
+                if let n = parseChineseNumber(numStr) { count = Double(n) }
+                else if let d = Double(numStr) { count = d }
+                else { count = 1 }
+                return (count * mlPerUnit, "\(numStr)\(unit)水")
+            }
+        }
+
+        // 2) 没数量+单位：单纯「喝水」「饮水」「灌水」 → 默认 1 杯（250ml）
+        if text.contains("喝水") || text.contains("饮水") || text.contains("灌水") {
+            return (250, "1杯水")
+        }
+
+        return nil
     }
 
     /// 从文本提取金额数字（如 35 / 12.5）。
@@ -1650,6 +1888,11 @@ struct ChatView: View {
                             responseText = localBill
                         }
                     }
+                    // 2.5. 饮水意图：含「喝+水/饮+水」+ 不含其他真实食物词时，直接走饮水路径（不查营养库、不走云端），
+                    //      避免「喝了 1 升水」被误识别为 food 然后去云端查「水」的营养失败被丢。
+                    else if let waterMsg = createWaterIntake(from: t) {
+                        responseText = waterMsg
+                    }
                     // 3. 食物意图：含「吃/喝/奶茶/咖啡/饭」等词，先尝试本地营养库估算，
                     //    命中则直接创建记录；未命中再走云端专项查询/通用识别，避免模型被上下文误导成账单或闲聊。
                     else if isFoodLike(t) {
@@ -1743,13 +1986,6 @@ struct ChatView: View {
         return nil
     }
 
-    // 根据分类名粗略判断是否为收入类账单
-    private func isIncomeCategory(_ category: String) -> Bool {
-        let incomeKeywords = ["工资", "收入", "报销", "退款", "返现", "奖金", "津贴", "补贴", "转账收入", "投资收益", "利息"]
-        let lowered = category.lowercased()
-        return incomeKeywords.contains { lowered.contains($0) }
-    }
-
     // MARK: - 平滑滚动到底部
     private let scrollAnimation: Animation = .spring(response: 0.32, dampingFraction: 0.82)
     private func scrollToBottom(proxy: ScrollViewProxy, delay: TimeInterval = 0, anchor: UnitPoint = .bottom) {
@@ -1791,79 +2027,96 @@ struct ChatView: View {
             allowedTypes == nil || allowedTypes!.contains(type)
         }
 
-        if shouldSaveType("food"), types.contains("food"), let food = result.food, let foodName = food.name, !foodName.isEmpty {
-            let meal = resolveMeal(from: food.meal, text: originalText)
-            let portion = food.portion ?? "100克"
-            let weight = RecognitionSaver.weightFromPortion(portion)
-            let ratio = weight / 100.0
-            let baseCal = food.calories ?? 0
-            let basePro = food.protein ?? 0
-            let baseCar = food.carbs ?? 0
-            let baseFat = food.fat ?? 0
-            let cal = baseCal * ratio
-            let protein = basePro * ratio
-            let carbs = baseCar * ratio
-            let fat = baseFat * ratio
+        if shouldSaveType("food"), types.contains("food") {
+            for food in result.foodList {
+                guard let foodName = food.name, !foodName.isEmpty else { continue }
+                let meal = resolveMeal(from: food.meal, text: originalText)
+                let portion = food.portion ?? "100克"
+                let weight = RecognitionSaver.weightFromPortion(portion)
+                let ratio = weight / 100.0
+                let baseCal = food.calories ?? 0
+                let basePro = food.protein ?? 0
+                let baseCar = food.carbs ?? 0
+                let baseFat = food.fat ?? 0
+                let baseFiber = food.fiber ?? 0
+                let baseSugar = food.sugar ?? 0
+                let baseSodium = food.sodium ?? 0
+                let cal = baseCal * ratio
+                let protein = basePro * ratio
+                let carbs = baseCar * ratio
+                let fat = baseFat * ratio
+                let fiber = baseFiber * ratio
+                let sugar = baseSugar * ratio
+                let sodium = baseSodium * ratio
 
-            let action = food.action?.lowercased() ?? "create"
-            switch action {
-            case "update":
-                guard ChatView.hasExplicitUpdateIntent(originalText) else { fallthrough }
-                if let target = findFoodTarget(targetTitle: food.targetTitle, fallbackToLatest: false) {
-                    // 只覆盖云端明确给到的字段；meal 为空（用户没提餐次）时保留原值，避免被当前时间兜底改掉。
-                    target.name = foodName
-                    target.calories = cal
-                    target.protein = protein
-                    target.carbs = carbs
-                    target.fat = fat
-                    target.portion = portion
-                    target.weightGram = weight
-                    target.baseCalories = baseCal
-                    target.baseProtein = basePro
-                    target.baseCarbs = baseCar
-                    target.baseFat = baseFat
-                    if let m = food.meal, !m.isEmpty {
-                        target.meal = ChatView.normalizeMeal(m)
+                let action = food.action?.lowercased() ?? "create"
+                switch action {
+                case "update":
+                    guard ChatView.hasExplicitUpdateIntent(originalText) else { fallthrough }
+                    if let target = findFoodTarget(targetTitle: food.targetTitle, fallbackToLatest: false) {
+                        target.name = foodName
+                        target.calories = cal
+                        target.protein = protein
+                        target.carbs = carbs
+                        target.fat = fat
+                        target.fiber = fiber
+                        target.sugar = sugar
+                        target.sodium = sodium
+                        target.portion = portion
+                        target.weightGram = weight
+                        target.baseCalories = baseCal
+                        target.baseProtein = basePro
+                        target.baseCarbs = baseCar
+                        target.baseFat = baseFat
+                        target.baseFiber = baseFiber
+                        target.baseSugar = baseSugar
+                        target.baseSodium = baseSodium
+                        if let m = food.meal, !m.isEmpty {
+                            target.meal = ChatView.normalizeMeal(m)
+                        }
+                        target.syncUpdatedAt = Date()
+                        HealthManager.shared.saveCaloriesConsumed(cal, date: target.date)
+                        FoodMetaStore.upsert(name: foodName, displayName: foodName,
+                                             kcal: baseCal, protein: basePro, carbs: baseCar, fat: baseFat,
+                                             fiber: baseFiber, sugar: baseSugar, sodium: baseSodium,
+                                             source: "cloud", in: context)
+                        summary.append("🔄 已更新「\(foodName)」：\(target.meal) \(Int(cal)) kcal\n  蛋白 \(String(format: "%.1f", target.protein))g · 碳水 \(String(format: "%.1f", target.carbs))g · 脂肪 \(String(format: "%.1f", target.fat))g · 纤维 \(String(format: "%.1f", target.fiber))g · 糖 \(String(format: "%.1f", target.sugar))g · 钠 \(String(format: "%.0f", target.sodium))mg")
+                    } else {
+                        fallthrough
                     }
-                    target.syncUpdatedAt = Date()
-                    HealthManager.shared.saveCaloriesConsumed(cal, date: target.date)
-                    // 把修正后的营养沉淀到本地食物缓存，方便下次本地直接命中。
+                case "delete":
+                    guard ChatView.hasExplicitDeleteIntent(originalText) else { fallthrough }
+                    if let target = findFoodTarget(targetTitle: food.targetTitle, fallbackToLatest: false) {
+                        SafeDelete.food(target, in: context)
+                        summary.append("🗑 已删除「\(foodName)」")
+                    } else {
+                        summary.append("我没找到你想删除的饮食记录，能再描述一下吗？")
+                    }
+                default:
+                    if baseCal <= 0 && basePro <= 0 && baseCar <= 0 && baseFat <= 0 {
+                        summary.append("⚠️ 识别到「\(foodName)」但暂未查到营养数据，已跳过保存")
+                        break
+                    }
+                    context.insert(FoodEntry(name: foodName,
+                                             calories: cal, protein: protein, carbs: carbs, fat: fat,
+                                             fiber: fiber, sugar: sugar, sodium: sodium,
+                                             portion: portion, meal: meal,
+                                             weightGram: weight,
+                                             baseCalories: baseCal,
+                                             baseProtein: basePro,
+                                             baseCarbs: baseCar,
+                                             baseFat: baseFat,
+                                             baseFiber: baseFiber,
+                                             baseSugar: baseSugar,
+                                             baseSodium: baseSodium,
+                                             imageName: nil))
                     FoodMetaStore.upsert(name: foodName, displayName: foodName,
                                          kcal: baseCal, protein: basePro, carbs: baseCar, fat: baseFat,
+                                         fiber: baseFiber, sugar: baseSugar, sodium: baseSodium,
                                          source: "cloud", in: context)
-                    summary.append("🔄 已更新「\(foodName)」：\(target.meal) \(Int(cal)) kcal")
-                } else {
-                    fallthrough
+                    HealthManager.shared.saveCaloriesConsumed(cal, date: .now)
+                    summary.append("🍽 \(meal)「\(foodName)」\(Int(cal)) kcal\n  蛋白 \(String(format: "%.1f", protein))g · 碳水 \(String(format: "%.1f", carbs))g · 脂肪 \(String(format: "%.1f", fat))g · 纤维 \(String(format: "%.1f", fiber))g · 糖 \(String(format: "%.1f", sugar))g · 钠 \(String(format: "%.0f", sodium))mg")
                 }
-            case "delete":
-                guard ChatView.hasExplicitDeleteIntent(originalText) else { fallthrough }
-                if let target = findFoodTarget(targetTitle: food.targetTitle, fallbackToLatest: false) {
-                    SafeDelete.food(target, in: context)
-                    summary.append("🗑 已删除「\(foodName)」")
-                } else {
-                    summary.append("我没找到你想删除的饮食记录，能再描述一下吗？")
-                }
-            default:
-                // 校验：全部营养为零 → 跳过保存空壳食物记录
-                if baseCal <= 0 && basePro <= 0 && baseCar <= 0 && baseFat <= 0 {
-                    summary.append("⚠️ 识别到「\(foodName)」但暂未查到营养数据，已跳过保存")
-                    break
-                }
-                context.insert(FoodEntry(name: foodName,
-                                         calories: cal, protein: protein, carbs: carbs, fat: fat,
-                                         portion: portion, meal: meal,
-                                         weightGram: weight,
-                                         baseCalories: baseCal,
-                                         baseProtein: basePro,
-                                         baseCarbs: baseCar,
-                                         baseFat: baseFat,
-                                         imageName: nil))
-                // 云端识别出的食物营养沉淀到本地缓存，下次同类食物可直接本地命中。
-                FoodMetaStore.upsert(name: foodName, displayName: foodName,
-                                     kcal: baseCal, protein: basePro, carbs: baseCar, fat: baseFat,
-                                     source: "cloud", in: context)
-                HealthManager.shared.saveCaloriesConsumed(cal, date: .now)
-                summary.append("🍽 \(meal)「\(foodName)」\(Int(cal)) kcal")
             }
         }
 
@@ -1873,7 +2126,7 @@ struct ChatView: View {
                       let amount = bill.amount, amount > 0 else { continue }
                 let time = RecognitionResult.date(from: bill.time) ?? .now
                 let category = bill.category ?? "其他"
-                let income = isIncomeCategory(category)
+                let income = RecognitionSaver.isIncomeSignal(category: category, merchant: merchant, rawText: originalText)
 
                 let action = bill.action?.lowercased() ?? "create"
                 switch action {
