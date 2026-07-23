@@ -869,7 +869,7 @@ struct ChatView: View {
         if explicitBill { return false }
 
         let foodKw = ["吃", "喝", "食", "进", "尝", "品",
-                      "餐", "菜", "汤", "粥", "点心", "饭",
+                      "点心",
                       "早饭", "午饭", "晚饭", "早餐", "午餐", "晚餐", "夜宵", "加餐", "零食",
                       "宵夜", "吃不饱", "吃太撑", "吃撑"]
         return foodKw.contains(where: { lower.contains($0) })
