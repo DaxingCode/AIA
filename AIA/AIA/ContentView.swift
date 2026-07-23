@@ -270,7 +270,7 @@ struct ContentView: View {
         HStack(alignment: .center, spacing: 8) {
             abaoAvatar
 
-            Text("\(Self.greetingEmoji) \(greeting)，\(userNickname)")
+            Text("\(greeting)，\(userNickname) \(Self.greetingEmoji)")
                 .font(AIATheme.Font.title2.weight(.semibold))
             Spacer()
             if pendingCount > 0 {
@@ -290,23 +290,17 @@ struct ContentView: View {
         ["👋", "😊", "🌟", "☀️", "✨", "🎉", "💪", "🫡", "👍", "🔥", "🌸", "🍀", "🥳", "😎"].randomElement() ?? "👋"
     }()
 
-    /// 阿宝头像：笑脸 SF Symbol + 琥珀淡底圆 + 呼吸脉冲动画（2.5s 循环胀缩）
+    /// 阿宝头像：app icon (AIAvatar) 圆形裁剪 + 呼吸脉冲动画（2.5s 循环胀缩）
     private var abaoAvatar: some View {
         Button {
             // 未来：跳转阿宝聊天页
         } label: {
-            ZStack {
-                Circle()
-                    .fill(AIATheme.dietBG)
-                    .frame(width: 36, height: 36)
-                    .overlay(
-                        Circle().stroke(AIATheme.food.opacity(0.3), lineWidth: 1)
-                    )
-                Image(systemName: "face.smiling")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(AIATheme.food)
-                    .scaleEffect(abaoPulse ? 1.12 : 1.0)
-            }
+            Image("AIAvatar")
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 36, height: 36)
+                .clipShape(Circle())
+                .scaleEffect(abaoPulse ? 1.12 : 1.0)
         }
         .frame(width: 44, height: 44)
         .buttonStyle(.plain)
