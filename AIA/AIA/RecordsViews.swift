@@ -154,15 +154,17 @@ struct FoodListView: View {
         selectedFoods.reduce(0) { $0 + $1.waterIntake }
     }
 
-    /// 「今日饮水」卡片：与左侧「净热量」卡同高（撑满 HStack 高度）。
+    /// 「今日饮水」卡片：数字+单位同行，与左侧「净热量」卡同高（撑满 HStack 高度）。
     private var waterCard: some View {
         VStack(spacing: 2) {
-            Text("\(Int(waterIntakeToday))")
-                .font(AIATheme.Font.title3.weight(.semibold))
-                .foregroundStyle(AIATheme.health)
-            Text("ml")
-                .font(AIATheme.Font.micro)
-                .foregroundStyle(AIATheme.sub)
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text("\(Int(waterIntakeToday))")
+                    .font(AIATheme.Font.title3.weight(.semibold))
+                    .foregroundStyle(AIATheme.health)
+                Text("ml")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.sub)
+            }
             Text(NSLocalizedString("food.water", comment: ""))
                 .font(AIATheme.Font.micro)
                 .foregroundStyle(AIATheme.sub)
