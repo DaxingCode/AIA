@@ -106,6 +106,9 @@ enum SchemaVersion3: VersionedSchema {
 // MARK: - v4.0.0：RecurringRule 新增 cycleRaw / customValue / customUnitRaw 字段，支持多周期。
 //           为了与 v5 的 FoodEntry（新增 weightGram/base* 字段）schema checksum 不同，
 //           v4 必须内嵌一个同构旧版 FoodEntry，而不是直接引用外层已变异的 FoodEntry。
+//           同步地，外层 RecurringRule 在 v9 新增 syncId/syncUpdatedAt/syncDeleted，
+//           v4 必须内嵌一个「v4 时刻的旧 shape」RecurringRule（含周期字段，无 sync 字段），
+//           而非引用外层已变异的 RecurringRule。
 enum SchemaVersion4: VersionedSchema {
     static var versionIdentifier: Schema.Version = Schema.Version(4, 0, 0)
 
@@ -142,6 +145,40 @@ enum SchemaVersion4: VersionedSchema {
         }
     }
 
+    // v4 时刻的 RecurringRule：含周期字段（cycleRaw/customValue/customUnitRaw），
+    // 但尚无 syncId/syncUpdatedAt/syncDeleted（这些是 v9 新增的）。
+    // 与 v1/v3 内嵌版类身份不同，确保唯一的 schema checksum。
+    @Model final class RecurringRule {
+        var merchant: String
+        var amount: Double
+        var category: String
+        var note: String
+        var isIncome: Bool
+        var dayOfMonth: Int
+        var startDate: Date
+        var lastGeneratedAt: Date?
+        var cycleRaw: String?
+        var customValue: Int?
+        var customUnitRaw: String?
+
+        init(merchant: String = "", amount: Double = 0, category: String = "",
+             note: String = "", isIncome: Bool = false, dayOfMonth: Int = 1,
+             startDate: Date = .now, lastGeneratedAt: Date? = nil,
+             cycleRaw: String = "monthly", customValue: Int = 1, customUnitRaw: String = "month") {
+            self.merchant = merchant
+            self.amount = amount
+            self.category = category
+            self.note = note
+            self.isIncome = isIncome
+            self.dayOfMonth = min(max(dayOfMonth, 1), 28)
+            self.startDate = startDate
+            self.lastGeneratedAt = lastGeneratedAt
+            self.cycleRaw = cycleRaw
+            self.customValue = max(customValue, 1)
+            self.customUnitRaw = customUnitRaw
+        }
+    }
+
     static var models: [any PersistentModel.Type] {
         [
             Bill.self,
@@ -150,7 +187,7 @@ enum SchemaVersion4: VersionedSchema {
             HealthMetric.self,
             RecognitionRecord.self,
             ChatMessage.self,
-            RecurringRule.self, // 外层 RecurringRule，含 v4 周期字段
+            RecurringRule.self, // SchemaVersion4 内嵌旧版（含周期字段，无 sync）
             MerchantMeta.self
         ]
     }
@@ -158,17 +195,86 @@ enum SchemaVersion4: VersionedSchema {
 
 // MARK: - v5.0.0：FoodEntry 新增 weightGram / baseCalories / baseProtein / baseCarbs / baseFat，
 //           支持编辑页改重量时自动联动热量与三大营养素。
+//           注意：v8 已新增 fiber/sugar/sodium/waterIntake/baseFiber/baseSugar/baseSodium。
+//           为保持 v5 checksum 不被新外层 FoodEntry 污染、且不与 v8 重复 checksum，
+//           v5 必须内嵌一个「v5 时刻的旧 shape」FoodEntry（仅含 weightGram/base*，无新字段），
+//           而不是直接引用外层已变异的 FoodEntry。
 enum SchemaVersion5: VersionedSchema {
     static var versionIdentifier: Schema.Version = Schema.Version(5, 0, 0)
+
+    @Model final class FoodEntry {
+        var name: String
+        var calories: Double
+        var protein: Double
+        var carbs: Double
+        var fat: Double
+        var portion: String
+        var meal: String
+        var date: Date
+        var weightGram: Double?
+        var baseCalories: Double?
+        var baseProtein: Double?
+        var baseCarbs: Double?
+        var baseFat: Double?
+        var imageName: String?
+        var syncId: UUID
+        var syncUpdatedAt: Date
+        var syncDeleted: Bool
+
+        init(name: String = "", calories: Double = 0, protein: Double = 0, carbs: Double = 0,
+             fat: Double = 0, portion: String = "", meal: String = "午餐", date: Date = .now,
+             weightGram: Double? = nil,
+             baseCalories: Double? = nil, baseProtein: Double? = nil,
+             baseCarbs: Double? = nil, baseFat: Double? = nil,
+             imageName: String? = nil,
+             syncId: UUID = UUID(), syncUpdatedAt: Date = .now, syncDeleted: Bool = false) {
+            self.name = name
+            self.calories = calories
+            self.protein = protein
+            self.carbs = carbs
+            self.fat = fat
+            self.portion = portion
+            self.meal = meal
+            self.date = date
+            self.weightGram = weightGram
+            self.baseCalories = baseCalories
+            self.baseProtein = baseProtein
+            self.baseCarbs = baseCarbs
+            self.baseFat = baseFat
+            self.imageName = imageName
+            self.syncId = syncId
+            self.syncUpdatedAt = syncUpdatedAt
+            self.syncDeleted = syncDeleted
+        }
+    }
+
+    // v5 时刻的 RecurringRule（含周期字段，无 sync 字段），同类嵌入规则参见 v4。
+    @Model final class RecurringRule {
+        var merchant: String
+        var amount: Double
+        var category: String
+        var note: String
+        var isIncome: Bool
+        var dayOfMonth: Int
+        var startDate: Date
+        var lastGeneratedAt: Date?
+        var cycleRaw: String?
+        var customValue: Int?
+        var customUnitRaw: String?
+        init(merchant: String = "", amount: Double = 0, category: String = "", note: String = "", isIncome: Bool = false, dayOfMonth: Int = 1, startDate: Date = .now, lastGeneratedAt: Date? = nil, cycleRaw: String = "monthly", customValue: Int = 1, customUnitRaw: String = "month") {
+            self.merchant = merchant; self.amount = amount; self.category = category; self.note = note; self.isIncome = isIncome; self.dayOfMonth = min(max(dayOfMonth, 1), 28); self.startDate = startDate; self.lastGeneratedAt = lastGeneratedAt; self.cycleRaw = cycleRaw; self.customValue = max(customValue, 1); self.customUnitRaw = customUnitRaw
+        }
+    }
+
     static var models: [any PersistentModel.Type] {
         [
             Bill.self,
             Reminder.self,
-            FoodEntry.self,     // 外层新版 FoodEntry，含 weightGram/base*
+            FoodEntry.self,     // SchemaVersion5 内嵌旧 shape（仅 weightGram/base*，无新字段）
             HealthMetric.self,
             RecognitionRecord.self,
             ChatMessage.self,
-            RecurringRule.self,
+            RecurringRule.self, // SchemaVersion5 内嵌旧版（含周期字段，无 sync）
             MerchantMeta.self
         ]
     }
@@ -178,8 +284,57 @@ enum SchemaVersion5: VersionedSchema {
 //           本地硬编码 NutritionLibrary 未命中时，走云端查询并沉淀到此表。
 //           注意：外层 MerchantMeta 已在 v7 新增 syncId/syncUpdatedAt/syncDeleted，
 //           为保持 v6 schema checksum 不变，此处内嵌旧版 MerchantMeta（无 sync 字段）。
+//           同样：外层 FoodEntry 在 v8 新增 fiber/sugar/sodium/waterIntake，
+//           为防止 v6 引用外层 FoodEntry 造成 checksum 漂移、与 v8 重复，
+//           v6 也内嵌 v5 时刻的旧 shape FoodEntry（仅含 weightGram/base*）。
 enum SchemaVersion6: VersionedSchema {
     static var versionIdentifier: Schema.Version = Schema.Version(6, 0, 0)
+
+    @Model final class FoodEntry {
+        var name: String
+        var calories: Double
+        var protein: Double
+        var carbs: Double
+        var fat: Double
+        var portion: String
+        var meal: String
+        var date: Date
+        var weightGram: Double?
+        var baseCalories: Double?
+        var baseProtein: Double?
+        var baseCarbs: Double?
+        var baseFat: Double?
+        var imageName: String?
+        var syncId: UUID
+        var syncUpdatedAt: Date
+        var syncDeleted: Bool
+
+        init(name: String = "", calories: Double = 0, protein: Double = 0, carbs: Double = 0,
+             fat: Double = 0, portion: String = "", meal: String = "午餐", date: Date = .now,
+             weightGram: Double? = nil,
+             baseCalories: Double? = nil, baseProtein: Double? = nil,
+             baseCarbs: Double? = nil, baseFat: Double? = nil,
+             imageName: String? = nil,
+             syncId: UUID = UUID(), syncUpdatedAt: Date = .now, syncDeleted: Bool = false) {
+            self.name = name
+            self.calories = calories
+            self.protein = protein
+            self.carbs = carbs
+            self.fat = fat
+            self.portion = portion
+            self.meal = meal
+            self.date = date
+            self.weightGram = weightGram
+            self.baseCalories = baseCalories
+            self.baseProtein = baseProtein
+            self.baseCarbs = baseCarbs
+            self.baseFat = baseFat
+            self.imageName = imageName
+            self.syncId = syncId
+            self.syncUpdatedAt = syncUpdatedAt
+            self.syncDeleted = syncDeleted
+        }
+    }
 
     @Model final class MerchantMeta {
         @Attribute(.unique) var merchant: String
@@ -198,24 +353,216 @@ enum SchemaVersion6: VersionedSchema {
         }
     }
 
+    // v6 时刻的 FoodMeta：仅含 kcal/protein/carbs/fat 共 4 营养字段，无 fiber/sugar/sodium。
+    // 同样按 v4 嵌入 RecurringRule / v6 嵌入 MerchantMeta 的模式，把当前已变异的
+    // 外层 FoodMeta 锁在 v6 checksum 内，避免 v8 升级时 checksum 漂移/重复。
+    @Model final class FoodMeta {
+        @Attribute(.unique) var name: String
+        var displayName: String
+        var kcal: Double
+        var protein: Double
+        var carbs: Double
+        var fat: Double
+        var source: String
+        var hitCount: Int
+        var lastSeen: Date
+
+        init(name: String, displayName: String? = nil,
+             kcal: Double, protein: Double, carbs: Double, fat: Double,
+             source: String = "cloud", hitCount: Int = 1, lastSeen: Date = .now) {
+            self.name = FoodMeta.normalize(name)
+            self.displayName = (displayName ?? name).trimmingCharacters(in: .whitespaces)
+            self.kcal = kcal
+            self.protein = protein
+            self.carbs = carbs
+            self.fat = fat
+            self.source = source
+            self.hitCount = hitCount
+            self.lastSeen = lastSeen
+        }
+
+        static func normalize(_ s: String) -> String {
+            s.trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .replacingOccurrences(of: " ", with: "")
+        }
+    }
+
+    // v6 时刻的 RecurringRule（含周期字段，无 sync 字段）
+    @Model final class RecurringRule {
+        var merchant: String; var amount: Double; var category: String; var note: String; var isIncome: Bool; var dayOfMonth: Int; var startDate: Date; var lastGeneratedAt: Date?; var cycleRaw: String?; var customValue: Int?; var customUnitRaw: String?
+        init(merchant: String = "", amount: Double = 0, category: String = "", note: String = "", isIncome: Bool = false, dayOfMonth: Int = 1, startDate: Date = .now, lastGeneratedAt: Date? = nil, cycleRaw: String = "monthly", customValue: Int = 1, customUnitRaw: String = "month") {
+            self.merchant = merchant; self.amount = amount; self.category = category; self.note = note; self.isIncome = isIncome; self.dayOfMonth = min(max(dayOfMonth, 1), 28); self.startDate = startDate; self.lastGeneratedAt = lastGeneratedAt; self.cycleRaw = cycleRaw; self.customValue = max(customValue, 1); self.customUnitRaw = customUnitRaw
+        }
+    }
+
     static var models: [any PersistentModel.Type] {
         [
             Bill.self,
             Reminder.self,
-            FoodEntry.self,
+            FoodEntry.self,     // SchemaVersion6 内嵌旧 shape FoodEntry
             HealthMetric.self,
             RecognitionRecord.self,
             ChatMessage.self,
-            RecurringRule.self,
+            RecurringRule.self, // SchemaVersion6 内嵌旧版（含周期字段，无 sync）
             MerchantMeta.self,  // 内嵌旧版
-            FoodMeta.self
+            FoodMeta.self       // SchemaVersion6 内嵌旧 shape FoodMeta
         ]
     }
 }
 
 // MARK: - v7.0.0：MerchantMeta 新增 syncId / syncUpdatedAt / syncDeleted，支持云端同步。
+//           同 v5/v6：内嵌 v5 时刻的旧 shape FoodEntry（仅含 weightGram/base*），
+//           避免 v8 升级时外层 FoodEntry 已新增字段导致 checksum 漂移/重复。
 enum SchemaVersion7: VersionedSchema {
     static var versionIdentifier: Schema.Version = Schema.Version(7, 0, 0)
+
+    @Model final class FoodEntry {
+        var name: String
+        var calories: Double
+        var protein: Double
+        var carbs: Double
+        var fat: Double
+        var portion: String
+        var meal: String
+        var date: Date
+        var weightGram: Double?
+        var baseCalories: Double?
+        var baseProtein: Double?
+        var baseCarbs: Double?
+        var baseFat: Double?
+        var imageName: String?
+        var syncId: UUID
+        var syncUpdatedAt: Date
+        var syncDeleted: Bool
+
+        init(name: String = "", calories: Double = 0, protein: Double = 0, carbs: Double = 0,
+             fat: Double = 0, portion: String = "", meal: String = "午餐", date: Date = .now,
+             weightGram: Double? = nil,
+             baseCalories: Double? = nil, baseProtein: Double? = nil,
+             baseCarbs: Double? = nil, baseFat: Double? = nil,
+             imageName: String? = nil,
+             syncId: UUID = UUID(), syncUpdatedAt: Date = .now, syncDeleted: Bool = false) {
+            self.name = name
+            self.calories = calories
+            self.protein = protein
+            self.carbs = carbs
+            self.fat = fat
+            self.portion = portion
+            self.meal = meal
+            self.date = date
+            self.weightGram = weightGram
+            self.baseCalories = baseCalories
+            self.baseProtein = baseProtein
+            self.baseCarbs = baseCarbs
+            self.baseFat = baseFat
+            self.imageName = imageName
+            self.syncId = syncId
+            self.syncUpdatedAt = syncUpdatedAt
+            self.syncDeleted = syncDeleted
+        }
+    }
+
+    // v7 时刻的 FoodMeta：与 v6 嵌入版同构（仅 4 营养字段），
+    // 但用 v7 自己的类身份，区别于 v6 的内嵌类（与 v1/v3 嵌入 RecurringRule 同款技巧）。
+    @Model final class FoodMeta {
+        @Attribute(.unique) var name: String
+        var displayName: String
+        var kcal: Double
+        var protein: Double
+        var carbs: Double
+        var fat: Double
+        var source: String
+        var hitCount: Int
+        var lastSeen: Date
+
+        init(name: String, displayName: String? = nil,
+             kcal: Double, protein: Double, carbs: Double, fat: Double,
+             source: String = "cloud", hitCount: Int = 1, lastSeen: Date = .now) {
+            self.name = FoodMeta.normalize(name)
+            self.displayName = (displayName ?? name).trimmingCharacters(in: .whitespaces)
+            self.kcal = kcal
+            self.protein = protein
+            self.carbs = carbs
+            self.fat = fat
+            self.source = source
+            self.hitCount = hitCount
+            self.lastSeen = lastSeen
+        }
+
+        static func normalize(_ s: String) -> String {
+            s.trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .replacingOccurrences(of: " ", with: "")
+        }
+    }
+
+    // v7 时刻的 RecurringRule（含周期字段，无 sync 字段）
+    @Model final class RecurringRule {
+        var merchant: String; var amount: Double; var category: String; var note: String; var isIncome: Bool; var dayOfMonth: Int; var startDate: Date; var lastGeneratedAt: Date?; var cycleRaw: String?; var customValue: Int?; var customUnitRaw: String?
+        init(merchant: String = "", amount: Double = 0, category: String = "", note: String = "", isIncome: Bool = false, dayOfMonth: Int = 1, startDate: Date = .now, lastGeneratedAt: Date? = nil, cycleRaw: String = "monthly", customValue: Int = 1, customUnitRaw: String = "month") {
+            self.merchant = merchant; self.amount = amount; self.category = category; self.note = note; self.isIncome = isIncome; self.dayOfMonth = min(max(dayOfMonth, 1), 28); self.startDate = startDate; self.lastGeneratedAt = lastGeneratedAt; self.cycleRaw = cycleRaw; self.customValue = max(customValue, 1); self.customUnitRaw = customUnitRaw
+        }
+    }
+
+    static var models: [any PersistentModel.Type] {
+        [
+            Bill.self,
+            Reminder.self,
+            FoodEntry.self,     // SchemaVersion7 内嵌旧 shape FoodEntry
+            HealthMetric.self,
+            RecognitionRecord.self,
+            ChatMessage.self,
+            RecurringRule.self, // SchemaVersion7 内嵌旧版（含周期字段，无 sync）
+            MerchantMeta.self,  // 外层新版（含 sync 字段）
+            FoodMeta.self       // SchemaVersion7 内嵌旧 shape FoodMeta
+        ]
+    }
+}
+
+// MARK: - v8.0.0：FoodEntry 新增 fiber/sugar/sodium/waterIntake 及 baseFiber/baseSugar/baseSodium，
+//           支持膳食纤维、糖、钠、饮水量的记录与展示。
+//           v5/v6/v7 已各自内嵌旧 shape FoodEntry（仅 weightGram/base*，无新字段），
+//           所以 v8 引用外层 FoodEntry 即可——外层已含新字段，与 v5/v6/v7 字段结构不同，
+//           不会触发 Duplicate version checksums。
+//           同 v4/v5/v6/v7：内嵌旧版 RecurringRule（含周期字段，无 sync），
+//           避免 v9 升级时外层 RecurringRule 已新增 sync 字段导致 checksum 漂移。
+enum SchemaVersion8: VersionedSchema {
+    static var versionIdentifier: Schema.Version = Schema.Version(8, 0, 0)
+
+    // v8 时刻的 RecurringRule（含周期字段，无 sync 字段）
+    @Model final class RecurringRule {
+        var merchant: String; var amount: Double; var category: String; var note: String; var isIncome: Bool; var dayOfMonth: Int; var startDate: Date; var lastGeneratedAt: Date?; var cycleRaw: String?; var customValue: Int?; var customUnitRaw: String?
+        init(merchant: String = "", amount: Double = 0, category: String = "", note: String = "", isIncome: Bool = false, dayOfMonth: Int = 1, startDate: Date = .now, lastGeneratedAt: Date? = nil, cycleRaw: String = "monthly", customValue: Int = 1, customUnitRaw: String = "month") {
+            self.merchant = merchant; self.amount = amount; self.category = category; self.note = note; self.isIncome = isIncome; self.dayOfMonth = min(max(dayOfMonth, 1), 28); self.startDate = startDate; self.lastGeneratedAt = lastGeneratedAt; self.cycleRaw = cycleRaw; self.customValue = max(customValue, 1); self.customUnitRaw = customUnitRaw
+        }
+    }
+
+    static var models: [any PersistentModel.Type] {
+        [
+            Bill.self,
+            Reminder.self,
+            FoodEntry.self,     // 外层新版 FoodEntry，含 fiber/sugar/sodium/waterIntake/baseFiber/baseSugar/baseSodium
+            HealthMetric.self,
+            RecognitionRecord.self,
+            ChatMessage.self,
+            RecurringRule.self, // SchemaVersion8 内嵌旧版（含周期字段，无 sync）
+            MerchantMeta.self,
+            FoodMeta.self
+        ]
+    }
+}
+
+// MARK: - v9.0.0：RecurringRule 新增 syncId / syncUpdatedAt / syncDeleted，支持云端同步。
+//           v4/v5/v6/v7/v8 已各自内嵌旧版 RecurringRule（含周期字段，无 sync），
+//           v9 引用外层新版 RecurringRule（含 sync 字段）。
+// ⚠️ 注意：之前 v9 引用外层 RecurringRule，v8→v9 lightweight 迁移静默失败，
+//    原因可能是 SwiftData 无法匹配 v8 内嵌类(不同 class identity)与 v9 外层类。
+//    当前用户已删 App 重装（fresh v9 store），无迁移需要，此问题暂不修复。
+//    用户在 2026-07-23 12:00 已删除重装后正常使用。如有老用户升级遇到同样问题，
+//    建议方案：删除 App 重新安装（数据在云端，登录后 0.3s 同步即可恢复）。
+enum SchemaVersion9: VersionedSchema {
+    static var versionIdentifier: Schema.Version = Schema.Version(9, 0, 0)
     static var models: [any PersistentModel.Type] {
         [
             Bill.self,
@@ -224,8 +571,8 @@ enum SchemaVersion7: VersionedSchema {
             HealthMetric.self,
             RecognitionRecord.self,
             ChatMessage.self,
-            RecurringRule.self,
-            MerchantMeta.self,  // 外层新版（含 sync 字段）
+            RecurringRule.self, // 外层新版 RecurringRule，含 syncId/syncUpdatedAt/syncDeleted
+            MerchantMeta.self,
             FoodMeta.self
         ]
     }
@@ -233,13 +580,14 @@ enum SchemaVersion7: VersionedSchema {
 
 // MARK: - 迁移计划：v1 → v3 仅新增 MerchantMeta 表；v3 → v4 为 RecurringRule 新增 3 个字段；
 //           v4 → v5 为 FoodEntry 新增 5 个可选字段；v5 → v6 新增 FoodMeta 表；
-//           v6 → v7 为 MerchantMeta 新增 3 个 sync 字段，均为 lightweight。
+//           v6 → v7 为 MerchantMeta 新增 3 个 sync 字段；v7 → v8 为 FoodEntry 新增 7 个字段；
+//           v8 → v9 为 RecurringRule 新增 3 个 sync 字段，均为 lightweight。
 //           注意：v1 与 v3 之间的中间版本（如 v2）若模型集合与 v1 完全相同，
 //           其 schema checksum 会与 v1 重复，导致 SwiftData 报
 //           "Duplicate version checksums across stages detected"，故不保留同构中间版本。
 enum AIAMigrationPlan: SchemaMigrationPlan {
-    static var schemas: [VersionedSchema.Type] { [SchemaVersion1.self, SchemaVersion3.self, SchemaVersion4.self, SchemaVersion5.self, SchemaVersion6.self, SchemaVersion7.self] }
-    static var stages: [MigrationStage] { [migrateV1toV3, migrateV3toV4, migrateV4toV5, migrateV5toV6, migrateV6toV7] }
+    static var schemas: [VersionedSchema.Type] { [SchemaVersion1.self, SchemaVersion3.self, SchemaVersion4.self, SchemaVersion5.self, SchemaVersion6.self, SchemaVersion7.self, SchemaVersion8.self, SchemaVersion9.self] }
+    static var stages: [MigrationStage] { [migrateV1toV3, migrateV3toV4, migrateV4toV5, migrateV5toV6, migrateV6toV7, migrateV7toV8, migrateV8toV9] }
 
     static let migrateV1toV3 = MigrationStage.lightweight(
         fromVersion: SchemaVersion1.self,
@@ -264,5 +612,15 @@ enum AIAMigrationPlan: SchemaMigrationPlan {
     static let migrateV6toV7 = MigrationStage.lightweight(
         fromVersion: SchemaVersion6.self,
         toVersion: SchemaVersion7.self
+    )
+
+    static let migrateV7toV8 = MigrationStage.lightweight(
+        fromVersion: SchemaVersion7.self,
+        toVersion: SchemaVersion8.self
+    )
+
+    static let migrateV8toV9 = MigrationStage.lightweight(
+        fromVersion: SchemaVersion8.self,
+        toVersion: SchemaVersion9.self
     )
 }
