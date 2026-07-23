@@ -143,11 +143,16 @@ struct FoodListView: View {
     private var goal: Double { goalIsCustom ? goalOverride : tdee }
     private var net: Double { selectedCalories - tdee }
 
-    private var macros: (p: Double, c: Double, f: Double) {
-        selectedFoods.reduce((0, 0, 0)) { ($0.0 + $1.protein, $0.1 + $1.carbs, $0.2 + $1.fat) }
+    private var macros: (p: Double, c: Double, f: Double, fiber: Double, sugar: Double, sodium: Double, water: Double) {
+        selectedFoods.reduce((0, 0, 0, 0, 0, 0, 0)) {
+            ($0.0 + $1.protein, $0.1 + $1.carbs, $0.2 + $1.fat,
+             $0.3 + $1.fiber, $0.4 + $1.sugar, $0.5 + $1.sodium, $0.6 + $1.waterIntake)
+        }
     }
-    /// 今日饮水（ml）。目前未接入数据源，先占位 0，后续可接入 HealthKit 或用户手动记录。
-    private var waterIntakeToday: Double { 0 }
+    /// 今日饮水（ml）：汇总 selectedFoods 中所有 waterIntake 之和。
+    private var waterIntakeToday: Double {
+        selectedFoods.reduce(0) { $0 + $1.waterIntake }
+    }
 
     private var weekData: [ChartPoint] {
         let cal = Calendar.current
@@ -288,9 +293,9 @@ struct FoodListView: View {
                         MacroCard(title: NSLocalizedString("food.macro.carb", comment: ""), value: "\(Int(macros.c))g", progress: macros.c / 220, color: AIATheme.amber)
                         MacroCard(title: NSLocalizedString("food.macro.protein", comment: ""), value: "\(Int(macros.p))g", progress: macros.p / 75, color: AIATheme.blue)
                         MacroCard(title: NSLocalizedString("food.macro.fat", comment: ""), value: "\(Int(macros.f))g", progress: macros.f / 55, color: AIATheme.green)
-                        MacroCard(title: NSLocalizedString("food.macro.fiber", comment: ""), value: "—", progress: 0, color: AIATheme.health)
-                        MacroCard(title: NSLocalizedString("food.macro.sugar", comment: ""), value: "—g", progress: 0, color: AIATheme.food)
-                        MacroCard(title: NSLocalizedString("food.macro.sodium", comment: ""), value: "—mg", progress: 0, color: AIATheme.todo)
+                        MacroCard(title: NSLocalizedString("food.macro.fiber", comment: ""), value: "\(Int(macros.fiber))g", progress: macros.fiber / 25, color: AIATheme.health)
+                        MacroCard(title: NSLocalizedString("food.macro.sugar", comment: ""), value: "\(Int(macros.sugar))g", progress: macros.sugar / 50, color: AIATheme.food)
+                        MacroCard(title: NSLocalizedString("food.macro.sodium", comment: ""), value: "\(Int(macros.sodium))mg", progress: macros.sodium / 2000, color: AIATheme.todo)
                     }
 
                     if !foods.isEmpty {
@@ -1754,11 +1759,11 @@ private struct DietPreferencesView: View {
                 HStack(spacing: 8) {
                     DietTintedCard(
                         icon: "camera.fill", title: "AI 识别", count: sourceBreakdown.aiCount,
-                        color: AIATheme.food, bg: AIATheme.dietBG
+                        color: AIATheme.food, bg: AIATheme.surface
                     )
                     DietTintedCard(
                         icon: "pencil", title: "手动输入", count: sourceBreakdown.manualCount,
-                        color: AIATheme.health, bg: AIATheme.healthBG
+                        color: AIATheme.health, bg: AIATheme.surface
                     )
                 }
 
@@ -1768,7 +1773,7 @@ private struct DietPreferencesView: View {
                     ForEach(mealCounts) { item in
                         DietTintedCard(
                             icon: item.icon, title: item.meal, count: item.count,
-                            color: AIATheme.food, bg: AIATheme.dietBG
+                            color: AIATheme.food, bg: AIATheme.surface
                         )
                     }
                 }
@@ -1811,8 +1816,12 @@ private struct DietPreferencesHero: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AIATheme.dietBG)
+        .background(AIATheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+        .overlay(
+            RoundedRectangle(cornerRadius: AIATheme.rMD)
+                .stroke(AIATheme.hairline, lineWidth: 0.5)
+        )
     }
 }
 
@@ -1861,7 +1870,7 @@ private struct DietRankRow: View {
     }
 }
 
-/// 饮食喜好：来源/餐次通用染色卡（icon+label+大数字，带 hue-tint 背景）
+/// 饮食喜好：来源/餐次通用白底卡（icon+label+大数字，文字色保留语义，白底 + hairline 描边区分区块）
 private struct DietTintedCard: View {
     let icon: String
     let title: String
@@ -1884,6 +1893,10 @@ private struct DietTintedCard: View {
         .padding(.vertical, 12)
         .background(bg)
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+        .overlay(
+            RoundedRectangle(cornerRadius: AIATheme.rMD)
+                .stroke(AIATheme.hairline, lineWidth: 0.5)
+        )
     }
 }
 
@@ -1912,13 +1925,14 @@ private struct DietAnalysisView: View {
         Int(periodFoods.reduce(0) { $0 + $1.calories })
     }
 
-    /// 8 维平均每日营养：4 项已建模（cal/protein/carbs/fat）+ 4 项未建模（纤维/糖/钠/饮水）= "—"
-    /// 颜色：4 项按宏量素语义色；4 项 muted
+    /// 8 维平均每日营养：全部已建模，不再使用占位符
+    /// 颜色：前 4 项按宏量素语义色；后 4 项同色
     private var nutritionCards: [(label: String, value: String, color: Color)] {
         let (s, e) = period.range()
         let dayCount = max(1, Calendar.current.dateComponents([.day], from: s, to: e).day ?? 1)
-        let sum = periodFoods.reduce((cal: 0.0, p: 0.0, c: 0.0, f: 0.0)) { acc, f in
-            (acc.cal + f.calories, acc.p + f.protein, acc.c + f.carbs, acc.f + f.fat)
+        let sum = periodFoods.reduce((cal: 0.0, p: 0.0, c: 0.0, f: 0.0, fiber: 0.0, sugar: 0.0, sodium: 0.0, water: 0.0)) { acc, f in
+            (acc.cal + f.calories, acc.p + f.protein, acc.c + f.carbs, acc.f + f.fat,
+             acc.fiber + f.fiber, acc.sugar + f.sugar, acc.sodium + f.sodium, acc.water + f.waterIntake)
         }
         let d = Double(dayCount)
         return [
@@ -1926,10 +1940,10 @@ private struct DietAnalysisView: View {
             ("蛋白质(g)",   String(format: "%.1f", sum.p   / d), AIATheme.blue),
             ("碳水(g)",     String(format: "%.1f", sum.c   / d), AIATheme.amber),
             ("脂肪(g)",     String(format: "%.1f", sum.f   / d), AIATheme.green),
-            ("膳食纤维(g)", "—", AIATheme.muted),
-            ("糖(g)",       "—", AIATheme.muted),
-            ("钠(mg)",      "—", AIATheme.muted),
-            ("饮水(ml)",    "—", AIATheme.muted)
+            ("膳食纤维(g)", String(format: "%.1f", sum.fiber / d), AIATheme.health),
+            ("糖(g)",       String(format: "%.1f", sum.sugar / d), AIATheme.food),
+            ("钠(mg)",      String(format: "%.0f", sum.sodium / d), AIATheme.todo),
+            ("饮水(ml)",    String(format: "%.0f", sum.water / d), AIATheme.blue)
         ]
     }
 
@@ -1950,15 +1964,15 @@ private struct DietAnalysisView: View {
                 HStack(spacing: 8) {
                     DietTintedCard(
                         icon: "calendar", title: "记录天数", count: overview.days,
-                        color: AIATheme.food, bg: AIATheme.dietBG
+                        color: AIATheme.food, bg: AIATheme.surface
                     )
                     DietTintedCard(
                         icon: "list.bullet", title: "总记录条数", count: overview.total,
-                        color: AIATheme.health, bg: AIATheme.healthBG
+                        color: AIATheme.health, bg: AIATheme.surface
                     )
                     DietTintedCard(
                         icon: "fork.knife", title: "餐次种类", count: overview.meals,
-                        color: AIATheme.bill, bg: AIATheme.billBG
+                        color: AIATheme.bill, bg: AIATheme.surface
                     )
                 }
 
@@ -2015,8 +2029,12 @@ private struct DietAnalysisHero: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AIATheme.dietBG)
+        .background(AIATheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+        .overlay(
+            RoundedRectangle(cornerRadius: AIATheme.rMD)
+                .stroke(AIATheme.hairline, lineWidth: 0.5)
+        )
     }
 }
 
