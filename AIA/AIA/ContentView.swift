@@ -85,7 +85,7 @@ struct ContentView: View {
                         aiSummarySection
                     }
                     .padding(.horizontal, 12)
-                    .padding(.top, 4)
+                    .padding(.top, 0)
                     .padding(.bottom, 12)
                 }
                 AIBottomBar()
