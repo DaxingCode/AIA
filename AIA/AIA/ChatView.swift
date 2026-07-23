@@ -167,6 +167,25 @@ struct ChatView: View {
         .navigationTitle("阿宝丨AI助理")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            // 中间标题：圆形头像 + "我是阿宝" + 副标（与首条气泡同款内容）
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 8) {
+                    Image("AIAvatar")
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 28, height: 28)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(AIATheme.hairline, lineWidth: 0.5))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("我是阿宝")
+                            .font(AIATheme.Font.footnote.weight(.semibold))
+                            .foregroundStyle(AIATheme.ink)
+                        Text("你的私人专属AI助理")
+                            .font(AIATheme.Font.micro)
+                            .foregroundStyle(AIATheme.muted)
+                    }
+                }
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 if isInputFocused {
                     Button {
