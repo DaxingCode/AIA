@@ -36,6 +36,8 @@ enum AppPersistence {
 
     /// 崩溃安全：磁盘库任何原因初始化失败，回退到内存存储，保证至少能写入（不白屏）。
     static func makeContainer() -> ModelContainer {
+        // 🟢 无条件 print：证明函数真的被调用了。如果连这行都看不到 = 跑的是旧二进制
+        print("🟢 [AppPersistence.makeContainer] 函数被调用 (build=\(Bundle.main.infoDictionary?["CFBundleVersion"] ?? "?"))")
         // 首次启用新文件名：把旧 AIA.store.v1/v2 备份并迁移到 AIA.store
         migrateLegacyStoreFilesIfNeeded()
 
