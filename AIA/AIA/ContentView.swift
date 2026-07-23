@@ -77,11 +77,14 @@ struct ContentView: View {
                 ScrollView {
                     VStack(spacing: 8) {
                         header
+                            .padding(.bottom, 8)
                         syncHeaderIndicator
                         tilesGrid
                         aiSummarySection
                     }
-                    .padding()
+                    .padding(.horizontal, 12)
+                    .padding(.top, 4)
+                    .padding(.bottom, 12)
                 }
                 AIBottomBar()
             }
