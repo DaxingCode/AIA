@@ -55,6 +55,11 @@ struct ContentView: View {
     // 防止 checkScreenshotPending 被多个通知并发/重复触发时重复 present。
     @State private var isCheckingScreenshotPending = false
 
+    // 冷启动同步指示器：首次同步完成前显示「正在同步数据…」，完成后消失。
+    // 用户在「同步完毕 = 全 0 → 真实数据」之间不再茫然。
+    @State private var showSyncIndicator = false
+    @State private var hasFirstSyncStarted = false
+
     // 目标常量（与记录页保持一致）
     private var calorieGoal: Double { calorieGoalIsCustom ? calorieGoalOverride : tdee }
     private let stepGoal: Int = 10000
@@ -72,6 +77,7 @@ struct ContentView: View {
                 ScrollView {
                     VStack(spacing: 8) {
                         header
+                        syncHeaderIndicator
                         tilesGrid
                         aiSummarySection
                     }
@@ -132,6 +138,11 @@ struct ContentView: View {
             health.requestAuthorization()
             // 启动定时同步器
             startPeriodicSync()
+            // 冷启动同步指示器：仅当已登录才亮起（本地无数据才真正可见）
+            if UserDefaults.standard.bool(forKey: "aia.isLoggedIn") {
+                showSyncIndicator = true
+                hasFirstSyncStarted = false
+            }
         }
         .onDisappear {
             syncTimer?.invalidate()
@@ -177,6 +188,16 @@ struct ContentView: View {
             guard quickAction.pending != nil else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 if let p = quickAction.pending { consume(p) }
+            }
+        }
+        // 冷启动同步指示器消失：检测到第一次 isSyncing 从 true → false
+        // （即 0.3s 后首次同步完成，云端数据写入本地，@Query 自动刷新）
+        .onReceive(sync.$isSyncing) { syncing in
+            if syncing {
+                hasFirstSyncStarted = true
+            }
+            if hasFirstSyncStarted && !syncing {
+                showSyncIndicator = false
             }
         }
         // 点击系统通知：跳转到对应页面（如待办提醒 → 待办页）。
@@ -252,6 +273,31 @@ struct ContentView: View {
                     .padding(.horizontal, 10).padding(.vertical, 4)
                     .background(AIATheme.warn.opacity(0.12))
                     .clipShape(Capsule())
+            }
+        }
+    }
+
+    /// 冷启动同步指示器：仅当本地无数据且首次同步尚未完成时显示。
+    /// 告诉用户「数据正在路上，请稍等片刻」，避免看到空数据时感到疑惑。
+    private var syncHeaderIndicator: some View {
+        // 核心逻辑：showSyncIndicator 在同步完成后变为 false；
+        // @Query 结果（foods/bills/reminders）有任一类数据说明本地不全空 → 无需提示
+        let shouldShow = showSyncIndicator
+            && foods.isEmpty
+            && bills.isEmpty
+            && reminders.isEmpty
+        return Group {
+            if shouldShow {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text("正在同步数据，请稍等…")
+                        .font(AIATheme.Font.caption)
+                        .foregroundStyle(AIATheme.sub)
+                    Spacer()
+                }
+                .padding(8)
+                .foregroundStyle(AIATheme.sub)
             }
         }
     }
