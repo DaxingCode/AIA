@@ -1074,9 +1074,10 @@ struct ChatView: View {
         HealthManager.shared.saveCaloriesConsumed(totalCal, date: .now)
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
         let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
+        let disclaimer = "\n\n结果仅供参考，如需修改可到\"饮食记录\"页面进行修改。"
         return summaries.count == 1
-            ? "\(opener)：\(summaries[0])"
-            : "\(opener)：\n" + summaries.joined(separator: "\n")
+            ? "\(opener)：\(summaries[0])" + disclaimer
+            : "\(opener)：\n" + summaries.joined(separator: "\n") + disclaimer
     }
 
     /// 云端兜底也失败时的「尽力记录」：本地营养库查不到、云端也识别不出时，
@@ -2080,7 +2081,7 @@ struct ChatView: View {
                                              kcal: baseCal, protein: basePro, carbs: baseCar, fat: baseFat,
                                              fiber: baseFiber, sugar: baseSugar, sodium: baseSodium,
                                              source: "cloud", in: context)
-                        summary.append("🔄 已更新「\(foodName)」：\(target.meal) \(Int(cal)) kcal\n  蛋白 \(String(format: "%.1f", target.protein))g · 碳水 \(String(format: "%.1f", target.carbs))g · 脂肪 \(String(format: "%.1f", target.fat))g · 纤维 \(String(format: "%.1f", target.fiber))g · 糖 \(String(format: "%.1f", target.sugar))g · 钠 \(String(format: "%.0f", target.sodium))mg")
+                        summary.append("🔄 已更新「\(foodName)」：\(target.meal) \(Int(cal)) kcal\n  蛋白 \(String(format: "%.1f", target.protein))g · 碳水 \(String(format: "%.1f", target.carbs))g · 脂肪 \(String(format: "%.1f", target.fat))g · 纤维 \(String(format: "%.1f", target.fiber))g · 糖 \(String(format: "%.1f", target.sugar))g · 钠 \(String(format: "%.0f", target.sodium))mg\n\n结果仅供参考，如需修改可到\"饮食记录\"页面进行修改。")
                     } else {
                         fallthrough
                     }
@@ -2115,7 +2116,7 @@ struct ChatView: View {
                                          fiber: baseFiber, sugar: baseSugar, sodium: baseSodium,
                                          source: "cloud", in: context)
                     HealthManager.shared.saveCaloriesConsumed(cal, date: .now)
-                    summary.append("🍽 \(meal)「\(foodName)」\(Int(cal)) kcal\n  蛋白 \(String(format: "%.1f", protein))g · 碳水 \(String(format: "%.1f", carbs))g · 脂肪 \(String(format: "%.1f", fat))g · 纤维 \(String(format: "%.1f", fiber))g · 糖 \(String(format: "%.1f", sugar))g · 钠 \(String(format: "%.0f", sodium))mg")
+                    summary.append("🍽 \(meal)「\(foodName)」\(Int(cal)) kcal\n  蛋白 \(String(format: "%.1f", protein))g · 碳水 \(String(format: "%.1f", carbs))g · 脂肪 \(String(format: "%.1f", fat))g · 纤维 \(String(format: "%.1f", fiber))g · 糖 \(String(format: "%.1f", sugar))g · 钠 \(String(format: "%.0f", sodium))mg\n\n结果仅供参考，如需修改可到\"饮食记录\"页面进行修改。")
                 }
             }
         }
