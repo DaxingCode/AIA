@@ -154,6 +154,26 @@ struct FoodListView: View {
         selectedFoods.reduce(0) { $0 + $1.waterIntake }
     }
 
+    /// 「今日饮水」卡片：与左侧「净热量」卡同高（撑满 HStack 高度）。
+    private var waterCard: some View {
+        VStack(spacing: 2) {
+            Text("\(Int(waterIntakeToday))")
+                .font(AIATheme.Font.title3.weight(.semibold))
+                .foregroundStyle(AIATheme.health)
+            Text("ml")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.sub)
+            Text(NSLocalizedString("food.water", comment: ""))
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.sub)
+        }
+        .frame(width: 86)
+        .frame(maxHeight: .infinity, alignment: .center)
+        .padding(.vertical, 12)
+        .background(AIATheme.health.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+    }
+
     private var weekData: [ChartPoint] {
         let cal = Calendar.current
         let day = cal.startOfDay(for: selectedDate)
@@ -269,22 +289,7 @@ struct FoodListView: View {
                         .background(AIATheme.billBG)
                         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
 
-                        // 今日饮水
-                        VStack(spacing: 2) {
-                            Text("\(Int(waterIntakeToday))")
-                                .font(AIATheme.Font.title3.weight(.semibold))
-                                .foregroundStyle(AIATheme.health)
-                            Text("ml")
-                                .font(AIATheme.Font.micro)
-                                .foregroundStyle(AIATheme.sub)
-                            Text(NSLocalizedString("food.water", comment: ""))
-                                .font(AIATheme.Font.micro)
-                                .foregroundStyle(AIATheme.sub)
-                        }
-                        .frame(width: 86)
-                        .padding(.vertical, 12)
-                        .background(AIATheme.health.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+                        waterCard
                     }
 
                     SectionTitle(text: NSLocalizedString("food.nutrition", comment: ""),
