@@ -266,7 +266,7 @@ struct ContentView: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text("\(greeting)，\(userNickname)")
+            Text("\(Self.greetingEmoji) \(greeting)，\(userNickname)")
                 .font(AIATheme.Font.title2.weight(.semibold))
             Spacer()
             if pendingCount > 0 {
@@ -278,7 +278,13 @@ struct ContentView: View {
                     .clipShape(Capsule())
             }
         }
+        .padding(.leading, 6)
     }
+
+    /// 问候语随机 emoji（每次启动从池中随机选一个，不随界面刷新变化）
+    private static let greetingEmoji: String = {
+        ["👋", "😊", "🌟", "☀️", "✨", "🎉", "💪", "🫡", "👍", "🔥", "🌸", "🍀", "🥳", "😎"].randomElement() ?? "👋"
+    }()
 
     /// 冷启动同步指示器：仅当本地无数据且首次同步尚未完成时显示。
     /// 告诉用户「数据正在路上，请稍等片刻」，避免看到空数据时感到疑惑。
