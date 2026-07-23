@@ -648,6 +648,8 @@ struct ContentView: View {
                             .foregroundStyle(badge.warn ? AIATheme.warn : AIATheme.sub)
                             .clipShape(Capsule())
                             .lineLimit(1)
+                            // badge 数字优先完整显示，title 让步
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                     Spacer(minLength: 0)
                     if let titleTrailing { titleTrailing }
