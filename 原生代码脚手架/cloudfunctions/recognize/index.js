@@ -8,6 +8,10 @@
 
 const https = require('https');
 
+// Agent 模式（可单独开关的云端智能问答）：避免循环依赖，仅引入 handleAgent；
+// TOOL_SCHEMAS / AGENT_SYSTEM_PROMPT 由 agentHandler 内部 require，index.js 不重复依赖。
+const { handleAgent } = require('./agentHandler');
+
 // 不同服务商的调用配置；默认 qwen（通义千问视觉）。
 // 其他三家是预留：将来想对比/回落，只改 event.provider 即可，App 不用动。
 // 注意：API Key 请配置成 CloudBase 的「环境变量」，不要硬编码在这里！
@@ -84,7 +88,7 @@ const PROVIDERS = {
 };
 
 // 版本标记：发布后 curl 可通过返回值里的 ver 字段确认是否部署了最新代码
-const FN_VERSION = '20260722m-notice-todo';
+const FN_VERSION = '20260723a-reldate';
 
 // 服务端兜底：纯通用回应（不论上下文）强制 types:["none"]，不依赖模型是否听话。
 // 与云端提示词规则 10 双保险，杜绝「好的/可以」被当成记录指令重复建待办。
@@ -129,7 +133,8 @@ const SYSTEM_PROMPT_IMAGE = `你是一个手机截图/照片理解引擎。用�
 1. 只输出图片中真实出现的信息，不要编造、推断或臆测。如果看不清，就降低 confidence 或返回 ["none"]。
 2. 只填写与 types 对应的字段；未命中的类型字段省略或设为 null。
 3. 金额用数字（如 24.0）；货币默认 "CNY"。
-4. 当前时间：{CURRENT_TIME}。所有相对时间（如"明天""周五""下周三"）必须基于当前时间推算为绝对时间；返回的时间必须是 ISO8601 格式（含时区 +08:00）。
+4. 当前时间：{CURRENT_TIME}。所有相对时间（如"明天""周五""下周三""昨天""前天""星期二"）必须基于当前时间推算为绝对时间；返回的时间必须是 ISO8601 格式（含时区 +08:00）。
+   - **支付宝/微信账单常见相对日期必须转换**："昨天 12:58" → "2026-07-22T12:58:00+08:00"，"星期二 19:09" → 取最近一个周二的绝对日期，"前天 15:30" → 前天对应时刻。**绝不能原样返回中文相对日期**。
 5. 支持一图多意图：例如"付完款记得交报表"应返回 ["bill","todo"] 两条。
 6. 食物热量是估算值，允许误差；如有包装/外卖图标请尽量准确。营养成分表优先读取每100克数据，portion 写"100克"或整包净含量。calories 字段必须是千卡（kcal）。同时返回 energyRaw（标签原始能量数值）和 energyUnit（kJ 或 kcal）。如果 energyUnit 是 kJ 或 千焦，calories = energyRaw / 4.184；如果 energyUnit 是 kcal 或 千卡，calories = energyRaw。换算结果允许四舍五入到整数。
 7. 如果是聊天截图，请提取其中截图或文字里的关键信息；如果聊天内容本身没有明确可记录的 bill/food/todo/health，则返回 types: ["none"]。
@@ -138,12 +143,12 @@ const SYSTEM_PROMPT_IMAGE = `你是一个手机截图/照片理解引擎。用�
 10. **强制识别为账单的截图类型**：如果截图是支付宝/微信「账单详情」「支付成功」「账单列表」「付款记录」「消费明细」「转账记录」等，或线下「超市小票」「便利店小票」「收银小票」「购物小票」「餐饮小票」「外卖订单」等，**都必须识别为 bill**。即使金额显示为负数（如支付宝/微信支出 -18.00）、商户名被脱敏为「**娟(个人)」、或商品说明是「经营码交易」「转账」「生活缴费」等，也绝不要返回 none。
 11. **支付成功页金额提取**：支付成功页/账单详情页的中心大数字（如 -0.81、-18.00）就是交易金额；负数表示支出，应取绝对值作为 amount。优惠/立减行（如「广发随机立减优惠¥0.19」）不是主交易金额，不要误把优惠金额当主金额。若截图同时出现「原价」「实付」「共支付」等，优先取实际支付金额。
 12. 商户名 cleaning：去掉首尾星号*，去掉「(个人)」「(商户)」等后缀，如「**娟(个人)」→ merchant 填「娟」；小票顶部的店名如「永辉(95HC 南宁盛隆世界店)欢迎您」→ merchant 填「永辉」或「永辉超市」；若收款方只有星号或无法读取，可取「商品说明」「账单」或「超市/便利店」作为 merchant。若无法确定分类，category 可填"其他"，但绝不要返回 none。
-13. **一图多账单（列表）必须拆条输出 `bills` 数组**：如果截图是「账单列表 / 支付记录列表 / 账单详情列表 / 转账记录」等包含**多笔独立交易**的页面，请识别每一笔交易，并输出一个 `bills` 数组，数组的每个元素都是一条完整的账单对象（字段同单条 bill：merchant / amount / currency / category / time / note）。
+13. **一图多账单（列表）必须拆条输出「bills」数组**：如果截图是「账单列表 / 支付记录列表 / 账单详情列表 / 转账记录」等包含**多笔独立交易**的页面，请识别每一笔交易，并输出一个「bills」数组，数组的每个元素都是一条完整的账单对象（字段同单条 bill：merchant / amount / currency / category / time / note）。
    - 每一笔都要读取它**自己那一行/那一条**的支付时间作为 time，必须是 ISO8601（含时区 +08:00）；**不要**把截图的拍摄时间或列表顶部状态栏时间当成某笔交易的支付时间。
    - 支出金额为负数时取绝对值作为 amount（如 -18.00 → 18.0）。
    - 即使其中某笔金额/商户看不清，也照常输出能识别的条目，看不清的字段可留空或降低 confidence，但**不要**为了某一条不清就整体返回 none 或只返回一条。
-   - 单笔账单（非列表）仍用单条 `bill` 对象即可；只有「一图多笔」才用 `bills` 数组。
-   - `types` 写 `["bill"]`。
+   - 单笔账单（非列表）仍用单条「bill」对象即可；只有「一图多笔」才用「bills」数组。
+   - 「types」写 ["bill"]。
 14. **通知/会议/培训/活动类截图归为待办(todo)**：如果截图是「培训通知」「会议邀请」「活动预告」「课程表」「日程安排」「打卡提醒」「系统通知」等，包含明确的**时间+地点**但**没有任何金额/支付/转账/价格/收款**信息，应识别为 todo（提取 title 与 due，有地点可写进 note），**不要识别为 bill**。即使截图里出现"群""群聊""微信通知""公众号"等字样，只要没有钱款交易行为，就不是账单。仅当截图确实含缴费/支付动作（如"请于X日前缴纳XXX元""扫码付款"）时，才识别为 bill。`;
 
 // 文字输入专用系统提示词
@@ -368,8 +373,18 @@ exports.main = async (event, context) => {
 
     // 服务端兜底：纯通用回应（非聊天、非图片）强制 none，省一次模型调用且确定性生效，
     // 不依赖模型是否听话（提示词规则 10 的双保险）。含具体指令的（如"好的帮我改"）不拦。
-    if (body.mode !== 'chat' && !body.imageBase64 && body.text && isGenericAcknowledgement(body.text)) {
+    if (body.mode !== 'chat' && body.mode !== 'agent' && !body.imageBase64 && body.text && isGenericAcknowledgement(body.text)) {
       return { ok: true, result: { types: ['none'] }, ver: FN_VERSION };
+    }
+
+    // Agent 模式：可单独开关的云端智能问答（只读）。未开启或异常均回落 handleChat。
+    if (body.mode === 'agent') {
+      if (process.env.AGENT_ENABLED !== 'true') {
+        const chatRes = await handleChat(provider, body, apiKey);
+        return { ...chatRes, ver: FN_VERSION };
+      }
+      const agentRes = await handleAgent(provider, body, apiKey, handleChat);
+      return { ...agentRes, ver: FN_VERSION };
     }
 
     // 聊天模式：不返回结构化 JSON，而是基于本地数据摘要直接回答
