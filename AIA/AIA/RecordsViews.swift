@@ -1222,12 +1222,22 @@ struct BillListView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 dateHeader(group.date, bills: group.bills)
                                 ForEach(group.bills) { b in
-                                    Button {
-                                        editBill = b
-                                    } label: {
-                                        groupedBillRow(b)
+                                    if let img = b.imageName, !img.isEmpty {
+                                        // 有图：先进详情页（详情页内可再编辑）
+                                        NavigationLink {
+                                            BillDetailView(bill: b)
+                                        } label: {
+                                            groupedBillRow(b)
+                                        }
+                                    } else {
+                                        // 无图：直达编辑页
+                                        Button {
+                                            editBill = b
+                                        } label: {
+                                            groupedBillRow(b)
+                                        }
+                                        .buttonStyle(.plain)
                                     }
-                                    .buttonStyle(.plain)
                                 }
                             }
                         }
@@ -1495,12 +1505,22 @@ struct BillListView: View {
                     .padding(.bottom, 4)
 
                     ForEach(dayBills) { b in
-                        Button {
-                            editBill = b
-                        } label: {
-                            groupedBillRow(b)
+                        if let img = b.imageName, !img.isEmpty {
+                            // 有图：先进详情页（详情页内可再编辑）
+                            NavigationLink {
+                                BillDetailView(bill: b)
+                            } label: {
+                                groupedBillRow(b)
+                            }
+                        } else {
+                            // 无图：直达编辑页
+                            Button {
+                                editBill = b
+                            } label: {
+                                groupedBillRow(b)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
