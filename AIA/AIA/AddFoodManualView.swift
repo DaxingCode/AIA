@@ -46,6 +46,9 @@ struct AddFoodManualView: View {
     @State private var searchResults: [FoodSearchResult] = []
     @State private var isSearching: Bool = false
     @State private var showSearchResults: Bool = false
+    @State private var isCloudSearching: Bool = false        // 本地无命中时联网兜底中
+    @State private var cloudErrorMessage: String? = nil       // 联网失败/无结果独立提示
+    @State private var searchTask: Task<Void, Never>? = nil   // 防抖 + 取消上一轮联网
 
     private let mealOptions = ["早餐", "午餐", "晚餐", "加餐"]
 
@@ -84,6 +87,11 @@ struct AddFoodManualView: View {
                 .scrollDismissesKeyboard(.immediately)
                 .onChange(of: searchText) { _, newValue in
                     performSearch(newValue)
+                }
+                .onDisappear {
+                    // 页面消失时取消未完成的联网任务，避免野指针
+                    searchTask?.cancel()
+                    searchTask = nil
                 }
             }
             .navigationTitle("手动添加食物")
@@ -127,6 +135,24 @@ struct AddFoodManualView: View {
 
             if showSearchResults && !searchResults.isEmpty {
                 searchResultList
+            } else if isCloudSearching {
+                HStack(spacing: 6) {
+                    ProgressView().scaleEffect(0.7)
+                    Text("联网搜索中...")
+                        .font(AIATheme.Font.caption)
+                        .foregroundStyle(AIATheme.blue)
+                }
+                .padding(.top, 4)
+            } else if let err = cloudErrorMessage {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.warning)
+                    Text(err)
+                        .font(AIATheme.Font.caption)
+                        .foregroundStyle(AIATheme.warning)
+                }
+                .padding(.top, 4)
             } else if showSearchResults && !searchText.isEmpty && searchResults.isEmpty {
                 Text("未找到匹配食物，请手动填写下方营养信息")
                     .font(AIATheme.Font.caption)
@@ -154,12 +180,7 @@ struct AddFoodManualView: View {
                                 .foregroundStyle(AIATheme.sub)
                         }
                         Spacer(minLength: 0)
-                        Text(result.source == "library" ? "内置库" : "历史缓存")
-                            .font(AIATheme.Font.micro)
-                            .foregroundStyle(AIATheme.muted)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(AIATheme.surfaceSecondary)
-                            .clipShape(Capsule())
+                        sourceBadge(result.source)
                         Image(systemName: "arrow.right.circle.fill")
                             .font(AIATheme.Font.body)
                             .foregroundStyle(AIATheme.blue)
@@ -391,17 +412,51 @@ struct AddFoodManualView: View {
 
     // MARK: - 搜索
 
+    /// 结果项来源 badge：内置库（绿） / 历史缓存（灰） / 联网查询（蓝）
+    @ViewBuilder
+    private func sourceBadge(_ source: String) -> some View {
+        switch source {
+        case "cloud":
+            Text("联网查询")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.blue)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(AIATheme.blue.opacity(0.12))
+                .clipShape(Capsule())
+        case "cache":
+            Text("历史缓存")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(AIATheme.surfaceSecondary)
+                .clipShape(Capsule())
+        default:
+            Text("内置库")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.green)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(AIATheme.green.opacity(0.12))
+                .clipShape(Capsule())
+        }
+    }
+
     private func performSearch(_ query: String) {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
+        // 取消上一轮联网任务（防抖）
+        searchTask?.cancel()
         guard !trimmed.isEmpty else {
             searchResults = []
             showSearchResults = false
+            isCloudSearching = false
+            cloudErrorMessage = nil
             return
         }
         isSearching = true
         showSearchResults = true
+        cloudErrorMessage = nil
+        isCloudSearching = false
 
-        // 1) 从 NutritionLibrary 匹配
+        // ① 本地查 NutritionLibrary（精确/别名/子串 三级，NutritionLibrary.match 内部已处理）
         var results: [FoodSearchResult] = []
         if let ref = library.match(trimmed) {
             results.append(FoodSearchResult(
@@ -411,13 +466,12 @@ struct AddFoodManualView: View {
             ))
         }
 
-        // 2) 从 FoodMeta 缓存搜索（归一化名称包含搜索词的）
+        // ② 本地查 FoodMeta 缓存（归一化名称包含搜索词的）
         let normQuery = FoodMeta.normalize(trimmed)
         let matchedMetas = foodMetas.filter { meta in
             meta.name.contains(normQuery) || FoodMeta.normalize(meta.displayName).contains(normQuery)
         }
         for meta in matchedMetas {
-            // 避免与 NutritionLibrary 结果重复
             if !results.contains(where: { FoodMeta.normalize($0.name) == meta.name }) {
                 results.append(FoodSearchResult(
                     name: meta.displayName, kcal: meta.kcal, protein: meta.protein,
@@ -427,19 +481,62 @@ struct AddFoodManualView: View {
             }
         }
 
-        // 3) 如果 NutritionLibrary 没有精确匹配，也尝试子串搜索库内食物
-        if results.isEmpty {
-            if let ref = library.match(trimmed) {
-                results.append(FoodSearchResult(
-                    name: ref.name, kcal: ref.kcal, protein: ref.protein,
-                    carbs: ref.carbs, fat: ref.fat, fiber: ref.fiber,
-                    sugar: ref.sugar, sodium: ref.sodium, source: "library"
-                ))
-            }
-        }
-
         searchResults = results
         isSearching = false
+
+        // ③ 本地无命中 → 启 Task 联网兜底（600ms 防抖 + 取消旧任务）
+        if results.isEmpty {
+            searchTask = Task { @MainActor in
+                do {
+                    try await Task.sleep(nanoseconds: 600_000_000)  // 600ms 防抖
+                    if Task.isCancelled { return }
+                    isCloudSearching = true
+                    cloudErrorMessage = nil
+
+                    let ref: FoodRef?
+                    do {
+                        ref = try await RecognizeService.queryFood(name: trimmed)
+                    } catch {
+                        isCloudSearching = false
+                        cloudErrorMessage = "联网搜索失败，请稍后重试或手动填写"
+                        return
+                    }
+                    if Task.isCancelled { return }
+
+                    guard let ref else {
+                        isCloudSearching = false
+                        cloudErrorMessage = "联网未找到该食物，请手动填写"
+                        return
+                    }
+
+                    // 落库 FoodMeta，下次直接命中
+                    FoodMetaStore.upsert(
+                        name: ref.name,
+                        displayName: ref.name,
+                        kcal: ref.kcal, protein: ref.protein,
+                        carbs: ref.carbs, fat: ref.fat,
+                        source: "cloud", in: context
+                    )
+
+                    let cloudResult = FoodSearchResult(
+                        name: ref.name, kcal: ref.kcal, protein: ref.protein,
+                        carbs: ref.carbs, fat: ref.fat, fiber: ref.fiber,
+                        sugar: ref.sugar, sodium: ref.sodium, source: "cloud"
+                    )
+                    if Task.isCancelled { return }
+                    searchResults = [cloudResult]
+                    isCloudSearching = false
+                } catch {
+                    // CancellationError 或其他（兜底）
+                    isCloudSearching = false
+                    if !Task.isCancelled {
+                        cloudErrorMessage = "联网搜索失败，请稍后重试或手动填写"
+                    }
+                }
+            }
+        } else {
+            cloudErrorMessage = nil
+        }
     }
 
     /// 选择搜索结果后，自动填充表单
