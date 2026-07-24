@@ -160,7 +160,7 @@ struct TodoDetailView: View {
     private var imageCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionTitle(text: "识别原图")
-            AttachmentSection(imageName: reminder.imageName)
+            AttachmentSection(imageName: reminder.imageName, title: nil)
         }
         .padding(14)
         .card()

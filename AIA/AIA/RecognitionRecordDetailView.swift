@@ -33,7 +33,7 @@ struct RecognitionRecordDetailView: View {
                 // 本地原图
                 if record.imageName != nil {
                     SectionTitle(text: "识别原图")
-                    AttachmentSection(imageName: record.imageName)
+                    AttachmentSection(imageName: record.imageName, title: nil)
                 }
 
                 // 识别文字

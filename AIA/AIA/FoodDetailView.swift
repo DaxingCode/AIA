@@ -35,31 +35,42 @@ struct FoodDetailView: View {
                 }
                 .padding(.bottom, 14)
 
-                // 热量卡
+                // 热量卡：左热量 + 右份量/餐次·时间（去掉无意义的「识别置信度 —」占位）
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("\(Int(entry.calories))").font(AIATheme.Font.title3.weight(.semibold)).foregroundStyle(AIATheme.ok)
-                        Text("热量 kcal").font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
+                        Text("\(Int(entry.calories))")
+                            .font(AIATheme.Font.title3.weight(.semibold))
+                            .foregroundStyle(AIATheme.ok)
+                        Text("热量 kcal")
+                            .font(AIATheme.Font.micro)
+                            .foregroundStyle(AIATheme.sub)
                     }
                     Divider().frame(height: 32)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("分量 \(portionLabel)").font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
-                        Text("识别置信度 —").font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
+                        Text("份量 \(portionLabel)")
+                            .font(AIATheme.Font.footnote.weight(.medium))
+                            .foregroundStyle(AIATheme.ink)
+                        Text("\(entry.meal) · \(timeLabel)")
+                            .font(AIATheme.Font.micro)
+                            .foregroundStyle(AIATheme.sub)
                     }
+                    Spacer()
                 }
                 .padding(12).background(AIATheme.dietBG).clipShape(RoundedRectangle(cornerRadius: 14))
 
                 SectionTitle(text: "营养明细")
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    MacroCard(title: "蛋白质", value: "\(Int(entry.protein))g", progress: entry.protein / 75, color: AIATheme.blue)
-                    MacroCard(title: "碳水", value: "\(Int(entry.carbs))g", progress: entry.carbs / 220, color: AIATheme.amber)
-                    MacroCard(title: "脂肪", value: "\(Int(entry.fat))g", progress: entry.fat / 55, color: AIATheme.green)
-                    MacroCard(title: "膳食纤维", value: "—", progress: 0, color: AIATheme.health)
+                VStack(spacing: 8) {
+                    macroRow("碳水", entry.carbs, entry.baseCarbs ?? entry.carbs, "g", AIATheme.amber)
+                    macroRow("蛋白质", entry.protein, entry.baseProtein ?? entry.protein, "g", AIATheme.blue)
+                    macroRow("脂肪", entry.fat, entry.baseFat ?? entry.fat, "g", AIATheme.green)
+                    macroRow("膳食纤维", entry.fiber, entry.baseFiber ?? entry.fiber, "g", AIATheme.purple)
+                    macroRow("糖", entry.sugar, entry.baseSugar ?? entry.sugar, "g", AIATheme.warn)
+                    macroRow("钠", entry.sodium, entry.baseSodium ?? entry.sodium, "mg", AIATheme.warning)
                 }
 
                 if entry.imageName != nil {
                     SectionTitle(text: "识别原图")
-                    AttachmentSection(imageName: entry.imageName)
+                    AttachmentSection(imageName: entry.imageName, title: nil)
                 }
 
                 SectionTitle(text: "操作")
@@ -82,7 +93,8 @@ struct FoodDetailView: View {
                 }
                 .buttonStyle(.plain)
             }
-            .padding()
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
         AIBottomBar()
     }
@@ -106,6 +118,39 @@ struct FoodDetailView: View {
                 }
             }
         }
+    }
+
+    // 单条营养明细行：色点 + 名称 + 当前总量 + (/100g 基准)。与 ResultConfirmView.macroRow 同款，
+    // 整端视觉统一（聊天确认卡片 / 列表行 / 结果确认页 / 详情页都是这一行式样）。
+    private func macroRow(_ name: String, _ total: Double, _ per100: Double, _ unit: String, _ color: Color) -> some View {
+        HStack {
+            HStack(spacing: 6) {
+                Circle().fill(color).frame(width: 6, height: 6)
+                Text(name)
+                    .font(AIATheme.Font.footnote)
+                    .foregroundStyle(AIATheme.sub)
+            }
+            Spacer()
+            Text("\(formatValue(total)) \(unit)")
+                .font(AIATheme.Font.footnote.weight(.medium))
+                .foregroundStyle(.primary)
+            Text("(\(formatValue(per100)) / 100\(unit == "mg" ? "g" : "g"))")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(AIATheme.surfaceSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+    }
+
+    /// 数值格式化：整数显整数，否则保留 1 位小数，0 显示 0。
+    private func formatValue(_ v: Double) -> String {
+        if v == 0 { return "0" }
+        if v.truncatingRemainder(dividingBy: 1) == 0 {
+            return "\(Int(v))"
+        }
+        return String(format: "%.1f", v)
     }
 
     private func row(title: String, sub: String, action: @escaping () -> Void) -> some View {
