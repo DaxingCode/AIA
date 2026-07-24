@@ -334,7 +334,9 @@ struct ResultConfirmView: View {
     }
 
     // MARK: - 字段行
-    private func fieldRow<Content: View>(icon: String, label: String,
+    private func fieldRow<Content: View>(icon: String, label: String, hint: String? = nil,
+                                           background: Color = AIATheme.surfaceSecondary,
+                                           cornerRadius: CGFloat = AIATheme.rSM,
                                            @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 5) {
@@ -344,17 +346,24 @@ struct ResultConfirmView: View {
                 Text(label)
                     .font(AIATheme.Font.micro)
                     .foregroundStyle(AIATheme.muted)
+                if let hint {
+                    Text(hint)
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.sub)
+                }
             }
             content()
         }
         .padding(12)
-        .background(AIATheme.surfaceSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+        .background(background)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
     }
 
     /// 单行内嵌版 fieldRow：icon + 标题 在左，输入控件 + 单位 在右（用 Spacer 推开）。
     /// 适合重量/热量等需要在同一行展示「标题 + 数值」的紧凑场景；视觉上比默认 fieldRow 省一行高度。
     private func inlineFieldRow<Content: View>(icon: String, label: String,
+                                                background: Color = AIATheme.surfaceSecondary,
+                                                cornerRadius: CGFloat = AIATheme.rSM,
                                                 @ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: 6) {
             HStack(spacing: 5) {
@@ -370,8 +379,8 @@ struct ResultConfirmView: View {
         }
         .frame(maxHeight: .infinity)   // 与同行 inlineFieldRow 等高开齐（重量/热量同高）
         .padding(12)
-        .background(AIATheme.surfaceSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+        .background(background)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
     }
 
     private func textField(_ text: Binding<String>, placeholder: String) -> some View {
@@ -425,7 +434,7 @@ struct ResultConfirmView: View {
             let similar = similarBills(merchant: editableBills[index].merchant,
                                        amount: Double(editableBills[index].amount) ?? 0,
                                        date: editableBills[index].date)
-            sectionCard(title: editableBills.count > 1 ? "账单 \(index + 1) / \(editableBills.count)" : "账单", icon: "yensign.circle", color: AIATheme.bill) {
+            sectionCard(title: editableBills.count > 1 ? "账单 \(index + 1) / \(editableBills.count)（点输入框可修改）" : "账单（点输入框可修改）", icon: "yensign.circle", color: AIATheme.bill) {
                 VStack(spacing: 12) {
                     if editableBills.count > 1 {
                         HStack {
@@ -460,7 +469,7 @@ struct ResultConfirmView: View {
                         }
                     }
                     dateTimeRow(icon: "calendar.badge.clock", label: "日期时间", selection: eb.date)
-                    fieldRow(icon: "tag", label: "分类") {
+                    fieldRow(icon: "tag", label: "分类", hint: "下方图标，左右滑动可切换") {
                         VStack(alignment: .leading, spacing: 8) {
                             textField(eb.category, placeholder: "输入分类")
                             categoryChips(eb.category)
@@ -540,15 +549,15 @@ struct ResultConfirmView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "info.circle")
                             .font(AIATheme.Font.micro)
-                            .foregroundStyle(nutritionSource.hasPrefix("已按") ? AIATheme.ok : AIATheme.muted)
+                            .foregroundStyle(nutritionSource.hasPrefix("已按") ? AIATheme.food : AIATheme.muted)
                         Text(nutritionSource)
                             .font(AIATheme.Font.micro)
-                            .foregroundStyle(nutritionSource.hasPrefix("已按") ? AIATheme.ok : AIATheme.muted)
+                            .foregroundStyle(nutritionSource.hasPrefix("已按") ? AIATheme.food : AIATheme.muted)
                             .lineLimit(2)
                         Spacer(minLength: 0)
                     }
                     .padding(12)
-                    .background((nutritionSource.hasPrefix("已按") ? AIATheme.ok : AIATheme.muted).opacity(0.08))
+                    .background((nutritionSource.hasPrefix("已按") ? AIATheme.food : AIATheme.muted).opacity(0.10))
                     .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
                 }
                 // 模型估算合理性护栏提示（仅 AI 估算来源且数值不自洽时显示）
@@ -571,7 +580,8 @@ struct ResultConfirmView: View {
         }
     }
 
-    /// 单条食物编辑卡片
+    /// 单条食物编辑卡片：按用户参考图样式——灰底圆角卡片式名称/重量、
+    /// 营养成分标题+热量徽章+2×3 数值网格。
     private func foodItemCard(idx: Int) -> some View {
         let binding = Binding<EditableFood>(
             get: { editableFoods[idx] },
@@ -588,69 +598,127 @@ struct ResultConfirmView: View {
         let totalSugar = food.sugarPer100g * ratio
         let totalSodium = food.sodiumPer100g * ratio
 
-        return VStack(spacing: 10) {
-            // 餐次 + 名称
-            HStack(spacing: 10) {
-                fieldRow(icon: "sun.horizon", label: "餐次") {
-                    Picker("", selection: binding.meal) {
-                        ForEach(["早餐", "午餐", "晚餐", "加餐"], id: \.self) { Text($0) }
-                    }
-                    .pickerStyle(.segmented)
-                }
-            }
-            fieldRow(icon: "fork.knife", label: "名称") {
+        let macros: [(name: String, value: Double, unit: String)] = [
+            ("蛋白质", totalPro, "g"),
+            ("碳水", totalCar, "g"),
+            ("脂肪", totalFat, "g"),
+            ("膳食纤维", totalFiber, "g"),
+            ("糖", totalSugar, "g"),
+            ("钠", totalSodium, "mg")
+        ]
+
+        return VStack(alignment: .leading, spacing: 12) {
+            // 餐次
+            SegmentedPicker(
+                options: ["早餐", "午餐", "晚餐", "加餐"].map { ($0, $0) },
+                selection: binding.meal
+            )
+
+            // 食物名称：标签+灰底卡片
+            VStack(alignment: .leading, spacing: 6) {
+                Text("食物名称（点输入框可修改）")
+                    .font(AIATheme.Font.caption)
+                    .foregroundStyle(AIATheme.muted)
                 textField(binding.name, placeholder: "输入食物名称")
+                    .font(AIATheme.Font.body.weight(.medium))
             }
-            HStack(spacing: 12) {
-                // 重量：标题 + 输入框 + 单位 同一行（inlineFieldRow）
-                inlineFieldRow(icon: "scalemass", label: "重量") {
-                    HStack(spacing: 4) {
-                        TextField("100", text: binding.weightGram)
-                            .keyboardType(.decimalPad)
-                            .font(AIATheme.Font.callout.weight(.semibold))
-                            .multilineTextAlignment(.trailing)
-                            .frame(maxWidth: 80, minHeight: 32)
-                            .contentShape(Rectangle())
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                        Text("g")
-                            .font(AIATheme.Font.callout)
-                            .foregroundStyle(AIATheme.muted)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                    }
+            .padding(12)
+            .background(AIATheme.fillSoft)
+            .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+
+            // 食用重量：标签+灰底卡片，数字左大、单位右小
+            VStack(alignment: .leading, spacing: 6) {
+                Text("食用重量（点输入框可修改）")
+                    .font(AIATheme.Font.caption)
+                    .foregroundStyle(AIATheme.muted)
+                HStack(alignment: .lastTextBaseline, spacing: 4) {
+                    TextField("100", text: binding.weightGram)
+                        .keyboardType(.decimalPad)
+                        .font(AIATheme.Font.title3.weight(.semibold))
+                    Spacer(minLength: 0)
+                    Text("克")
+                        .font(AIATheme.Font.callout)
+                        .foregroundStyle(AIATheme.muted)
                 }
-                // 热量：标题 + 只读数值 + 单位 同一行（inlineFieldRow）
-                inlineFieldRow(icon: "flame", label: "热量") {
+            }
+            .padding(12)
+            .background(AIATheme.fillSoft)
+            .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+
+            // 营养成分：标题 + 热量徽章 + 2×3 网格
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Text("营养成分（按当前重量）")
+                        .font(AIATheme.Font.caption)
+                        .foregroundStyle(AIATheme.muted)
+                    Spacer(minLength: 0)
                     HStack(spacing: 4) {
-                        Text("\(totalCal, specifier: "%.1f")")
-                            .font(AIATheme.Font.callout.weight(.semibold))
-                            .foregroundStyle(AIATheme.food)
-                            .lineLimit(1)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: true, vertical: false)
-                        Text("kcal")
+                        Image(systemName: "flame.fill")
                             .font(AIATheme.Font.caption)
-                            .foregroundStyle(AIATheme.muted)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
+                            .foregroundStyle(AIATheme.food)
+                        Text("\(Int(totalCal)) kcal")
+                            .font(AIATheme.Font.caption.weight(.semibold))
+                            .foregroundStyle(AIATheme.food)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(AIATheme.food.opacity(0.12))
+                    .clipShape(Capsule())
+                }
+
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 3),
+                          spacing: 0) {
+                    ForEach(Array(macros.enumerated()), id: \.offset) { offset, m in
+                        macroCellRef(
+                            name: m.name,
+                            value: m.value,
+                            unit: m.unit,
+                            isRightEdge: offset % 3 == 2,
+                            isBottomEdge: offset >= 3
+                        )
                     }
                 }
-            }
-            // 6 大营养素 2×3 网格：每行 3 个 cell，2 行共 6 项
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
-                      spacing: 8) {
-                macroCell("蛋白质", totalPro, food.proteinPer100g, "g", AIATheme.blue)
-                macroCell("碳水", totalCar, food.carbsPer100g, "g", AIATheme.amber)
-                macroCell("脂肪", totalFat, food.fatPer100g, "g", AIATheme.green)
-                macroCell("膳食纤维", totalFiber, food.fiberPer100g, "g", AIATheme.purple)
-                macroCell("糖", totalSugar, food.sugarPer100g, "g", AIATheme.warn)
-                macroCell("钠", totalSodium, food.sodiumPer100g, "mg", AIATheme.warning)
+                .background(AIATheme.fillSoft)
+                .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
             }
         }
-        .padding(12)
-        .background(AIATheme.dietBG)
-        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+    }
+
+    private var foodDivider: some View {
+        Rectangle().fill(AIATheme.hairline).frame(height: 1)
+    }
+
+    private var foodDividerVertical: some View {
+        Rectangle().fill(AIATheme.hairline).frame(width: 1)
+    }
+
+    /// 参考图风格营养素单元格：名称（小灰）/ 数值+单位（大+小灰）。
+    private func macroCellRef(name: String, value: Double, unit: String,
+                              isRightEdge: Bool, isBottomEdge: Bool) -> some View {
+        VStack(spacing: 2) {
+            Text(name)
+                .font(AIATheme.Font.caption)
+                .foregroundStyle(AIATheme.muted)
+                .lineLimit(1)
+            HStack(alignment: .lastTextBaseline, spacing: 2) {
+                Text("\(value, specifier: "%.1f")")
+                    .font(AIATheme.Font.subhead.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(unit)
+                    .font(AIATheme.Font.caption)
+                    .foregroundStyle(AIATheme.muted)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .trailing) {
+            if !isRightEdge { foodDividerVertical }
+        }
+        .overlay(alignment: .bottom) {
+            if !isBottomEdge { foodDivider }
+        }
     }
 
     private func macroRow(_ name: String, _ total: Double, _ per100: Double, _ unit: String, _ color: Color) -> some View {
@@ -677,7 +745,10 @@ struct ResultConfirmView: View {
 
     /// 营养网格单元（只读版）：彩色圆点 + 名称 / 数值 + 单位 / 每 100g 参考，三行内容；
     /// 适合 2×3 LazyVGrid 网格布局使用——与 EditFoodView.nutritionCell 视觉风格对齐（fillSoft 底 / rXS 圆角）。
-    private func macroCell(_ name: String, _ total: Double, _ per100: Double, _ unit: String, _ color: Color) -> some View {
+    private func macroCell(_ name: String, _ total: Double, _ per100: Double, _ unit: String, _ color: Color,
+                           background: Color = AIATheme.fillSoft,
+                           cornerRadius: CGFloat = AIATheme.rXS,
+                           stroke: Color? = nil) -> some View {
         VStack(alignment: .center, spacing: 4) {
             HStack(spacing: 5) {
                 Circle().fill(color).frame(width: 6, height: 6)
@@ -704,8 +775,16 @@ struct ResultConfirmView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .center)
-        .background(AIATheme.fillSoft)
-        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rXS))
+        .background(background)
+        .overlay(
+            Group {
+                if let stroke {
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .stroke(stroke, lineWidth: 0.5)
+                }
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
     }
 
     // MARK: - 健康卡片
