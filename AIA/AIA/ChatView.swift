@@ -356,11 +356,8 @@ struct ChatView: View {
         }
         .fullScreenCover(item: $fileImportCoverItem) { item in
             switch item {
-            case .recognizing:
-                ProgressView("识别中…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(.ultraThinMaterial)
-                    .ignoresSafeArea()
+            case .recognizing(let img):
+                RecognizingOverlay(image: img, onBack: { fileImportCoverItem = nil })
             case .present(let p):
                 makeResultConfirmView(p)
                     .environment(\.modelContext, context)
@@ -1199,7 +1196,6 @@ struct ChatView: View {
             FoodMetaStore.upsert(name: trimmed, displayName: cloudRef.name,
                                  kcal: cloudRef.kcal, protein: cloudRef.protein,
                                  carbs: cloudRef.carbs, fat: cloudRef.fat,
-                                 fiber: cloudRef.fiber, sugar: cloudRef.sugar, sodium: cloudRef.sodium,
                                  source: "cloud", in: context)
             ref = cloudRef
         }
@@ -1268,7 +1264,6 @@ struct ChatView: View {
 
                     FoodMetaStore.upsert(name: name, displayName: ref.name,
                                          kcal: ref.kcal, protein: ref.protein, carbs: ref.carbs, fat: ref.fat,
-                                         fiber: ref.fiber, sugar: ref.sugar, sodium: ref.sodium,
                                          source: "cloud", in: context)
 
                     let pending = PendingFoodConfirm(
@@ -1381,7 +1376,6 @@ struct ChatView: View {
 
                     FoodMetaStore.upsert(name: name, displayName: ref.name,
                                          kcal: ref.kcal, protein: ref.protein, carbs: ref.carbs, fat: ref.fat,
-                                         fiber: ref.fiber, sugar: ref.sugar, sodium: ref.sodium,
                                          source: "cloud", in: context)
 
                     let entry = FoodEntry(name: ref.name, calories: cal, protein: protein, carbs: carbs, fat: fat,
@@ -2270,7 +2264,7 @@ struct ChatView: View {
         }
 
         if shouldSaveType("food"), types.contains("food") {
-            for food in result.foodList {
+            for food in result.food.map({ [$0] }) ?? [] {
                 guard let foodName = food.name, !foodName.isEmpty else { continue }
                 let meal = resolveMeal(from: food.meal, text: originalText)
                 let portion = food.portion ?? "100克"
@@ -2320,7 +2314,6 @@ struct ChatView: View {
                         HealthManager.shared.saveCaloriesConsumed(cal, date: target.date)
                         FoodMetaStore.upsert(name: foodName, displayName: foodName,
                                              kcal: baseCal, protein: basePro, carbs: baseCar, fat: baseFat,
-                                             fiber: baseFiber, sugar: baseSugar, sodium: baseSodium,
                                              source: "cloud", in: context)
                         summary.append("🔄 已更新「\(foodName)」：\(target.meal) \(Int(cal)) kcal\n  蛋白 \(String(format: "%.1f", target.protein))g · 碳水 \(String(format: "%.1f", target.carbs))g · 脂肪 \(String(format: "%.1f", target.fat))g · 纤维 \(String(format: "%.1f", target.fiber))g · 糖 \(String(format: "%.1f", target.sugar))g · 钠 \(String(format: "%.0f", target.sodium))mg\n\n结果仅供参考，如需修改可到\"饮食记录\"页面进行修改。")
                     } else {
@@ -2354,7 +2347,6 @@ struct ChatView: View {
                                              imageName: nil))
                     FoodMetaStore.upsert(name: foodName, displayName: foodName,
                                          kcal: baseCal, protein: basePro, carbs: baseCar, fat: baseFat,
-                                         fiber: baseFiber, sugar: baseSugar, sodium: baseSodium,
                                          source: "cloud", in: context)
                     HealthManager.shared.saveCaloriesConsumed(cal, date: .now)
                     summary.append("🍽 \(meal)「\(foodName)」\(Int(cal)) kcal\n  蛋白 \(String(format: "%.1f", protein))g · 碳水 \(String(format: "%.1f", carbs))g · 脂肪 \(String(format: "%.1f", fat))g · 纤维 \(String(format: "%.1f", fiber))g · 糖 \(String(format: "%.1f", sugar))g · 钠 \(String(format: "%.0f", sodium))mg\n\n结果仅供参考，如需修改可到\"饮食记录\"页面进行修改。")
@@ -2368,7 +2360,7 @@ struct ChatView: View {
                       let amount = bill.amount, amount > 0 else { continue }
                 let time = RecognitionResult.date(from: bill.time) ?? .now
                 let category = bill.category ?? "其他"
-                let income = RecognitionSaver.isIncomeSignal(category: category, merchant: merchant, rawText: originalText)
+                let income = RecognitionSaver.isIncomeCategory(category)
 
                 let action = bill.action?.lowercased() ?? "create"
                 switch action {

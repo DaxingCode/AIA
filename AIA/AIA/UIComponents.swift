@@ -472,11 +472,13 @@ struct SectionTitle: View {
 // MARK: - 相机/相册 → 云端识别 → 结果确认页 的复用流程
 // AIBottomBar 与首页快捷操作「拍照记录」共用，避免重复实现识别链路。
 enum CameraCoverItem: Identifiable {
-    case recognizing
+    case recognizing(UIImage)
     case present(RecognitionPresent)
     var id: String {
         switch self {
-        case .recognizing: return "recognizing"
+        case .recognizing(let img):
+            // 用图片 hash 唯一化 id，避免连续两次 fullScreenCover 冲突
+            return "recognizing-\(img.hashValue)"
         case .present(let p): return "present-\(p.id)"
         }
     }
@@ -521,11 +523,8 @@ struct CameraRecognitionFlowModifier: ViewModifier {
             }
             .fullScreenCover(item: $coverItem) { item in
                 switch item {
-                case .recognizing:
-                    ProgressView("识别中…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(.ultraThinMaterial)
-                        .ignoresSafeArea()
+                case .recognizing(let img):
+                    RecognizingOverlay(image: img, onBack: { coverItem = nil })
                 case .present(let p):
                     makeResultConfirmView(p)
                         .environment(\.modelContext, context)
@@ -550,15 +549,77 @@ struct CameraRecognitionFlowModifier: ViewModifier {
     }
 }
 
+/// 识别中浮层：背景展示用户提交的照片（模糊化），中央显示双行提示 + spinner，底部「返回」按钮。
+struct RecognizingOverlay: View {
+    let image: UIImage
+    let onBack: () -> Void
+
+    var body: some View {
+        ZStack {
+            // 背景：用户照片撑满 + 模糊
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .blur(radius: 25)
+                .ignoresSafeArea()
+
+            // 半透明白色遮罩，让文字可读
+            Color.white.opacity(0.45)
+                .ignoresSafeArea()
+
+            // 中央：spinner + 双行文字
+            VStack(spacing: 14) {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(AIATheme.food)
+                VStack(spacing: 4) {
+                    Text("阿宝AI正在识别中")
+                        .font(AIATheme.Font.body.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.center)
+                    Text("账单、食物、通知都能识别哦")
+                        .font(AIATheme.Font.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+            }
+            .padding(.horizontal, 32)
+
+            // 底部：返回按钮
+            VStack {
+                Spacer()
+                Button {
+                    onBack()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                            .font(AIATheme.Font.footnote.weight(.semibold))
+                        Text("返回")
+                            .font(AIATheme.Font.subhead.weight(.medium))
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 12)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                }
+                .padding(.bottom, 24)
+            }
+        }
+    }
+}
+
 /// 公共识别入口：任意视图拿到 UIImage 后调用，统一走「识别中 → 结果确认页」流程。
 func runImageRecognition(image: UIImage,
                          context: ModelContext,
                          coverItem: Binding<CameraCoverItem?>,
                          errorMessage: Binding<String?>) {
-    coverItem.wrappedValue = .recognizing
+    coverItem.wrappedValue = .recognizing(image)
     Task {
         do {
             let output = try await RecognizeService.recognizeWithLocalPriority(image: image, in: context)
+            // 用户已点返回关闭 cover：丢弃结果，避免覆盖已关闭状态
+            guard coverItem.wrappedValue != nil else { return }
             let res = output.result
             let rawText = output.rawText
             await MainActor.run {
