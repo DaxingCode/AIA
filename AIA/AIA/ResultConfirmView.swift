@@ -566,12 +566,13 @@ struct ResultConfirmView: View {
             HStack(spacing: 12) {
                 // 重量：标题 + 输入框 + 单位 同一行（inlineFieldRow）
                 inlineFieldRow(icon: "scalemass", label: "重量") {
-                    HStack(spacing: 2) {
+                    HStack(spacing: 6) {
                         TextField("100", text: binding.weightGram)
                             .keyboardType(.decimalPad)
                             .font(AIATheme.Font.title3.weight(.semibold))
                             .multilineTextAlignment(.trailing)
-                            .frame(maxWidth: 70)
+                            .frame(maxWidth: 80, minHeight: 32)
+                            .contentShape(Rectangle())
                         Text("g")
                             .font(AIATheme.Font.callout)
                             .foregroundStyle(AIATheme.muted)
@@ -579,7 +580,7 @@ struct ResultConfirmView: View {
                 }
                 // 热量：标题 + 只读数值 + 单位 同一行（inlineFieldRow）
                 inlineFieldRow(icon: "flame", label: "热量") {
-                    HStack(spacing: 2) {
+                    HStack(spacing: 6) {
                         Text("\(totalCal, specifier: "%.1f")")
                             .font(AIATheme.Font.title3.weight(.semibold))
                             .foregroundStyle(AIATheme.food)
