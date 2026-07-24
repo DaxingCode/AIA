@@ -481,7 +481,7 @@ struct EditFoodView: View {
     /// 视觉上比 nutritionRow 更紧凑，适合等宽 cell。
     private func nutritionCell(icon: String, label: String, unit: String,
                                binding: Binding<String>, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .center, spacing: 6) {
             HStack(spacing: 5) {
                 Image(systemName: icon)
                     .font(AIATheme.Font.caption)
@@ -490,21 +490,22 @@ struct EditFoodView: View {
                     .font(AIATheme.Font.caption)
                     .foregroundStyle(.primary)
             }
+            .frame(maxWidth: .infinity, alignment: .center)
             HStack(alignment: .firstTextBaseline, spacing: 2) {
                 TextField("0", text: binding)
                     .keyboardType(.decimalPad)
-                    .multilineTextAlignment(.trailing)
+                    .multilineTextAlignment(.center)
                     .font(AIATheme.Font.subhead.weight(.medium))
                     .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity)
                 Text(unit)
                     .font(AIATheme.Font.caption)
                     .foregroundStyle(AIATheme.muted)
             }
+            .frame(maxWidth: .infinity, alignment: .center)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
         .background(AIATheme.fillSoft)
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rXS))
     }
