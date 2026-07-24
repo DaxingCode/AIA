@@ -589,13 +589,15 @@ struct ResultConfirmView: View {
                     }
                 }
             }
-            VStack(spacing: 8) {
-                macroRow("蛋白质", totalPro, food.proteinPer100g, "g", AIATheme.blue)
-                macroRow("碳水", totalCar, food.carbsPer100g, "g", AIATheme.amber)
-                macroRow("脂肪", totalFat, food.fatPer100g, "g", AIATheme.green)
-                macroRow("膳食纤维", totalFiber, food.fiberPer100g, "g", AIATheme.purple)
-                macroRow("糖", totalSugar, food.sugarPer100g, "g", AIATheme.warn)
-                macroRow("钠", totalSodium, food.sodiumPer100g, "mg", AIATheme.warning)
+            // 6 大营养素 2×3 网格：每行 3 个 cell，2 行共 6 项
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
+                      spacing: 8) {
+                macroCell("蛋白质", totalPro, food.proteinPer100g, "g", AIATheme.blue)
+                macroCell("碳水", totalCar, food.carbsPer100g, "g", AIATheme.amber)
+                macroCell("脂肪", totalFat, food.fatPer100g, "g", AIATheme.green)
+                macroCell("膳食纤维", totalFiber, food.fiberPer100g, "g", AIATheme.purple)
+                macroCell("糖", totalSugar, food.sugarPer100g, "g", AIATheme.warn)
+                macroCell("钠", totalSodium, food.sodiumPer100g, "mg", AIATheme.warning)
             }
         }
         .padding(12)
@@ -623,6 +625,34 @@ struct ResultConfirmView: View {
         .padding(.vertical, 8)
         .background(AIATheme.surfaceSecondary)
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+    }
+
+    /// 营养网格单元（只读版）：彩色圆点 + 名称 / 数值 + 单位 / 每 100g 参考，三行内容；
+    /// 适合 2×3 LazyVGrid 网格布局使用——与 EditFoodView.nutritionCell 视觉风格对齐（fillSoft 底 / rXS 圆角）。
+    private func macroCell(_ name: String, _ total: Double, _ per100: Double, _ unit: String, _ color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Circle().fill(color).frame(width: 6, height: 6)
+                Text(name)
+                    .font(AIATheme.Font.caption)
+                    .foregroundStyle(AIATheme.sub)
+                    .lineLimit(1)
+            }
+            Text("\(total, specifier: "%.1f") \(unit)")
+                .font(AIATheme.Font.subhead.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            Text("(\(per100, specifier: "%.1f")/100g)")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AIATheme.fillSoft)
+        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rXS))
     }
 
     // MARK: - 健康卡片
