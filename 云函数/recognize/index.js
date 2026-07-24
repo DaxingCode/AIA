@@ -88,7 +88,8 @@ const PROVIDERS = {
 };
 
 // 版本标记：发布后 curl 可通过返回值里的 ver 字段确认是否部署了最新代码
-const FN_VERSION = '20260723c-multifood';
+// 注意：保持全小写+连字符，package-recognize.sh 的正则 [a-z]+ 兼容（小写 + 数字后缀 + 可选 -xxx 后缀，不支持大写）
+const FN_VERSION = '20260724a-queryfood';
 
 // 服务端兜底：纯通用回应（不论上下文）强制 types:["none"]，不依赖模型是否听话。
 // 与云端提示词规则 10 双保险，杜绝「好的/可以」被当成记录指令重复建待办。
@@ -342,6 +343,69 @@ async function handleChat(provider, body, apiKey) {
   return { ok: true, reply };
 }
 
+// queryFood 模式处理：手动添加食物页搜不到时，问云端该食物每 100g 的营养。
+// - 入参 body.foodName（必填，trim 后非空）
+// - 客户端 FoodPayload 期望：{name, calories, protein, carbs, fat, fiber?, sugar?, sodium?}
+// - 关键：要求模型只输出 JSON。sensechat-turbo / qwen-plus 等小模型可能包 ```json``` 围栏
+//   或前后多空行，extractJSON 做了防御性清洗。
+// - 关键：模型说"不知道"或不是食物时，必须返回 {ok:false, error}，禁止把 caloriess=0 的伪结果返给前端。
+//   客户端 queryFood() 用 calories > 0 判定"有效"，但 0 容易混在「空数据」里出错，前端显示更不友好。
+async function handleQueryFood(provider, body, apiKey) {
+  const rawName = (body.foodName || '').trim();
+  if (!rawName) {
+    return { ok: false, error: '缺少 foodName' };
+  }
+  const system = `你是食物营养助手。严格基于公开营养数据库（中国食物成分表 / USDA FoodData Central）输出食物每 100 克的可食部分营养。
+回答规则：
+1. 必须是 JSON 对象，不要解释、不要 Markdown 围栏、不要前后缀文字。
+2. 字段：name（标准中文名）、calories（千卡/100g，number）、protein（克/100g）、carbs（克/100g）、fat（克/100g）、fiber（克/100g，可选）、sugar（克/100g，可选）、sodium（毫克/100g，可选）。
+3. 如果是地方小吃、复合菜品、罕见品牌、或你不确定，请把 calories 设为 0 并把 name 设为 null，让前端知道"没找到"，绝不要瞎编数字。
+4. 数字字段必须是 number 类型（不要带"g""kcal"等单位字符串）。`;
+  const messages = [
+    { role: 'system', content: system },
+    { role: 'user', content: `请告诉我"${rawName}"每 100 克可食部分的营养。` },
+  ];
+  let reply;
+  try {
+    reply = await callChatRaw(provider, messages, apiKey);
+  } catch (e) {
+    return { ok: false, error: `模型调用失败: ${e.message}` };
+  }
+  const parsed = extractJSON(reply);
+  // 强制约束：必须是 {name, calories, ...} 的对象
+  if (!parsed || typeof parsed !== 'object' || !('calories' in parsed)) {
+    console.log(`[queryFood] 解析无 calories 字段: ${String(reply).slice(0, 200)}`);
+    return { ok: false, error: '未能解析营养数据' };
+  }
+  const name = typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name.trim() : null;
+  const calories = Number(parsed.calories);
+  // 关键防线：name==null 或 calories<=0 或 NaN → 整体失败，不返伪数据
+  if (!name || !Number.isFinite(calories) || calories <= 0) {
+    console.log(`[queryFood] 营养无效（name=${name}, calories=${calories}），原文: ${String(reply).slice(0, 200)}`);
+    return { ok: false, error: '该食物不在数据库或无可靠数据' };
+  }
+  const toNum = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  };
+  return {
+    ok: true,
+    result: {
+      types: ['food'],
+      food: {
+        name,
+        calories,
+        protein: toNum(parsed.protein),
+        carbs:   toNum(parsed.carbs),
+        fat:     toNum(parsed.fat),
+        fiber:   toNum(parsed.fiber),
+        sugar:   toNum(parsed.sugar),
+        sodium:  toNum(parsed.sodium),
+      },
+    },
+  };
+}
+
 // 有些模型会在 JSON 外面包 ```json 代码块，这里做防御性清洗。
 // 同时兜底解析失败（空 result / 非法 JSON / 缺 types 字段）为 {types:["none"]}，
 // 避免 App 端拿到空 result 后直接崩溃。
@@ -392,6 +456,14 @@ exports.main = async (event, context) => {
       }
       const agentRes = await handleAgent(provider, body, apiKey, handleChat);
       return { ...agentRes, ver: FN_VERSION };
+    }
+
+    // queryFood 模式：纯文本食物营养查询（手动添加食物页搜不到时联网兜底）。
+    // 客户端 RecognizeService.queryFood() 期望返回 { ok, result:{ food:{name, calories, protein, carbs, fat, ...} } }
+    // 与 FoodPayload 编码一致；失败/找不到 → { ok:false, error } 让前端走「联网未找到」分支。
+    if (body.mode === 'queryFood') {
+      const qfRes = await handleQueryFood(provider, body, apiKey);
+      return { ...qfRes, ver: FN_VERSION };
     }
 
     // 聊天模式：不返回结构化 JSON，而是基于本地数据摘要直接回答

@@ -524,6 +524,10 @@ struct AddFoodManualView: View {
     /// 选择搜索结果后，自动填充表单
     private func applySearchResult(_ result: FoodSearchResult) {
         name = result.name
+        // 搜索结果的基础营养按 100g 算 → 显式把食用重量重置为 100g，
+        // 让"营养成分（按当前重量）" = 基础营养，避免用户之前改的 200g 等
+        // 旧值继续影响计算（用户后续可再调）。
+        weightText = "100"
         baseKcalText = String(format: "%.1f", result.kcal)
         baseProteinText = result.protein > 0 ? String(format: "%.1f", result.protein) : ""
         baseCarbsText = result.carbs > 0 ? String(format: "%.1f", result.carbs) : ""
