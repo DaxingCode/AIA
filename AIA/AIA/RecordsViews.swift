@@ -1633,6 +1633,9 @@ struct ReminderListView: View {
     @State private var filter: TodoFilter = .active
     @State private var calendarMonth = Date()
     @State private var selectedDate: Date? = Date()
+    /// 点行触发的「编辑待办」sheet（2026-07-24：从 navigationDestination 推页改为 .sheet 弹起，
+    /// 与「编辑账单」一致；首页行点击走 EditTodoSheet，与 AllRecordsView 入口统一为 sheet 体验）
+    @State private var editTodo: Reminder?
     private var active: [Reminder] {
         reminders.filter { !$0.done && $0.due != nil }
             .sorted { ($0.due ?? .distantPast) < ($1.due ?? .distantPast) }
@@ -1770,11 +1773,18 @@ struct ReminderListView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 dateHeader(group.date, reminders: group.reminders)
                                 ForEach(group.reminders) { r in
-                                    ValueSelectableCard(
-                                        value: HomeRoute.editTodo(r),
-                                        leadingAccessory: todoDoneButton(r),
-                                        content: todoRowContent(r)
-                                    )
+                                    // ZStack 分层（与 ValueSelectableCard 同款结构，但触发方式从
+                                    // NavigationLink(value:) 推 path 改为 .sheet 弹起）：
+                                    //   底层：卡主体（todoRowContent 自身带 44pt 左 padding 给圆圈让位），
+                                    //          整张可点 → editTodo = r 触发 sheet
+                                    //   顶层：左侧完成圆圈 todoDoneButton（Color.clear 36×36 独立 hit area
+                                    //          拦截点击，不穿透到下层卡主体）
+                                    ZStack(alignment: .leading) {
+                                        todoRowContent(r)
+                                            .contentShape(RoundedRectangle(cornerRadius: 14))
+                                            .onTapGesture { editTodo = r }
+                                        todoDoneButton(r)
+                                    }
                                 }
                             }
                         }
@@ -1796,6 +1806,11 @@ struct ReminderListView: View {
         }
         .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("tab.todo"))
+        // 点行 → 弹「编辑待办」sheet（与「编辑账单」一致：从下方弹出，背景能看到首页；
+        // sheet 顶左「取消」/ 顶右「保存」由 EditTodoView.toolbar 提供）
+        .sheet(item: $editTodo) { r in
+            EditTodoSheet(reminder: r)
+        }
     }
 
     // MARK: - 日历视图
@@ -1864,10 +1879,10 @@ struct ReminderListView: View {
                         .padding(.vertical, 20)
                 } else {
                     ForEach(dayTodos) { r in
-                        ValueSelectableCard(
-                            value: HomeRoute.editTodo(r),
-                            content: todoRowContent(r, hasDoneCircle: false)
-                        )
+                        // 日历视图没有完成圆圈（hasDoneCircle: false），整张卡可点 → 触发 sheet
+                        todoRowContent(r, hasDoneCircle: false)
+                            .contentShape(RoundedRectangle(cornerRadius: 14))
+                            .onTapGesture { editTodo = r }
                     }
                 }
             }

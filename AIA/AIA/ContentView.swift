@@ -18,7 +18,8 @@ enum HomeRoute: Hashable {
     // 详情/编辑页：用 associated value 携带记录引用，让 .navigationDestination(for: HomeRoute.self) 统一处理
     // 所有 push 目标。**严禁**用 SelectableCard 的闭包式 destination 嵌入本路径——会触发
     // SwiftUI.AnyNavigationPath.Error.comparisonTypeMismatch try! 强解崩溃（2026-07-24 踩坑）。
-    case editTodo(Reminder)
+    // 注意：「编辑待办」**不再走 navigationDestination**——2026-07-24 改为 .sheet 弹起（与「编辑账单」一致），
+    // 入口在 ReminderListView 内的 @State editTodo + .sheet(item:)。这里只保留 .healthDetail。
     case healthDetail(HealthMetric)
 }
 
@@ -117,8 +118,6 @@ struct ContentView: View {
                     case .chatVoice:    ChatView(autostartVoice: true)
                     case .settings:     SettingsView()
                     case .autoSetup:    AutoRecognitionSetupView()
-                    case .editTodo(let r):
-                        EditTodoView(reminder: r)
                     case .healthDetail(let m):
                         HealthDetailView(metric: m)
                     }

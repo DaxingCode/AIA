@@ -1022,13 +1022,14 @@ struct EditTodoView: View {
     }
 
     var body: some View {
-        // 注意：本 view 有 2 个调用点：
-        // ① ContentView.swift case .editTodo(let r) 在 navigationDestination(for: HomeRoute.self) 内 push
-        //   → 已经在父级 NavigationStack 里，**不能再自己包 NavigationStack**（嵌套会触发
-        //     AnyNavigationPath.Error.comparisonTypeMismatch try! 崩，2026-07-24 第 9 轮踩坑）
-        // ② AllRecordsView.swift .sheet(item: $editTodo) 弹 sheet → sheet 自身是独立 NavigationContext，
-        //   必须用 EditTodoSheet（带 NavigationStack 包装）调用。
-        // 因此本 body 直接是 ScrollView，调用方按场景选 EditTodoView 或 EditTodoSheet。
+        // 调用点（2026-07-24 改为统一 sheet 弹起）：
+        // ① AllRecordsView.swift:163 .sheet(item: $editTodo) { EditTodoSheet(reminder: $0) }
+        // ② RecordsViews.swift:1808 ReminderListView 内的 .sheet(item: $editTodo) { EditTodoSheet(reminder: $0) }
+        // 两个 sheet 入口都用 EditTodoSheet wrapper（带 NavigationStack 包装）调用。
+        // EditTodoView 自身**不能**自己包 NavigationStack——一旦未来再加回 navigationDestination 推入父级
+        // NavigationStack 的入口（与 .sheet 双调用点），self-contained 的 NavigationStack 会触发
+        // AnyNavigationPath.Error.comparisonTypeMismatch try! 崩（2026-07-24 二次踩坑已写入 MEMORY.md）。
+        // 因此本 body 直接是 ScrollView，调用方一律走 EditTodoSheet。
         ZStack {
             AIATheme.fillSoft.ignoresSafeArea()
             ScrollView {
@@ -1047,7 +1048,10 @@ struct EditTodoView: View {
         .navigationTitle("编辑待办")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            // 顶左「取消」已删——与左上系统返回箭头冗余，dismiss 等价于左箭头
+            // sheet 弹起模式：左「取消」dismiss 关闭 sheet（无系统返回箭头）
+            ToolbarItem(placement: .cancellationAction) {
+                Button("取消") { dismiss() }
+            }
             ToolbarItem(placement: .confirmationAction) {
                 Button("保存") { save() }
                     .font(AIATheme.Font.callout.weight(.semibold))
@@ -1479,12 +1483,13 @@ struct EditHealthView: View {
     }
 }
 
-/// EditTodoView 的 sheet 包装：仅 .sheet 路径用，自身包 NavigationStack 提供 toolbar context。
-/// 因为 EditTodoView 自身在 navigationDestination(for: HomeRoute.self) 内被 push，已经在父级 NavigationStack 里，
-/// 不能再自己包 NavigationStack（嵌套会触发 AnyNavigationPath.Error.comparisonTypeMismatch try! 崩）。
-/// 拆开两个入口后：
-/// - navigationDestination 路径用 EditTodoView（无 NavigationStack 包装）
-/// - .sheet 路径用 EditTodoSheet（有 NavigationStack 包装，sheet 自身是独立 NavigationContext）
+/// EditTodoView 的 sheet 包装：所有 sheet 入口必须用本 wrapper（自身包 NavigationStack 提供 toolbar context）。
+/// EditTodoView 自身不带 NavigationStack 包装，**只**通过本 wrapper 在 sheet 模式下被调用。
+/// 2026-07-24 改为统一 sheet 弹起（与「编辑账单」一致）：
+/// - AllRecordsView.swift:163  .sheet(item: $editTodo) { EditTodoSheet(reminder: $0) }
+/// - RecordsViews.swift:1808   ReminderListView 内 .sheet(item: $editTodo) { EditTodoSheet(reminder: $0) }
+/// 禁止把 EditTodoView 直接放进 navigationDestination(for: HomeRoute.self) ——
+/// EditTodoView 自身不包 NavigationStack，被 push 到父级 NavigationStack 后 toolbar 标题栏不会渲染（视觉异常）。
 struct EditTodoSheet: View {
     let reminder: Reminder
     var body: some View {
