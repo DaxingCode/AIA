@@ -579,9 +579,10 @@ struct EditFoodView: View {
     }
 }
 
-// MARK: - 账单编辑
+// MARK: - 账单编辑（支持编辑 + 手动添加两种模式；UI/逻辑共用，仅 deleteCard 和 title 切换）
 struct EditBillView: View {
     let bill: Bill
+    let isAdding: Bool          // true = 手动添加模式（不显示删除按钮，title 改"添加账单"）
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
 
@@ -601,8 +602,9 @@ struct EditBillView: View {
     @State private var pickedImage: UIImage? = nil
     @State private var pendingDeleteID: PersistentIdentifier? = nil
 
-    init(bill: Bill) {
+    init(bill: Bill, isAdding: Bool = false) {
         self.bill = bill
+        self.isAdding = isAdding
         _merchant = State(initialValue: bill.merchant)
         _amountText = State(initialValue: String(format: "%.2f", bill.amount))
         _category = State(initialValue: bill.category)
@@ -621,14 +623,14 @@ struct EditBillView: View {
                         infoCard
                         incomeCard
                         noteCard
-                        deleteCard
+                        if !isAdding { deleteCard }    // 添加模式不显示删除按钮
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
                 }
                 .scrollDismissesKeyboard(.immediately)
             }
-            .navigationTitle("编辑账单")
+            .navigationTitle(isAdding ? "添加账单" : "编辑账单")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showCategoryPicker) {
                 BillCategoryPickerSheet(selection: $category)
@@ -909,6 +911,11 @@ struct EditBillView: View {
         bill.isIncome = isIncome
         bill.imageName = imageName
         bill.syncUpdatedAt = .now
+        if isAdding {
+            // 草稿 Bill 在 addNewBill 时设了 syncDeleted=true（被 @Query 谓词过滤，sheet 期间背景干净）；
+            // 用户点保存 → 把 syncDeleted 改回 false，Bill 复活并显示在列表里
+            bill.syncDeleted = false
+        }
         try? context.save()
         dismiss()
     }

@@ -932,6 +932,8 @@ struct BillListView: View {
     @State private var showPicker = false
     /// 点击账单记录直接弹出「编辑账单」页（sheet 呈现 EditBillView，与其设计意图一致）
     @State private var editBill: Bill? = nil
+    /// 右上角加号 → 弹出「添加账单」页（与编辑共用 EditBillView，加 isAdding: true）
+    @State private var addBillDraft: Bill? = nil
 
     private var todayBills: [Bill] {
         bills.filter { Calendar.current.isDateInToday($0.time) }
@@ -1253,6 +1255,16 @@ struct BillListView: View {
         }
         .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("tab.bill"))
+        .toolbar {
+            // 右上角 + 号 → 手动添加账单（与编辑账单共用 EditBillView，加 isAdding: true 切换 title + 隐藏删除按钮）
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { addNewBill() } label: {
+                    Image(systemName: "plus")
+                        .font(AIATheme.Font.body.weight(.semibold))
+                        .foregroundStyle(AIATheme.blue)
+                }
+            }
+        }
         .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker)
         .sheet(isPresented: $showBudgetEditor) {
             VStack(spacing: 0) {
@@ -1325,6 +1337,24 @@ struct BillListView: View {
         .sheet(item: $editBill) { b in
             EditBillView(bill: b)
         }
+        // 右上角 + 号 → 手动添加账单（草稿 Bill 已在 addNewBill 时软删除，@Query 过滤掉；保存时复活）
+        .sheet(item: $addBillDraft) { b in
+            EditBillView(bill: b, isAdding: true)
+        }
+    }
+
+    /// 右上角 + 号 action：创建临时草稿 Bill（syncDeleted=true 软删除，被 @Query 谓词过滤，sheet 期间背景不显示空账单）→ 存到 addBillDraft 触发 sheet
+    private func addNewBill() {
+        let draft = Bill(
+            merchant: "",
+            amount: 0,
+            category: "其他",
+            time: .now,
+            confirmed: true
+        )
+        draft.syncDeleted = true  // 软删除：@Query #Predicate { !$0.syncDeleted } 过滤掉，sheet 期间账单列表背景干净
+        context.insert(draft)
+        addBillDraft = draft
     }
 
     private func dateHeader(_ date: Date, bills: [Bill]) -> some View {
