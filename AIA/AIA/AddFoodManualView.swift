@@ -535,7 +535,7 @@ struct AddFoodManualView: View {
         baseFiberText = result.fiber > 0 ? String(format: "%.1f", result.fiber) : ""
         baseSugarText = result.sugar > 0 ? String(format: "%.1f", result.sugar) : ""
         baseSodiumText = result.sodium > 0 ? String(format: "%.1f", result.sodium) : ""
-        searchText = ""
+        searchText = result.name   // 选中后搜索框展示已选食物名（不再清空）
         searchResults = []
         showSearchResults = false
 
