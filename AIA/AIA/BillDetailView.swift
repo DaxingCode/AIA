@@ -18,8 +18,9 @@ struct BillDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 12) {
                     headerCard
+                    infoGrid
                     if bill.imageName != nil { imageCard }
                     actionCard
                 }
@@ -52,13 +53,13 @@ struct BillDetailView: View {
     private var headerCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 14) {
-                Text("💳")
+                Text(BillCategoryHelpers.icon(for: bill.category))
                     .font(AIATheme.Font.display)
-                    .frame(width: 60, height: 60)
-                    .background(AIATheme.billBG)
+                    .frame(width: 56, height: 56)
+                    .background(BillCategoryHelpers.color(for: bill.category).opacity(0.12))
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(bill.merchant)
+                    Text(bill.merchant.isEmpty ? "其他消费" : bill.merchant)
                         .font(AIATheme.Font.title3.weight(.semibold))
                         .foregroundStyle(.primary)
                     Text(bill.category.isEmpty ? "其他" : bill.category)
@@ -68,32 +69,38 @@ struct BillDetailView: View {
                 Spacer(minLength: 0)
             }
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(amountLabel)
                     .font(AIATheme.Font.hero.weight(.bold))
                     .foregroundStyle(bill.isIncome ? AIATheme.ok : AIATheme.warn)
-                HStack(spacing: 8) {
-                    Text(AppFormat.dateTime.string(from: bill.time))
-                        .font(AIATheme.Font.caption)
-                        .foregroundStyle(AIATheme.muted)
-                }
+                Text(AppFormat.dateTime.string(from: bill.time))
+                    .font(AIATheme.Font.caption)
+                    .foregroundStyle(AIATheme.muted)
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(AIATheme.billBG)
             .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
-
-            infoGrid
         }
         .padding(14)
         .card()
     }
 
+    // MARK: - 账单信息（4 格：类型 / 分类 / 时间 / 商户，避免与头部金额重复）
     private var infoGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible())], spacing: 12) {
-            infoBox(icon: "arrow.2.circlepath", label: bill.isIncome ? "类型" : "类型", value: bill.isIncome ? "收入" : "支出")
-            infoBox(icon: "yensign.circle", label: "金额", value: "¥\(String(format: "%.2f", bill.amount))")
+        VStack(alignment: .leading, spacing: 12) {
+            Text("账单信息")
+                .font(AIATheme.Font.subhead.weight(.semibold))
+                .foregroundStyle(.primary)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible())], spacing: 10) {
+                infoBox(icon: "arrow.2.circlepath", label: "类型", value: bill.isIncome ? "收入" : "支出")
+                infoBox(icon: "tag", label: "分类", value: bill.category.isEmpty ? "其他" : bill.category)
+                infoBox(icon: "clock", label: "时间", value: AppFormat.time.string(from: bill.time))
+                infoBox(icon: "building.2", label: "商户", value: bill.merchant.isEmpty ? "—" : bill.merchant)
+            }
         }
+        .padding(14)
+        .card()
     }
 
     private func infoBox(icon: String, label: String, value: String) -> some View {
@@ -117,42 +124,39 @@ struct BillDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
     }
 
-    // MARK: - 识别原图
+    // MARK: - 账单图片（标题统一在卡片层，AttachmentSection 不再重复显示）
     private var imageCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("识别原图")
+            Text("账单图片")
                 .font(AIATheme.Font.subhead.weight(.semibold))
                 .foregroundStyle(.primary)
-            AttachmentSection(imageName: bill.imageName)
+            AttachmentSection(imageName: bill.imageName, title: nil)
         }
         .padding(14)
         .card()
     }
 
-    // MARK: - 操作卡片
+    // MARK: - 操作卡片（编辑主按钮 + 删除次按钮，逻辑更直观）
     private var actionCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("操作")
                 .font(AIATheme.Font.subhead.weight(.semibold))
                 .foregroundStyle(.primary)
-                .padding(.bottom, 6)
 
-            actionButton(
-                title: "编辑账单",
-                sub: "商户 / 金额 / 分类",
-                icon: "square.and.pencil",
-                color: AIATheme.sub
-            ) {
+            Button {
                 showEdit = true
+            } label: {
+                Text("编辑账单")
+                    .font(AIATheme.Font.subhead.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(AIATheme.ink)
+                    .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
             }
-            Divider().padding(.leading, 14)
+            .buttonStyle(.plain)
 
-            actionButton(
-                title: "删除该账单",
-                sub: "删除后不可恢复",
-                icon: "trash",
-                color: AIATheme.warn
-            ) {
+            Button {
                 // 先标记删除意图并 pop 回列表，等 onDisappear（pop 动画完全结束）
                 // 再真正执行 SafeDelete。避免 syncDeleted=true 触发 @Query 重 fetch
                 // 与 NavigationStack pop 动画叠加，导致最后一条删除时卡死。
@@ -160,40 +164,19 @@ struct BillDetailView: View {
                 // 600ms 后访问属性触发 fault 异常闪退。
                 pendingDeleteID = bill.persistentModelID
                 dismiss()
+            } label: {
+                Text("删除该账单")
+                    .font(AIATheme.Font.subhead.weight(.semibold))
+                    .foregroundStyle(AIATheme.warn)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(AIATheme.warn.opacity(0.08))
+                    .overlay(RoundedRectangle(cornerRadius: AIATheme.rMD).stroke(AIATheme.warn.opacity(0.25), lineWidth: 0.5))
+                    .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
             }
+            .buttonStyle(.plain)
         }
         .padding(14)
         .card()
-    }
-
-    private func actionButton(title: String, sub: String, icon: String, color: Color,
-                               action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(color.opacity(0.1))
-                        .frame(width: 32, height: 32)
-                    Image(systemName: icon)
-                        .font(AIATheme.Font.subhead.weight(.medium))
-                        .foregroundStyle(color)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(AIATheme.Font.subhead.weight(.medium))
-                        .foregroundStyle(color)
-                    Text(sub)
-                        .font(AIATheme.Font.micro)
-                        .foregroundStyle(AIATheme.muted)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(AIATheme.Font.caption.weight(.semibold))
-                    .foregroundStyle(AIATheme.muted)
-            }
-            .padding(.vertical, 12)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 }

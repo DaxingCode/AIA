@@ -49,16 +49,25 @@ enum LocalImageStore {
 
 // MARK: - 复用 UI：附件原图区块（缩略图 + 点击查看大图）
 // 各详情页统一调用：AttachmentSection(imageName: entry.imageName)
+// 传入 title: nil 可隐藏内部标题，由调用方在卡片外层统一提供 section 标题。
 struct AttachmentSection: View {
     let imageName: String?
+    let title: String?
     @State private var showFull = false
+
+    init(imageName: String?, title: String? = "识别原图") {
+        self.imageName = imageName
+        self.title = title
+    }
 
     var body: some View {
         if let img = LocalImageStore.load(imageName) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("识别原图")
-                    .font(AIATheme.Font.footnote.weight(.semibold))
-                    .foregroundStyle(AIATheme.sub)
+                if let title {
+                    Text(title)
+                        .font(AIATheme.Font.footnote.weight(.semibold))
+                        .foregroundStyle(AIATheme.sub)
+                }
                 Button {
                     showFull = true
                 } label: {
