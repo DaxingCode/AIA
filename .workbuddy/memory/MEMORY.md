@@ -28,6 +28,17 @@
 - **导航铁律（2026-07-24 踩坑·崩）**：全 App 用单 `NavigationStack(path: $router.path) + .navigationDestination(for: HomeRoute.self)`（ContentView.swift 77/103）。**所有从首页列表点行进入详情/编辑页必须走 value-based**：`ValueSelectableCard(value: HomeRoute.xxx(记录), content: ...)` + HomeRoute 加 associated value case + navigationDestination switch 加分支。**严禁** `SelectableCard(destination: SomeView)` 闭包式嵌入首页 NavigationStack 根层——AnyNavigationPath 内部 `try!` 比较 path entry 会触发 `comparisonTypeMismatch` 崩溃，整页 NavigationStack 死锁（白屏 + 首页任何按钮点不动）。闭包式 destination 仅允许用于 `.sheet` 自带 NavigationStack 内部（如 EditBillView）。新增列表行跳详情前**先**确认 HomeRoute 有对应 case，否则用 `enum HomeRoute { case xxx(记录) }` 加好再写 UI。
 - **NavigationStack 嵌套铁律（2026-07-24 二次踩坑·崩）**：view 的 body **绝对不能**自己包 `NavigationStack` 如果它会被 `navigationDestination(for: HomeRoute.self)` 推到父级 `NavigationStack` 内（父级 path 是 `[HomeRoute]`，子级 `NavigationStack` 默认是 `NavigationPath` untyped，两者并存 AnyNavigationPath try! 比较会 `comparisonTypeMismatch` 直接崩）。**view 有双调用点（既有 navigationDestination 又有 .sheet）必须拆 wrapper**：view 自身无 NavigationStack 包装（父级 push 用），sheet 路径另加 `XxxSheet` wrapper 包 NavigationStack（sheet 弹起自带 NavigationContext 可以包）。修法见 EditTodoView → EditTodoSheet（commit `b2ce263`）。**新增 view 前先扫调用点**：如果只在 `.sheet` 内被调（EditFoodView/EditBillView/EditHealthView），自身保留 NavigationStack OK；如果在 `navigationDestination` + `.sheet` 双调，必须拆 wrapper。
 - **「拆 wrapper 即使单调用点也保留」铁律（2026-07-24 三次踩坑）**：即使一个 view 当前的**所有**调用入口都是 `.sheet`（如 2026-07-24 把 HomeRoute.editTodo 删后 EditTodoView 只剩 sheet 调用），**EditTodoView 自身仍不带 NavigationStack**，所有 sheet 入口必须走 `EditTodoSheet` wrapper。**理由**：① 预防未来再加 push 入口时崩（单调用点变双调用点会引历史 bug 复活）；② EditTodoSheet 注释明确「所有 sheet 入口必须用本 wrapper」+ 列出全部调用点，新人一眼能看到约束；③ wrapper 本身零运行时开销（仅多一层 NavigationStack），纯防御性。**判断标准**：如果一个 view 历史上曾因 NavigationStack 嵌套崩过（EditTodoView b2ce263 案例），即使现在只剩 sheet 入口，wrapper 拆法**永远保留**，不合并回主 view。
+- **Swift struct 默认参数铁律（2026-07-24 踩坑·编译失败）**：**Swift struct 用 `let isAdding: Bool = false` 默认值时，编译器生成的自动 init 是 `init(reminder:isAdding:)`（全部属性按顺序），不会让 `isAdding` 变成可选参数**。调用 `EditTodoSheet(reminder: r, isAdding: true)` 会报 `extra argument 'isAdding' in call`。**修法**：必须**显式写 init**：```swift
+struct EditTodoSheet: View {
+    let reminder: Reminder
+    let isAdding: Bool
+    init(reminder: Reminder, isAdding: Bool = false) {
+        self.reminder = reminder
+        self.isAdding = isAdding
+    }
+}
+```**适用范围**：所有 wrapper 结构体（EditXxxSheet / AddXxxView）只要加了带默认值的属性，**必须**显式 init，否则编译失败且错误位置误导到调用方。
+- **SwiftUI type-check timeout 铁律（2026-07-24 踩坑·编译失败）**：加 toolbar + 多 sheet + 多层 ZStack 后 body modifier 链总深度让 Swift 编译器类型推断**超时**，报 `the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions`，错误位置通常**指在嵌套最深处**（误导）。**修法**：把嵌套 ZStack / VStack 抽成 `@ViewBuilder private func xxx(_ r: ...) -> some View` helper，body 里只调 helper，编译器压力大幅减小。**适用范围**：所有 view body 内联多层嵌套 view builder + 多 modifier。**预防**：新增 toolbar / sheet / 多级 ZStack 时如果报 type-check timeout，优先拆 helper（拆 ViewBuilder 树）。RemindersView 拆 todoRow(r) helper 后 BUILD SUCCEEDED（commit `356dd10`）。
 
 ## 图片识别链路（2026-07-22 重构·单一清晰路径）
 - `recognizeWithLocalPriority(imageData:in:)` 是唯一入口，链路自上而下、命中即返回：
