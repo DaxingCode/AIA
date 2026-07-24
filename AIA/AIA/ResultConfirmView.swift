@@ -331,6 +331,27 @@ struct ResultConfirmView: View {
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
     }
 
+    /// 单行内嵌版 fieldRow：icon + 标题 在左，输入控件 + 单位 在右（用 Spacer 推开）。
+    /// 适合重量/热量等需要在同一行展示「标题 + 数值」的紧凑场景；视觉上比默认 fieldRow 省一行高度。
+    private func inlineFieldRow<Content: View>(icon: String, label: String,
+                                                @ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                Text(label)
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+            }
+            Spacer(minLength: 8)
+            content()
+        }
+        .padding(12)
+        .background(AIATheme.surfaceSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+    }
+
     private func textField(_ text: Binding<String>, placeholder: String) -> some View {
         TextField(placeholder, text: text)
             .font(AIATheme.Font.callout)
@@ -421,11 +442,7 @@ struct ResultConfirmView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             textField(eb.category, placeholder: "输入分类")
                             categoryChips(eb.category)
-                            let willBeIncome = RecognitionSaver.isIncomeSignal(
-                                category: eb.category.wrappedValue,
-                                merchant: eb.merchant.wrappedValue,
-                                rawText: rawText
-                            )
+                            let willBeIncome = RecognitionSaver.isIncomeCategory(eb.category.wrappedValue)
                             HStack(spacing: 4) {
                                 Image(systemName: willBeIncome ? "arrow.down.circle.fill" : "arrow.up.circle.fill")
                                     .font(AIATheme.Font.micro)
@@ -547,22 +564,22 @@ struct ResultConfirmView: View {
                 textField(binding.name, placeholder: "输入食物名称")
             }
             HStack(spacing: 12) {
-                fieldRow(icon: "scalemass", label: "重量") {
-                    HStack(spacing: 4) {
-                        Spacer()
+                // 重量：标题 + 输入框 + 单位 同一行（inlineFieldRow）
+                inlineFieldRow(icon: "scalemass", label: "重量") {
+                    HStack(spacing: 2) {
                         TextField("100", text: binding.weightGram)
                             .keyboardType(.decimalPad)
                             .font(AIATheme.Font.title3.weight(.semibold))
                             .multilineTextAlignment(.trailing)
-                            .frame(width: 70)
+                            .frame(maxWidth: 70)
                         Text("g")
                             .font(AIATheme.Font.callout)
                             .foregroundStyle(AIATheme.muted)
                     }
                 }
-                fieldRow(icon: "flame", label: "热量") {
-                    HStack(spacing: 4) {
-                        Spacer()
+                // 热量：标题 + 只读数值 + 单位 同一行（inlineFieldRow）
+                inlineFieldRow(icon: "flame", label: "热量") {
+                    HStack(spacing: 2) {
                         Text("\(totalCal, specifier: "%.1f")")
                             .font(AIATheme.Font.title3.weight(.semibold))
                             .foregroundStyle(AIATheme.food)
@@ -688,7 +705,7 @@ struct ResultConfirmView: View {
             // 收入类（工资/奖金/退款等）截图云端常不返商户名：默认「收入」，
             // 用户可直接保存，也可改成真实付款方（如公司名）。
             let defaultMerchant = rawMerchant.isEmpty
-                ? (RecognitionSaver.isIncomeSignal(category: b.category ?? "", merchant: "", rawText: rawText) ? "收入" : "")
+                ? (RecognitionSaver.isIncomeCategory(b.category ?? "") ? "收入" : "")
                 : rawMerchant
             return EditableBill(
                 originalIndex: i,
@@ -702,8 +719,8 @@ struct ResultConfirmView: View {
         todoTitle = result.todo?.title ?? ""
         todoDueDate = defaultTodoDueDate()
 
-        // 多食物支持：逐条填充 editableFoods（foodList 优先，兼容单条 food）
-        let foods = result.foodList
+        // 逐条填充 editableFoods（识别结果中单条 food，可能为空）
+        let foods: [FoodPayload] = result.food.map { [$0] } ?? []
         let defaultMeal = RecognitionSaver.defaultMeal(for: .now)
         editableFoods = foods.map { f in
             let portion = f.portion ?? "100克"
@@ -772,7 +789,6 @@ struct ResultConfirmView: View {
                 FoodMetaStore.upsert(name: name, displayName: ref.name,
                                      kcal: ref.kcal, protein: ref.protein,
                                      carbs: ref.carbs, fat: ref.fat,
-                                     fiber: ref.fiber, sugar: ref.sugar, sodium: ref.sodium,
                                      source: "cloud", in: context)
                 editableFoods[0].caloriesPer100g = ref.kcal
                 editableFoods[0].proteinPer100g = ref.protein
@@ -832,7 +848,7 @@ struct ResultConfirmView: View {
                     if let amt = Double(eb.amount) { b.amount = amt }
                     b.category = eb.category
                     b.time = eb.date
-                    b.isIncome = RecognitionSaver.isIncomeSignal(category: eb.category, merchant: eb.merchant, rawText: rawText)
+                    b.isIncome = RecognitionSaver.isIncomeCategory(eb.category)
                     b.imageName = session.imageName
                 }
             }
@@ -959,11 +975,10 @@ struct ResultConfirmView: View {
             let corrected: [String: Any] = ["title": todoTitle, "due": isoString(todoDueDate)]
             return (type, original, corrected)
         case "food":
-            guard let f = result.foodList.first else { return nil }
+            guard let f = result.food else { return nil }
             let original: [String: Any] = [
                 "name": n(f.name), "calories": n(f.calories), "protein": n(f.protein),
                 "carbs": n(f.carbs), "fat": n(f.fat),
-                "fiber": n(f.fiber), "sugar": n(f.sugar), "sodium": n(f.sodium),
                 "portion": n(f.portion)
             ]
             let corrected: [String: Any] = {
@@ -996,7 +1011,7 @@ func makeResultConfirmView(_ present: RecognitionPresent) -> ResultConfirmView {
     case .duplicate(let d):
         return ResultConfirmView(result: d.result, rawText: d.rawText, sourceImage: d.sourceImage,
                                  source: d.source, duplicate: d)
-    case .pending(let result, let rawText, let image, let source, _):
+    case .pending(let result, let rawText, let image, let source):
         return ResultConfirmView(result: result, rawText: rawText, sourceImage: image,
                                  source: source, existingSession: nil, duplicate: nil)
     }
