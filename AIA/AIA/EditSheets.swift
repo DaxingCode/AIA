@@ -1016,7 +1016,10 @@ struct EditTodoView: View {
         self.isAdding = isAdding
         _title = State(initialValue: reminder.title)
         _hasDue = State(initialValue: reminder.due != nil)
-        _due = State(initialValue: reminder.due ?? Date())
+        // 默认时间：新增场景（reminder.due == nil）= 当前时间 + 1 小时（2026-07-24 改）；
+        // 编辑场景（reminder.due 有值）保留原值不动。Date() 含分钟秒，
+        // addingTimeInterval(3600) 后是「下个整点前 1 小时」级别近似，符合"1 小时后"直觉。
+        _due = State(initialValue: reminder.due ?? Date().addingTimeInterval(3600))
         _priority = State(initialValue: reminder.priority)
         _repeatRule = State(initialValue: reminder.repeatRule)
         _done = State(initialValue: reminder.done)
