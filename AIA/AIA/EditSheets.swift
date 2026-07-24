@@ -473,14 +473,14 @@ struct EditBillView: View {
     }
 
     private var noteCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("备注")
                 .font(AIATheme.Font.micro)
                 .foregroundStyle(AIATheme.muted)
             TextEditor(text: $note)
                 .font(AIATheme.Font.body)
                 .foregroundStyle(.primary)
-                .frame(minHeight: 60)
+                .frame(minHeight: 44)
                 .scrollContentBackground(.hidden)
             if let img = LocalImageStore.load(imageName) {
                 HStack(spacing: 12) {
