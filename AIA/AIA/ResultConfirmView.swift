@@ -67,6 +67,27 @@ struct ResultConfirmView: View {
     @State private var healthValue: String = ""
     @State private var nutritionSource: String = ""   // 营养库校正来源提示
 
+    /// 模型估算合理性护栏：仅当营养来源是「AI 看图估算」时生效（营养库/本地库/包装标签视为可信）。
+    /// 触发条件：每 100g 三大营养素合计超过 100g（物理上不可能，说明模型重复计入），
+    /// 或 标注热量与三大营养素反推热量相差超过 30%（数值内部不自洽）。
+    private var macroEstimateWarning: String? {
+        guard editableFoods.count == 1,
+              nutritionSource.contains("模型估算") else { return nil }
+        let f = editableFoods[0]
+        let pro = f.proteinPer100g, car = f.carbsPer100g, fat = f.fatPer100g
+        let macroSum = pro + car + fat
+        if macroSum > 100 {
+            return "⚠️ 三大营养素合计 \(String(format: "%.0f", macroSum))g 超过 100g/100g（物理上不可能），AI 估算可能失真，请手动核对"
+        }
+        let calFromMacro = pro * 4 + car * 4 + fat * 9
+        let kcal = f.caloriesPer100g
+        if kcal > 0, abs(kcal - calFromMacro) / kcal > 0.3 {
+            return "⚠️ 热量 \(Int(kcal)) kcal 与三大营养素推算 \(Int(calFromMacro)) kcal 相差过大，AI 估算可能不准"
+        }
+        return nil
+    }
+
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -530,6 +551,22 @@ struct ResultConfirmView: View {
                     .background((nutritionSource.hasPrefix("已按") ? AIATheme.ok : AIATheme.muted).opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
                 }
+                // 模型估算合理性护栏提示（仅 AI 估算来源且数值不自洽时显示）
+                if editableFoods.count == 1, let w = macroEstimateWarning, !w.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(AIATheme.Font.micro)
+                            .foregroundStyle(AIATheme.warning)
+                        Text(w)
+                            .font(AIATheme.Font.micro)
+                            .foregroundStyle(AIATheme.warning)
+                            .lineLimit(3)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(12)
+                    .background(AIATheme.warning.opacity(0.10))
+                    .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+                }
             }
         }
     }
@@ -847,10 +884,10 @@ struct ResultConfirmView: View {
                 editableFoods[0].sodiumPer100g = ref.sodium
                 nutritionSource = "已联网查询营养库「\(ref.name)」并保存"
             } else {
-                nutritionSource = "未查到营养，使用模型估算值（可手动改）"
+                nutritionSource = "未查到权威营养数据，以下数值由 AI 看图估算，仅供参考，建议手动核对"
             }
         } catch {
-            nutritionSource = "联网查询失败，使用模型估算值（可手动改）"
+            nutritionSource = "联网查询失败，以下数值由 AI 看图估算，仅供参考，建议手动核对"
         }
     }
 
