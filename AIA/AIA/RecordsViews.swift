@@ -358,6 +358,36 @@ struct FoodListView: View {
         selectedDate = Calendar.current.date(byAdding: .day, value: days, to: selectedDate) ?? selectedDate
     }
 
+    // MARK: - 食物信息卡（B 方案）辅助方法
+    private func macroCell(_ title: String, _ value: Double, _ unit: String) -> some View {
+        VStack(spacing: 4) {
+            Text(title)
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+            HStack(alignment: .firstTextBaseline, spacing: 1) {
+                Text(formatValue(value))
+                    .font(AIATheme.Font.callout.weight(.semibold))
+                    .foregroundStyle(AIATheme.ink)
+                Text(unit)
+                    .font(AIATheme.Font.caption)
+                    .foregroundStyle(AIATheme.sub)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(AIATheme.surfaceSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rXS))
+    }
+
+    /// 数值格式化：整数显示整数，否则保留 1 位小数（0 显示 0）。
+    private func formatValue(_ v: Double) -> String {
+        if v == 0 { return "0" }
+        if v.truncatingRemainder(dividingBy: 1) == 0 {
+            return "\(Int(v))"
+        }
+        return String(format: "%.1f", v)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // 顶部分段：饮食记录 / 饮食喜好 / 饮食分析
@@ -524,19 +554,47 @@ struct FoodListView: View {
                     } else {
                         ForEach(mealItems) { f in
                             SelectableCard(
-                                content: HStack(spacing: 10) {
-                                    // 类型色圆点：饮食=琥珀，与首页时间线、各列表类型色一致
-                                    Circle().fill(AIATheme.food).frame(width: 7, height: 7).padding(.top, 2)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(f.name).font(AIATheme.Font.footnote.weight(.medium))
-                                        let sourceText = (f.imageName?.isEmpty == false)
-                                            ? NSLocalizedString("food.recognized", comment: "")
-                                            : NSLocalizedString("food.by_chat", comment: "")
-                                        Text([f.portion, sourceText].compactMap { $0.isEmpty ? nil : $0 }.joined(separator: " · "))
-                                            .font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
+                                content: VStack(alignment: .leading, spacing: 10) {
+                                    // hero：左食物名 + 餐次·份量；右热量大数字
+                                    HStack(alignment: .center, spacing: 10) {
+                                        Circle()
+                                            .fill(AIATheme.food)
+                                            .frame(width: 8, height: 8)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(f.name)
+                                                .font(AIATheme.Font.subhead.weight(.semibold))
+                                                .foregroundStyle(AIATheme.ink)
+                                            let sourceText = (f.imageName?.isEmpty == false)
+                                                ? NSLocalizedString("food.recognized", comment: "")
+                                                : NSLocalizedString("food.by_chat", comment: "")
+                                            Text([f.portion, sourceText].compactMap { $0.isEmpty ? nil : $0 }.joined(separator: " · "))
+                                                .font(AIATheme.Font.micro)
+                                                .foregroundStyle(AIATheme.muted)
+                                        }
+                                        Spacer()
+                                        HStack(alignment: .firstTextBaseline, spacing: 2) {
+                                            Text("\(Int(f.calories))")
+                                                .font(AIATheme.Font.title3.weight(.bold))
+                                                .foregroundStyle(AIATheme.food)
+                                                .contentTransition(.numericText())
+                                            Text("kcal")
+                                                .font(AIATheme.Font.micro)
+                                                .foregroundStyle(AIATheme.sub)
+                                        }
                                     }
-                                    Spacer()
-                                    Text("\(Int(f.calories))").font(AIATheme.Font.footnote.weight(.medium))
+
+                                    Divider()
+                                        .background(AIATheme.hairline)
+
+                                    // 6 列营养明细：碳水 / 蛋白 / 脂肪 / 纤维 / 糖 / 钠
+                                    HStack(spacing: 4) {
+                                        macroCell("碳水", f.carbs, "g")
+                                        macroCell("蛋白", f.protein, "g")
+                                        macroCell("脂肪", f.fat, "g")
+                                        macroCell("纤维", f.fiber, "g")
+                                        macroCell("糖", f.sugar, "g")
+                                        macroCell("钠", f.sodium, "mg")
+                                    }
                                 }
                                 .padding(.vertical, 10).padding(.horizontal, 12)
                                 .card(radius: AIATheme.rMD, shadow: false),
