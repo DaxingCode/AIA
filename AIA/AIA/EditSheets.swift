@@ -988,9 +988,10 @@ struct BillCategoryPickerSheet: View {
     }
 }
 
-// MARK: - 待办编辑
+// MARK: - 待办编辑（支持编辑 + 手动添加两种模式；UI/逻辑共用，仅 deleteCard 和 title 切换）
 struct EditTodoView: View {
     let reminder: Reminder
+    let isAdding: Bool          // true = 手动添加模式（不显示删除按钮，title 改"添加待办"；save() 时草稿 syncDeleted 复活）
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
 
@@ -1010,8 +1011,9 @@ struct EditTodoView: View {
     @State private var showDeleteConfirm = false
     @State private var pendingDeleteID: PersistentIdentifier? = nil
 
-    init(reminder: Reminder) {
+    init(reminder: Reminder, isAdding: Bool = false) {
         self.reminder = reminder
+        self.isAdding = isAdding
         _title = State(initialValue: reminder.title)
         _hasDue = State(initialValue: reminder.due != nil)
         _due = State(initialValue: reminder.due ?? Date())
@@ -1038,14 +1040,14 @@ struct EditTodoView: View {
                     timeAlertCard
                     noteCard
                     propertyCard
-                    deleteCard
+                    if !isAdding { deleteCard }    // 添加模式不显示删除按钮
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
             .scrollDismissesKeyboard(.immediately)
         }
-        .navigationTitle("编辑待办")
+        .navigationTitle(isAdding ? "添加待办" : "编辑待办")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             // sheet 弹起模式：左「取消」dismiss 关闭 sheet（无系统返回箭头）
@@ -1398,6 +1400,11 @@ struct EditTodoView: View {
         reminder.remindTimes = times
         reminder.remindAt = times.first
         reminder.syncUpdatedAt = .now
+        if isAdding {
+            // 草稿 Reminder 在 addNewTodo 时设了 syncDeleted=true（被 @Query 谓词过滤，sheet 期间背景干净）；
+            // 用户点保存 → 把 syncDeleted 改回 false，Reminder 复活并显示在列表里
+            reminder.syncDeleted = false
+        }
         try? context.save()
         if done {
             ReminderNotificationManager.cancel(reminder)
@@ -1492,9 +1499,16 @@ struct EditHealthView: View {
 /// EditTodoView 自身不包 NavigationStack，被 push 到父级 NavigationStack 后 toolbar 标题栏不会渲染（视觉异常）。
 struct EditTodoSheet: View {
     let reminder: Reminder
+    let isAdding: Bool
+
+    init(reminder: Reminder, isAdding: Bool = false) {
+        self.reminder = reminder
+        self.isAdding = isAdding
+    }
+
     var body: some View {
         NavigationStack {
-            EditTodoView(reminder: reminder)
+            EditTodoView(reminder: reminder, isAdding: isAdding)
         }
     }
 }

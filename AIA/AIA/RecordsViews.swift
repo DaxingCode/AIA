@@ -1636,6 +1636,9 @@ struct ReminderListView: View {
     /// 点行触发的「编辑待办」sheet（2026-07-24：从 navigationDestination 推页改为 .sheet 弹起，
     /// 与「编辑账单」一致；首页行点击走 EditTodoSheet，与 AllRecordsView 入口统一为 sheet 体验）
     @State private var editTodo: Reminder?
+    /// 右上角 + 号触发的「添加待办」sheet（仿 BillListView.addBillDraft：草稿 Reminder syncDeleted=true
+    /// 被 @Query 过滤，sheet 期间背景干净；保存时 syncDeleted=false 复活显示）
+    @State private var addTodoDraft: Reminder?
     private var active: [Reminder] {
         reminders.filter { !$0.done && $0.due != nil }
             .sorted { ($0.due ?? .distantPast) < ($1.due ?? .distantPast) }
@@ -1773,18 +1776,7 @@ struct ReminderListView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 dateHeader(group.date, reminders: group.reminders)
                                 ForEach(group.reminders) { r in
-                                    // ZStack 分层（与 ValueSelectableCard 同款结构，但触发方式从
-                                    // NavigationLink(value:) 推 path 改为 .sheet 弹起）：
-                                    //   底层：卡主体（todoRowContent 自身带 44pt 左 padding 给圆圈让位），
-                                    //          整张可点 → editTodo = r 触发 sheet
-                                    //   顶层：左侧完成圆圈 todoDoneButton（Color.clear 36×36 独立 hit area
-                                    //          拦截点击，不穿透到下层卡主体）
-                                    ZStack(alignment: .leading) {
-                                        todoRowContent(r)
-                                            .contentShape(RoundedRectangle(cornerRadius: 14))
-                                            .onTapGesture { editTodo = r }
-                                        todoDoneButton(r)
-                                    }
+                                    todoRow(r)
                                 }
                             }
                         }
@@ -1806,11 +1798,38 @@ struct ReminderListView: View {
         }
         .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("tab.todo"))
+        .toolbar { addTodoToolbarItem }
         // 点行 → 弹「编辑待办」sheet（与「编辑账单」一致：从下方弹出，背景能看到首页；
         // sheet 顶左「取消」/ 顶右「保存」由 EditTodoView.toolbar 提供）
         .sheet(item: $editTodo) { r in
             EditTodoSheet(reminder: r)
         }
+        // 右上角 + 号 → 弹「添加待办」sheet（isAdding=true：title="添加待办" + 隐藏删除按钮）
+        .sheet(item: $addTodoDraft) { r in
+            EditTodoSheet(reminder: r, isAdding: true)
+        }
+    }
+
+    /// 右上角 + 号 → 手动添加待办 toolbar（与 BillListView 蓝「+」同款；拆出独立 ToolbarContent 子 view
+    /// 帮编译器避开 toolbar/Sheet 链路过长导致的 type-check timeout）
+    @ToolbarContentBuilder
+    private var addTodoToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button { addNewTodo() } label: {
+                Image(systemName: "plus")
+                    .font(AIATheme.Font.body.weight(.semibold))
+                    .foregroundStyle(AIATheme.blue)
+            }
+        }
+    }
+
+    /// 右上角 + 号 action：创建临时草稿 Reminder（syncDeleted=true 软删除，被 @Query 谓词过滤，
+    /// sheet 期间背景不显示空待办）→ 存到 addTodoDraft 触发 sheet
+    private func addNewTodo() {
+        let draft = Reminder(title: "")
+        draft.syncDeleted = true
+        context.insert(draft)
+        addTodoDraft = draft
     }
 
     // MARK: - 日历视图
@@ -1947,6 +1966,24 @@ struct ReminderListView: View {
     }
 
     // MARK: - 待办行
+    /// 单行待办卡：ZStack 分层（与 ValueSelectableCard 同款结构，但触发方式从
+    /// NavigationLink(value:) 推 path 改为 .sheet 弹起）：
+    ///   底层：卡主体（todoRowContent 自身带 44pt 左 padding 给圆圈让位），
+    ///          整张可点 → editTodo = r 触发 sheet
+    ///   顶层：左侧完成圆圈 todoDoneButton（Color.clear 36×36 独立 hit area
+    ///          拦截点击，不穿透到下层卡主体）
+    /// 抽成独立 helper（不在 body 内联 ZStack）—— 加 toolbar + 双 sheet 后 body modifier 链
+    /// 总深度让 Swift 编译器类型推断超时（2026-07-24 踩坑）。
+    @ViewBuilder
+    private func todoRow(_ r: Reminder) -> some View {
+        ZStack(alignment: .leading) {
+            todoRowContent(r)
+                .contentShape(RoundedRectangle(cornerRadius: 14))
+                .onTapGesture { editTodo = r }
+            todoDoneButton(r)
+        }
+    }
+
     private func todoDoneButton(_ r: Reminder) -> some View {
         // 用 Color.clear + overlay(Image) + .onTapGesture —— 显式 36×36 hit area，
         // 避免 Image 自身 hit area 不一致（之前圆圈"消失"是因为 Image 颜色 iconInactive
