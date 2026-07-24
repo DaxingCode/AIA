@@ -1015,15 +1015,24 @@ struct EditTodoView: View {
         self.reminder = reminder
         self.isAdding = isAdding
         _title = State(initialValue: reminder.title)
-        _hasDue = State(initialValue: reminder.due != nil)
         // 默认时间：新增场景（reminder.due == nil）= 当前时间 + 1 小时（2026-07-24 改）；
         // 编辑场景（reminder.due 有值）保留原值不动。Date() 含分钟秒，
         // addingTimeInterval(3600) 后是「下个整点前 1 小时」级别近似，符合"1 小时后"直觉。
-        _due = State(initialValue: reminder.due ?? Date().addingTimeInterval(3600))
+        let fallbackDue = reminder.due ?? Date().addingTimeInterval(3600)
+        _due = State(initialValue: fallbackDue)
+        // 新增待办：提醒时间开关默认打开，并预置一条「准时」提醒，
+        // 让用户一进来就看到「设置提醒时间」已启用 + 列表里已有「准时」节点。
+        // 编辑待办：严格按 reminder.due 是否已有值决定开关状态。
+        if isAdding {
+            _hasDue = State(initialValue: true)
+            _alertItems = State(initialValue: [AlertItem(option: .atTime, customDate: fallbackDue)])
+        } else {
+            _hasDue = State(initialValue: reminder.due != nil)
+            _alertItems = State(initialValue: alerts(from: reminder))
+        }
         _priority = State(initialValue: reminder.priority)
         _repeatRule = State(initialValue: reminder.repeatRule)
         _done = State(initialValue: reminder.done)
-        _alertItems = State(initialValue: alerts(from: reminder))
     }
 
     var body: some View {
@@ -1417,7 +1426,13 @@ struct EditTodoView: View {
         reminder.priority = priority
         reminder.repeatRule = repeatRule
         reminder.done = done
-        let times = hasDue ? reminderTimes(from: alertItems, due: due) : []
+        // 方案A：开关打开但用户未手动添加任何提醒节点时，自动补一个「准时」提醒，
+        // 避免「设了截止时间却收不到任何提醒」的违和（用户预期=到点会响）。
+        var effectiveAlerts = alertItems
+        if hasDue && effectiveAlerts.isEmpty {
+            effectiveAlerts = [AlertItem(option: .atTime, customDate: due ?? Date())]
+        }
+        let times = hasDue ? reminderTimes(from: effectiveAlerts, due: due) : []
         reminder.remindTimes = times
         reminder.remindAt = times.first
         reminder.syncUpdatedAt = .now
