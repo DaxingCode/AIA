@@ -313,17 +313,17 @@ struct AddFoodManualView: View {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
                       spacing: 8) {
                 nutritionCell(icon: "fish.fill", label: "蛋白质", unit: "g",
-                              binding: $baseProteinText, color: AIATheme.blue)
+                              binding: $baseProteinText)
                 nutritionCell(icon: "leaf.fill", label: "碳水", unit: "g",
-                              binding: $baseCarbsText, color: AIATheme.amber)
+                              binding: $baseCarbsText)
                 nutritionCell(icon: "drop.fill", label: "脂肪", unit: "g",
-                              binding: $baseFatText, color: AIATheme.green)
+                              binding: $baseFatText)
                 nutritionCell(icon: "crop", label: "膳食纤维", unit: "g",
-                              binding: $baseFiberText, color: AIATheme.health)
+                              binding: $baseFiberText)
                 nutritionCell(icon: "circle.hexagongrid", label: "糖", unit: "g",
-                              binding: $baseSugarText, color: AIATheme.warn)
+                              binding: $baseSugarText)
                 nutritionCell(icon: "drop.triangle", label: "钠", unit: "mg",
-                              binding: $baseSodiumText, color: AIATheme.todo)
+                              binding: $baseSodiumText)
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 14)
@@ -361,13 +361,15 @@ struct AddFoodManualView: View {
 
     /// 营养网格单元：icon + 名称 + 输入框 + 单位，2×3 网格布局使用。
     /// 视觉上比 nutritionRow 更紧凑，适合等宽 cell。
+    /// 配色策略：icon 统一 `food.opacity(0.85)` 暖琥珀（与食物主题色一致 + 微降饱和），靠 icon 形状天然区分营养素；
+    /// cell 底 `surface` + `hairline` 0.5pt 描边，避免与外层 card 颜色层叠。
     private func nutritionCell(icon: String, label: String, unit: String,
-                               binding: Binding<String>, color: Color) -> some View {
+                               binding: Binding<String>) -> some View {
         VStack(alignment: .center, spacing: 6) {
             HStack(spacing: 5) {
                 Image(systemName: icon)
                     .font(AIATheme.Font.caption)
-                    .foregroundStyle(color)
+                    .foregroundStyle(AIATheme.food.opacity(0.85))
                 Text(label)
                     .font(AIATheme.Font.caption)
                     .foregroundStyle(.primary)
@@ -388,7 +390,11 @@ struct AddFoodManualView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .center)
-        .background(AIATheme.fillSoft)
+        .background(AIATheme.surface)
+        .overlay(
+            RoundedRectangle(cornerRadius: AIATheme.rXS)
+                .stroke(AIATheme.hairline, lineWidth: 0.5)
+        )
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rXS))
     }
 
