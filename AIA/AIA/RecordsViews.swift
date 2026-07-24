@@ -134,6 +134,11 @@ struct FoodListView: View {
     /// 点行直接弹出「编辑食物」sheet（取代原来的 SelectableCard→FoodDetailView 中间层）。
     @State private var editFood: FoodEntry? = nil
 
+    // MARK: 多选删除
+    @State private var multiSelectMode = false
+    @State private var selectedIDs = Set<PersistentIdentifier>()
+    @State private var showDeleteConfirm = false
+
     // 按进入时间自动匹配餐次页签：5-11 早餐、11-16 午餐、16-22 晚餐，其余为加餐
     private static func defaultMeal(for date: Date) -> MealFilter {
         let hour = Calendar.current.component(.hour, from: date)
@@ -370,7 +375,7 @@ struct FoodListView: View {
             HStack(alignment: .firstTextBaseline, spacing: 1) {
                 Text(formatValue(value))
                     .font(AIATheme.Font.callout.weight(.semibold))
-                    .foregroundStyle(AIATheme.ink)
+                    .foregroundStyle(.primary)
                 Text(unit)
                     .font(AIATheme.Font.caption)
                     .foregroundStyle(AIATheme.sub)
@@ -556,9 +561,14 @@ struct FoodListView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         ForEach(mealItems) { f in
-                            Button {
-                                editFood = f
-                            } label: {
+                            SelectableRow(
+                                isSelecting: multiSelectMode,
+                                isSelected: selectedIDs.contains(f.persistentModelID),
+                                onTap: { editFood = f },
+                                onLongPress: { enterFoodMultiSelect(f.persistentModelID) },
+                                onToggle: { toggleFoodSelection(f.persistentModelID) },
+                                onDelete: { SafeDelete.food(f, in: context) }
+                            ) {
                                 VStack(alignment: .leading, spacing: 10) {
                                     // hero：左食物名 + 餐次·份量；右热量大数字
                                     HStack(alignment: .center, spacing: 10) {
@@ -568,7 +578,7 @@ struct FoodListView: View {
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(f.name)
                                                 .font(AIATheme.Font.subhead.weight(.semibold))
-                                                .foregroundStyle(AIATheme.ink)
+                                                .foregroundStyle(.primary)
                                             let sourceText = (f.imageName?.isEmpty == false)
                                                 ? NSLocalizedString("food.recognized", comment: "")
                                                 : NSLocalizedString("food.by_chat", comment: "")
@@ -604,7 +614,6 @@ struct FoodListView: View {
                                 .padding(.vertical, 10).padding(.horizontal, 12)
                                 .card(radius: AIATheme.rMD, shadow: false)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -627,23 +636,60 @@ struct FoodListView: View {
         .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("food.navTitle"))
         .toolbar {
-            // 日历按钮只对「饮食记录」tab 有意义（选日期看当日饮食）
-            if dietTab == .records {
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 4) {
-                        Button { showAddFood = true } label: {
-                            Image(systemName: "plus")
-                                .font(AIATheme.Font.headline.weight(.medium))
-                                .foregroundStyle(AIATheme.blue)
-                        }
-                        Button { showDatePicker = true } label: {
-                            Image(systemName: "calendar")
-                                .font(AIATheme.Font.headline)
-                                .foregroundStyle(AIATheme.blue)
+            if !multiSelectMode {
+                // 日历按钮只对「饮食记录」tab 有意义（选日期看当日饮食）
+                if dietTab == .records {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        HStack(spacing: 4) {
+                            Button { showAddFood = true } label: {
+                                Image(systemName: "plus")
+                                    .font(AIATheme.Font.headline.weight(.medium))
+                                    .foregroundStyle(AIATheme.blue)
+                            }
+                            Button { showDatePicker = true } label: {
+                                Image(systemName: "calendar")
+                                    .font(AIATheme.Font.headline)
+                                    .foregroundStyle(AIATheme.blue)
+                            }
                         }
                     }
                 }
             }
+        }
+        .overlay(alignment: .bottom) {
+            if multiSelectMode {
+                MultiSelectBottomBar(
+                    count: selectedIDs.count,
+                    totalCount: mealItems.count,
+                    onCancel: {
+                        multiSelectMode = false
+                        selectedIDs.removeAll()
+                    },
+                    onSelectAll: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        let allIDs = Set(mealItems.map(\.persistentModelID))
+                        if selectedIDs.isSuperset(of: allIDs) {
+                            selectedIDs.subtract(allIDs)
+                        } else {
+                            selectedIDs.formUnion(allIDs)
+                        }
+                    },
+                    onDelete: {
+                        guard !selectedIDs.isEmpty else { return }
+                        showDeleteConfirm = true
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.22), value: multiSelectMode)
+        .alert(NSLocalizedString("common.confirmDelete", comment: ""), isPresented: $showDeleteConfirm) {
+            Button(NSLocalizedString("common.cancel", comment: ""), role: .cancel) { }
+            Button(NSLocalizedString("common.delete", comment: ""), role: .destructive) {
+                batchDeleteFood()
+            }
+        } message: {
+            Text(String(format: NSLocalizedString("common.deleteCount", comment: ""), selectedIDs.count))
         }
         .fullScreenCover(isPresented: $showAddFood) {
             AddFoodManualView()
@@ -773,6 +819,32 @@ struct FoodListView: View {
         // 避免直接硬删导致 deleted=true 标志无法到达云端（详见 SafeDelete 注释）。
         SafeDelete.food(f, in: context)
     }
+
+    // MARK: 多选删除
+
+    private func enterFoodMultiSelect(_ id: PersistentIdentifier) {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        multiSelectMode = true
+        selectedIDs.insert(id)
+    }
+
+    private func toggleFoodSelection(_ id: PersistentIdentifier) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        if selectedIDs.contains(id) {
+            selectedIDs.remove(id)
+            if selectedIDs.isEmpty { multiSelectMode = false }
+        } else {
+            selectedIDs.insert(id)
+        }
+    }
+
+    private func batchDeleteFood() {
+        for id in selectedIDs {
+            SafeDelete.foodByID(id, in: context)
+        }
+        multiSelectMode = false
+        selectedIDs.removeAll()
+    }
 }
 
 // MARK: - 健康管理（④）
@@ -780,6 +852,11 @@ struct HealthListView: View {
     @Environment(\.modelContext) private var context
     @Query(filter: #Predicate { !$0.syncDeleted }, sort: \HealthMetric.date, order: .reverse) private var healths: [HealthMetric]
     @StateObject private var health = HealthManager.shared
+
+    // MARK: 多选删除
+    @State private var multiSelectMode = false
+    @State private var selectedIDs = Set<PersistentIdentifier>()
+    @State private var showDeleteConfirm = false
 
     private var sleepHours: Double {
         healths.first(where: { $0.metric.contains("睡眠") }).flatMap { Double($0.value) } ?? 0
@@ -876,21 +953,30 @@ struct HealthListView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         ForEach(healths) { h in
-                            ValueSelectableCard(
-                                value: HomeRoute.healthDetail(h),
-                                content: HStack(spacing: 12) {
-                                    Image(systemName: "heart.circle").foregroundStyle(AIATheme.health)
-                                        .frame(width: 26)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(h.metric).font(AIATheme.Font.footnote.weight(.medium))
-                                        Text(AppFormat.dateTime.string(from: h.date)).font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
+                            SelectableRow(
+                                isSelecting: multiSelectMode,
+                                isSelected: selectedIDs.contains(h.persistentModelID),
+                                onTap: {},
+                                onLongPress: { enterHealthMultiSelect(h.persistentModelID) },
+                                onToggle: { toggleHealthSelection(h.persistentModelID) },
+                                onDelete: { SafeDelete.health(h, in: context) }
+                            ) {
+                                NavigationLink(value: HomeRoute.healthDetail(h)) {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: "heart.circle").foregroundStyle(AIATheme.health)
+                                            .frame(width: 26)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(h.metric).font(AIATheme.Font.footnote.weight(.medium))
+                                            Text(AppFormat.dateTime.string(from: h.date)).font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
+                                        }
+                                        Spacer()
+                                        Text("\(h.value)\(h.unit)").font(AIATheme.Font.footnote.weight(.medium))
                                     }
-                                    Spacer()
-                                    Text("\(h.value)\(h.unit)").font(AIATheme.Font.footnote.weight(.medium))
+                                    .padding(.vertical, 10).padding(.horizontal, 12)
+                                    .background(AIATheme.surface).clipShape(RoundedRectangle(cornerRadius: 14))
                                 }
-                                .padding(.vertical, 10).padding(.horizontal, 12)
-                                .background(AIATheme.surface).clipShape(RoundedRectangle(cornerRadius: 14))
-                            )
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
                 }
@@ -900,10 +986,71 @@ struct HealthListView: View {
         }
         .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("health.navTitle"))
+        .overlay(alignment: .bottom) {
+            if multiSelectMode {
+                MultiSelectBottomBar(
+                    count: selectedIDs.count,
+                    totalCount: healths.count,
+                    onCancel: {
+                        multiSelectMode = false
+                        selectedIDs.removeAll()
+                    },
+                    onSelectAll: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        let allIDs = Set(healths.map(\.persistentModelID))
+                        if selectedIDs.isSuperset(of: allIDs) {
+                            selectedIDs.subtract(allIDs)
+                        } else {
+                            selectedIDs.formUnion(allIDs)
+                        }
+                    },
+                    onDelete: {
+                        guard !selectedIDs.isEmpty else { return }
+                        showDeleteConfirm = true
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.22), value: multiSelectMode)
+        .alert(NSLocalizedString("common.confirmDelete", comment: ""), isPresented: $showDeleteConfirm) {
+            Button(NSLocalizedString("common.cancel", comment: ""), role: .cancel) { }
+            Button(NSLocalizedString("common.delete", comment: ""), role: .destructive) {
+                batchDeleteHealth()
+            }
+        } message: {
+            Text(String(format: NSLocalizedString("common.deleteCount", comment: ""), selectedIDs.count))
+        }
     }
 
     private func deleteHealth(_ h: HealthMetric) {
         SafeDelete.health(h, in: context)
+    }
+
+    // MARK: 多选删除
+
+    private func enterHealthMultiSelect(_ id: PersistentIdentifier) {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        multiSelectMode = true
+        selectedIDs.insert(id)
+    }
+
+    private func toggleHealthSelection(_ id: PersistentIdentifier) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        if selectedIDs.contains(id) {
+            selectedIDs.remove(id)
+            if selectedIDs.isEmpty { multiSelectMode = false }
+        } else {
+            selectedIDs.insert(id)
+        }
+    }
+
+    private func batchDeleteHealth() {
+        for id in selectedIDs {
+            SafeDelete.healthByID(id, in: context)
+        }
+        multiSelectMode = false
+        selectedIDs.removeAll()
     }
 }
 
@@ -934,6 +1081,11 @@ struct BillListView: View {
     @State private var editBill: Bill? = nil
     /// 右上角加号 → 弹出「添加账单」页（与编辑共用 EditBillView，加 isAdding: true）
     @State private var addBillDraft: Bill? = nil
+
+    // MARK: 多选删除
+    @State private var multiSelectMode = false
+    @State private var selectedIDs = Set<PersistentIdentifier>()
+    @State private var showDeleteConfirm = false
 
     private var todayBills: [Bill] {
         bills.filter { Calendar.current.isDateInToday($0.time) }
@@ -1190,7 +1342,7 @@ struct BillListView: View {
 
                             // 同理：monthlyGroups 派生自 @Query，用元素遍历避免下标越界。
                             // 用 enumerated() 取 offset 作 id，避免 tuple 需 Hashable 且保证单次 render 内稳定。
-                            ForEach(Array(monthlyGroups.enumerated()), id: \.offset) { _, group in
+                            ForEach(Array(monthlyGroups.enumerated()), id: \.offset) { idx, group in
                                 NavigationLink {
                                     MonthlyBillListView(year: group.year, month: group.month, bills: group.bills)
                                         .environment(\.modelContext, context)
@@ -1198,6 +1350,13 @@ struct BillListView: View {
                                     monthlySummaryRow(group)
                                 }
                                 .buttonStyle(.plain)
+                                // 月份卡片之间加 hairline 分隔，最后一张不画
+                                if idx < monthlyGroups.count - 1 {
+                                    Rectangle()
+                                        .fill(AIATheme.hairline)
+                                        .frame(height: 0.5)
+                                        .padding(.horizontal, 12)
+                                }
                             }
                         }
                         .frame(maxWidth: .infinity)
@@ -1229,15 +1388,26 @@ struct BillListView: View {
                         // 插入账单/提醒时数组长度会变化，两次求值不一致会导致 groupedByDate[i] 越界闪退。
                         // 用 enumerated() 取 offset 作 id，避免 tuple 需 Hashable 且保证单次 render 内稳定。
                         ForEach(Array(groupedByDate.enumerated()), id: \.offset) { _, group in
-                            VStack(alignment: .leading, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 0) {
                                 dateHeader(group.date, bills: group.bills)
-                                ForEach(group.bills) { b in
-                                    Button {
-                                        editBill = b
-                                    } label: {
+                                ForEach(Array(group.bills.enumerated()), id: \.element.persistentModelID) { idx, b in
+                                    SelectableRow(
+                                        isSelecting: multiSelectMode,
+                                        isSelected: selectedIDs.contains(b.persistentModelID),
+                                        onTap: { editBill = b },
+                                        onLongPress: { enterMultiSelect(b.persistentModelID) },
+                                        onToggle: { toggleSelection(b.persistentModelID) },
+                                        onDelete: { SafeDelete.bill(b, in: context) }
+                                    ) {
                                         groupedBillRow(b)
                                     }
-                                    .buttonStyle(.plain)
+                                    // 行间分隔：让位 62pt（icon 42 + 间距 12 + 缓冲 8），最后一行不画
+                                    if idx < group.bills.count - 1 {
+                                        Rectangle()
+                                            .fill(AIATheme.hairline)
+                                            .frame(height: 0.5)
+                                            .padding(.leading, 62)
+                                    }
                                 }
                             }
                         }
@@ -1256,14 +1426,51 @@ struct BillListView: View {
         .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("tab.bill"))
         .toolbar {
-            // 右上角 + 号 → 手动添加账单（与编辑账单共用 EditBillView，加 isAdding: true 切换 title + 隐藏删除按钮）
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { addNewBill() } label: {
-                    Image(systemName: "plus")
-                        .font(AIATheme.Font.body.weight(.semibold))
-                        .foregroundStyle(AIATheme.blue)
+            if !multiSelectMode {
+                // 右上角 + 号 → 手动添加账单（与编辑账单共用 EditBillView，加 isAdding: true 切换 title + 隐藏删除按钮）
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { addNewBill() } label: {
+                        Image(systemName: "plus")
+                            .font(AIATheme.Font.body.weight(.semibold))
+                            .foregroundStyle(AIATheme.blue)
+                    }
                 }
             }
+        }
+        .overlay(alignment: .bottom) {
+            if multiSelectMode {
+                MultiSelectBottomBar(
+                    count: selectedIDs.count,
+                    totalCount: groupedByDate.reduce(0) { $0 + $1.bills.count },
+                    onCancel: {
+                        multiSelectMode = false
+                        selectedIDs.removeAll()
+                    },
+                    onSelectAll: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        let allIDs = Set(groupedByDate.flatMap(\.bills).map(\.persistentModelID))
+                        if selectedIDs.isSuperset(of: allIDs) {
+                            selectedIDs.subtract(allIDs)
+                        } else {
+                            selectedIDs.formUnion(allIDs)
+                        }
+                    },
+                    onDelete: {
+                        guard !selectedIDs.isEmpty else { return }
+                        showDeleteConfirm = true
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.22), value: multiSelectMode)
+        .alert(NSLocalizedString("common.confirmDelete", comment: ""), isPresented: $showDeleteConfirm) {
+            Button(NSLocalizedString("common.cancel", comment: ""), role: .cancel) { }
+            Button(NSLocalizedString("common.delete", comment: ""), role: .destructive) {
+                batchDelete()
+            }
+        } message: {
+            Text(String(format: NSLocalizedString("common.deleteCount", comment: ""), selectedIDs.count))
         }
         .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker)
         .sheet(isPresented: $showBudgetEditor) {
@@ -1355,6 +1562,32 @@ struct BillListView: View {
         draft.syncDeleted = true  // 软删除：@Query #Predicate { !$0.syncDeleted } 过滤掉，sheet 期间账单列表背景干净
         context.insert(draft)
         addBillDraft = draft
+    }
+
+    // MARK: 多选删除
+
+    private func enterMultiSelect(_ id: PersistentIdentifier) {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        multiSelectMode = true
+        selectedIDs.insert(id)
+    }
+
+    private func toggleSelection(_ id: PersistentIdentifier) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        if selectedIDs.contains(id) {
+            selectedIDs.remove(id)
+            if selectedIDs.isEmpty { multiSelectMode = false }
+        } else {
+            selectedIDs.insert(id)
+        }
+    }
+
+    private func batchDelete() {
+        for id in selectedIDs {
+            SafeDelete.billByID(id, in: context)
+        }
+        multiSelectMode = false
+        selectedIDs.removeAll()
     }
 
     private func dateHeader(_ date: Date, bills: [Bill]) -> some View {
@@ -1459,22 +1692,27 @@ struct BillListView: View {
             HStack {
                 Button { billCalendarMonth = billPrevMonth } label: {
                     Image(systemName: "chevron.left")
-                        .font(AIATheme.Font.subhead.weight(.medium))
-                        .foregroundStyle(AIATheme.ink)
-                        .frame(width: 32, height: 32)
-                        .background(AIATheme.surfaceSecondary).clipShape(Circle())
+                        .font(AIATheme.Font.body.weight(.semibold))
+                        .foregroundStyle(AIATheme.blue)
+                        .frame(width: 36, height: 36)
+                        .background(AIATheme.blue.opacity(0.12))
+                        .clipShape(Circle())
                 }
+                .buttonStyle(.plain)
                 Spacer()
                 Text(billMonthTitle)
                     .font(AIATheme.Font.callout.weight(.medium))
+                .buttonStyle(.plain)
                 Spacer()
                 Button { billCalendarMonth = billNextMonth } label: {
                     Image(systemName: "chevron.right")
-                        .font(AIATheme.Font.subhead.weight(.medium))
-                        .foregroundStyle(AIATheme.ink)
-                        .frame(width: 32, height: 32)
-                        .background(AIATheme.surfaceSecondary).clipShape(Circle())
+                        .font(AIATheme.Font.body.weight(.semibold))
+                        .foregroundStyle(AIATheme.blue)
+                        .frame(width: 36, height: 36)
+                        .background(AIATheme.blue.opacity(0.12))
+                        .clipShape(Circle())
                 }
+                .buttonStyle(.plain)
             }
 
             // 星期头
@@ -1639,9 +1877,23 @@ struct ReminderListView: View {
     /// 右上角 + 号触发的「添加待办」sheet（仿 BillListView.addBillDraft：草稿 Reminder syncDeleted=true
     /// 被 @Query 过滤，sheet 期间背景干净；保存时 syncDeleted=false 复活显示）
     @State private var addTodoDraft: Reminder?
+
+    // MARK: 多选删除
+    @State private var multiSelectMode = false
+    @State private var selectedIDs = Set<PersistentIdentifier>()
+    @State private var showDeleteConfirm = false
     private var active: [Reminder] {
-        reminders.filter { !$0.done && $0.due != nil }
-            .sorted { ($0.due ?? .distantPast) < ($1.due ?? .distantPast) }
+        // 含「未安排截止」的待办：due == nil 的也保留在底部，以保持与首页宫格 `recentTodos` 的来源一致。
+        // 这样「测试不提醒」这种测试用例在两个地方都能看到、能删能改。
+        reminders.filter { !$0.done }
+            .sorted { a, b in
+                switch (a.due, b.due) {
+                case (nil, nil):   return a.title < b.title
+                case (nil, _):     return false   // 无 due 排到底部
+                case (_, nil):     return true
+                case let (d1?, d2?): return d1 < d2
+                }
+            }
     }
     private var finished: [Reminder] { reminders.filter { $0.done } }
     private var list: [Reminder] {
@@ -1798,7 +2050,46 @@ struct ReminderListView: View {
         }
         .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("tab.todo"))
-        .toolbar { addTodoToolbarItem }
+        .toolbar {
+            if !multiSelectMode {
+                addTodoToolbarItem
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if multiSelectMode {
+                MultiSelectBottomBar(
+                    count: selectedIDs.count,
+                    totalCount: list.count,
+                    onCancel: {
+                        multiSelectMode = false
+                        selectedIDs.removeAll()
+                    },
+                    onSelectAll: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        let allIDs = Set(list.map(\.persistentModelID))
+                        if selectedIDs.isSuperset(of: allIDs) {
+                            selectedIDs.subtract(allIDs)
+                        } else {
+                            selectedIDs.formUnion(allIDs)
+                        }
+                    },
+                    onDelete: {
+                        guard !selectedIDs.isEmpty else { return }
+                        showDeleteConfirm = true
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.22), value: multiSelectMode)
+        .alert(NSLocalizedString("common.confirmDelete", comment: ""), isPresented: $showDeleteConfirm) {
+            Button(NSLocalizedString("common.cancel", comment: ""), role: .cancel) { }
+            Button(NSLocalizedString("common.delete", comment: ""), role: .destructive) {
+                batchDeleteTodo()
+            }
+        } message: {
+            Text(String(format: NSLocalizedString("common.deleteCount", comment: ""), selectedIDs.count))
+        }
         // 点行 → 弹「编辑待办」sheet（与「编辑账单」一致：从下方弹出，背景能看到首页；
         // sheet 顶左「取消」/ 顶右「保存」由 EditTodoView.toolbar 提供）
         .sheet(item: $editTodo) { r in
@@ -1832,6 +2123,32 @@ struct ReminderListView: View {
         addTodoDraft = draft
     }
 
+    // MARK: 多选删除
+
+    private func enterTodoMultiSelect(_ id: PersistentIdentifier) {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        multiSelectMode = true
+        selectedIDs.insert(id)
+    }
+
+    private func toggleTodoSelection(_ id: PersistentIdentifier) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        if selectedIDs.contains(id) {
+            selectedIDs.remove(id)
+            if selectedIDs.isEmpty { multiSelectMode = false }
+        } else {
+            selectedIDs.insert(id)
+        }
+    }
+
+    private func batchDeleteTodo() {
+        for id in selectedIDs {
+            SafeDelete.reminderByID(id, in: context)
+        }
+        multiSelectMode = false
+        selectedIDs.removeAll()
+    }
+
     // MARK: - 日历视图
     private var calendarView: some View {
         VStack(spacing: 12) {
@@ -1839,22 +2156,26 @@ struct ReminderListView: View {
             HStack {
                 Button { calendarMonth = prevMonth } label: {
                     Image(systemName: "chevron.left")
-                        .font(AIATheme.Font.subhead.weight(.medium))
-                        .foregroundStyle(AIATheme.ink)
-                        .frame(width: 32, height: 32)
-                        .background(AIATheme.surfaceSecondary).clipShape(Circle())
+                        .font(AIATheme.Font.body.weight(.semibold))
+                        .foregroundStyle(AIATheme.blue)
+                        .frame(width: 36, height: 36)
+                        .background(AIATheme.blue.opacity(0.12))
+                        .clipShape(Circle())
                 }
+                .buttonStyle(.plain)
                 Spacer()
                 Text(monthTitle)
                     .font(AIATheme.Font.callout.weight(.medium))
                 Spacer()
                 Button { calendarMonth = nextMonth } label: {
                     Image(systemName: "chevron.right")
-                        .font(AIATheme.Font.subhead.weight(.medium))
-                        .foregroundStyle(AIATheme.ink)
-                        .frame(width: 32, height: 32)
-                        .background(AIATheme.surfaceSecondary).clipShape(Circle())
+                        .font(AIATheme.Font.body.weight(.semibold))
+                        .foregroundStyle(AIATheme.blue)
+                        .frame(width: 36, height: 36)
+                        .background(AIATheme.blue.opacity(0.12))
+                        .clipShape(Circle())
                 }
+                .buttonStyle(.plain)
             }
 
             // 星期头
@@ -1977,9 +2298,17 @@ struct ReminderListView: View {
     @ViewBuilder
     private func todoRow(_ r: Reminder) -> some View {
         ZStack(alignment: .leading) {
-            todoRowContent(r)
-                .contentShape(RoundedRectangle(cornerRadius: 14))
-                .onTapGesture { editTodo = r }
+            SelectableRow(
+                isSelecting: multiSelectMode,
+                isSelected: selectedIDs.contains(r.persistentModelID),
+                onTap: { editTodo = r },
+                onLongPress: { enterTodoMultiSelect(r.persistentModelID) },
+                onToggle: { toggleTodoSelection(r.persistentModelID) },
+                onDelete: { SafeDelete.reminder(r, in: context) }
+            ) {
+                todoRowContent(r)
+                    .contentShape(RoundedRectangle(cornerRadius: 14))
+            }
             todoDoneButton(r)
         }
     }
