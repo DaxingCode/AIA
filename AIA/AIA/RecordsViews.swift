@@ -876,7 +876,8 @@ struct HealthListView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         ForEach(healths) { h in
-                            SelectableCard(
+                            ValueSelectableCard(
+                                value: HomeRoute.healthDetail(h),
                                 content: HStack(spacing: 12) {
                                     Image(systemName: "heart.circle").foregroundStyle(AIATheme.health)
                                         .frame(width: 26)
@@ -888,8 +889,7 @@ struct HealthListView: View {
                                     Text("\(h.value)\(h.unit)").font(AIATheme.Font.footnote.weight(.medium))
                                 }
                                 .padding(.vertical, 10).padding(.horizontal, 12)
-                                .background(AIATheme.surface).clipShape(RoundedRectangle(cornerRadius: 14)),
-                                destination: HealthDetailView(metric: h)
+                                .background(AIATheme.surface).clipShape(RoundedRectangle(cornerRadius: 14))
                             )
                         }
                     }
@@ -1770,10 +1770,10 @@ struct ReminderListView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 dateHeader(group.date, reminders: group.reminders)
                                 ForEach(group.reminders) { r in
-                                    SelectableCard(
+                                    ValueSelectableCard(
+                                        value: HomeRoute.editTodo(r),
                                         leadingAccessory: todoDoneButton(r),
-                                        content: todoRowContent(r),
-                                        destination: EditTodoView(reminder: r)
+                                        content: todoRowContent(r)
                                     )
                                 }
                             }
@@ -1864,10 +1864,9 @@ struct ReminderListView: View {
                         .padding(.vertical, 20)
                 } else {
                     ForEach(dayTodos) { r in
-                        SelectableCard(
-                            leadingAccessory: EmptyView(),
-                            content: todoRowContent(r, hasDoneCircle: false),
-                            destination: EditTodoView(reminder: r)
+                        ValueSelectableCard(
+                            value: HomeRoute.editTodo(r),
+                            content: todoRowContent(r, hasDoneCircle: false)
                         )
                     }
                 }

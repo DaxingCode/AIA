@@ -15,6 +15,11 @@ import Combine
 /// 首页可跳转的目的地。统一枚举 → 单个 navigationDestination，规避多 destination 冲突。
 enum HomeRoute: Hashable {
     case diet, health, bill, todo, todoTools, chat, chatVoice, settings, autoSetup
+    // 详情/编辑页：用 associated value 携带记录引用，让 .navigationDestination(for: HomeRoute.self) 统一处理
+    // 所有 push 目标。**严禁**用 SelectableCard 的闭包式 destination 嵌入本路径——会触发
+    // SwiftUI.AnyNavigationPath.Error.comparisonTypeMismatch try! 强解崩溃（2026-07-24 踩坑）。
+    case editTodo(Reminder)
+    case healthDetail(HealthMetric)
 }
 
 struct ContentView: View {
@@ -103,15 +108,19 @@ struct ContentView: View {
             .navigationDestination(for: HomeRoute.self) { route in
                 Group {
                     switch route {
-                    case .diet:      FoodListView()
-                    case .health:    HealthListView()
-                    case .bill:      BillListView()
-                    case .todo:      ReminderListView()
-                    case .todoTools: TodoToolsView()
-                    case .chat:      ChatView(prefill: router.chatPrefill)
-                    case .chatVoice: ChatView(autostartVoice: true)
-                    case .settings:  SettingsView()
-                    case .autoSetup: AutoRecognitionSetupView()
+                    case .diet:         FoodListView()
+                    case .health:       HealthListView()
+                    case .bill:         BillListView()
+                    case .todo:         ReminderListView()
+                    case .todoTools:    TodoToolsView()
+                    case .chat:         ChatView(prefill: router.chatPrefill)
+                    case .chatVoice:    ChatView(autostartVoice: true)
+                    case .settings:     SettingsView()
+                    case .autoSetup:    AutoRecognitionSetupView()
+                    case .editTodo(let r):
+                        EditTodoView(reminder: r)
+                    case .healthDetail(let m):
+                        HealthDetailView(metric: m)
                     }
                 }
             }
@@ -248,8 +257,7 @@ struct ContentView: View {
         let img = ScreenshotStore.loadPendingImage()
         let present = RecognitionSaver.preparePresent(result: p.result, rawText: p.rawText,
                                                             image: img, context: context,
-                                                            source: p.source ?? .cloud,
-                                                            pendingId: p.id)
+                                                            source: p.source ?? .cloud)
         pendingPresent = present
         isCheckingScreenshotPending = false
     }
@@ -750,7 +758,9 @@ struct ContentView: View {
         // 之后每 60s 增量同步一次
         syncTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak sync] _ in
             print("[ContentView] 定时同步触发")
-            sync?.autoSyncIfEnabled(context: context)
+            MainActor.assumeIsolated {
+                sync?.autoSyncIfEnabled(context: context)
+            }
         }
     }
 
@@ -853,7 +863,6 @@ struct ContentView: View {
     private func todoTimeSuffix(_ r: Reminder) -> String {
         guard let due = r.due else { return "" }
         let cal = Calendar.current
-        let now = Date()
         let time = AppFormat.time.string(from: due)
         let datePrefix: String
         if cal.isDateInToday(due) {
