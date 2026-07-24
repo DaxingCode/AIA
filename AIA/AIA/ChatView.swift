@@ -560,7 +560,7 @@ struct ChatView: View {
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
 
         let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
-        let foodIcon = ["🍽", "🍜", "🍚", "🥗", "🍔", "🍱"].randomElement() ?? "🍽"
+        let foodIcon = ["🍽", "🍜", "🍚", "🥗", "😋", "🍱"].randomElement() ?? "🍽"
         message.text = "\(opener)：\(foodIcon) \(pending.meal)「\(pending.name)」\(Int(pending.cal)) kcal（\(pending.portion)）"
         try? context.save()
     }
@@ -1095,7 +1095,7 @@ struct ChatView: View {
         var entries: [FoodEntry] = []
         var summaries: [String] = []
         var totalCal: Double = 0
-        let foodIcon = ["🍽", "🍜", "🍚", "🥗", "🍔", "🍱"].randomElement() ?? "🍽"
+        let foodIcon = ["🍽", "🍜", "🍚", "🥗", "😋", "🍱"].randomElement() ?? "🍽"
 
         for (name, weight, portion) in items {
             let ref: FoodRef
@@ -1360,7 +1360,7 @@ struct ChatView: View {
         var entries: [FoodEntry] = []
         var summaries: [String] = []
         var totalCal: Double = 0
-        let foodIcon = ["🍽", "🍜", "🍚", "🥗", "🍔", "🍱"].randomElement() ?? "🍽"
+        let foodIcon = ["🍽", "🍜", "🍚", "🥗", "😋", "🍱"].randomElement() ?? "🍽"
 
         for (name, weight, portion) in items {
             do {
