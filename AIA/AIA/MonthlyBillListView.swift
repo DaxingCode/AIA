@@ -8,6 +8,8 @@ struct MonthlyBillListView: View {
     let month: Int
     let bills: [Bill]
     @Environment(\.modelContext) private var context
+    /// 点击账单行 → 直接弹出「编辑账单」sheet（与主账单页 / 食物 / 待办 列表点击行为统一）
+    @State private var editBill: Bill? = nil
 
     private var monthTitle: String {
         "\(String(year))年\(month)月"
@@ -62,6 +64,10 @@ struct MonthlyBillListView: View {
         .navigationTitle(monthTitle)
         .navigationBarTitleDisplayMode(.inline)
         .background(AIATheme.fillSoft.ignoresSafeArea())
+        // 账单行点击 → 直接弹「编辑账单」sheet（与主账单页/食物/待办统一体验）
+        .sheet(item: $editBill) { b in
+            EditBillView(bill: b)
+        }
     }
 
     // MARK: - 本月收支概览
@@ -127,8 +133,11 @@ struct MonthlyBillListView: View {
                         .background(AIATheme.hairline)
                 }
 
-                NavigationLink {
-                    BillDetailView(bill: b)
+                // 改为 Button + .sheet：与 BillListView / FoodListView / ReminderListView
+                // 列表行点击行为统一（直接弹 EditBillView sheet，不再走「详情页→编辑」两段式）。
+                // 原 NavigationLink → BillDetailView 删掉，避免用户在「详情」页再点一次才到编辑页。
+                Button {
+                    editBill = b
                 } label: {
                     billRow(b)
                 }
@@ -183,7 +192,6 @@ struct MonthlyBillListView: View {
     // MARK: - Helpers
     private func dayHeader(_ date: Date) -> String {
         let cal = Calendar.current
-        let now = Date()
         if cal.isDateInToday(date) { return "今天" }
         if cal.isDateInYesterday(date) { return "昨天" }
         let weekday = cal.component(.weekday, from: date) - 1
