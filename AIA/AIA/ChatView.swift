@@ -1008,23 +1008,35 @@ struct ChatView: View {
         let lower = text.lowercased()
         // 必须先有金额，否则不是本地可解析的账单（纯饮食/问句等交给其它分支）
         guard let amount = extractAmount(text) else { return nil }
-        // 本地建账单的两种触发条件：
+
+        let incomeKeywords = ["工资","薪资","薪水","收入","报销","退款","返现","奖金","分红","利息","红包","补贴","收款","进账","提成","劳务费","兼职"]
+        // 本地建账单的触发条件：
         // 1) 显式账单关键词（记一笔/花了/付了…）；
         // 2) 食物+金额（如「午饭吃了碗牛肉面32块」），用户既说了吃什么又给了金额，明确是一笔花费。
         //    金额需带货币单位（元/块/￥/¥），以排除「1500大卡」这类把热量当金额误建账单的情况。
+        // 3) 收入关键词 + 金额（如「工资12000」「报销了500块」），本地常漏判为支出或交给 AI。
         // 纯饮食（如「喝了一杯奶茶」）因无金额已在上面返回 nil，仍走 food 路径，不会误建账单。
         let billKw = ["记一笔", "记账", "花了", "花掉", "付了", "付给", "买了", "消费", "支出", "账单", "花销", "开销", "扫码付"]
         let hasExplicitBill = billKw.contains(where: { lower.contains($0) })
         let hasMoneyUnit = lower.contains("元") || lower.contains("块") || lower.contains("￥") || lower.contains("¥")
         let isFoodWithAmount = hasRawFoodIntent(text) && hasMoneyUnit
-        guard hasExplicitBill || isFoodWithAmount else { return nil }
+        let isIncomeWithAmount = incomeKeywords.contains(where: { lower.contains($0) })
+        guard hasExplicitBill || isFoodWithAmount || isIncomeWithAmount else { return nil }
 
-        // 商户名：去掉金额数字及单位、去掉记账关键词、去掉时间/饮食动词与语气助词后剩下的文本
+        // 商户名：去掉金额数字及单位、去掉记账关键词、命令前缀、去掉时间/饮食动词与语气助词后剩下的文本
         var merchant = text
+        // 去掉命令前缀（如「帮我增加一笔」「增加一笔」「帮我记」），避免「帮我增加一笔收入」被当成商户名。
+        // 必须按长度降序，否则「帮我」会先被删，留下「增加一笔收入」。
+        let commandNoise = ["帮我增加一笔", "帮我添加一笔", "帮我记一笔", "给我记一笔",
+                            "增加一笔", "添加一笔", "加一笔", "来一笔",
+                            "帮我记", "给我记", "帮我", "给我",
+                            "记一下", "记下来", "记个"]
+        for kw in commandNoise { merchant = merchant.replacingOccurrences(of: kw, with: "") }
         // 去掉「花」作花费动词且后接金额（如「汉堡花10元」），放在金额提取前，避免残留成商户名；
         // 用占位符保护爆米花等含「花」菜品（stripSpendPhrase 已做保护）。
         merchant = ChatView.stripSpendPhrase(merchant)
-        merchant = merchant.replacingOccurrences(of: #"\d+(\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?"#,
+        // 去掉金额（支持千分位逗号/中文逗号）及可选货币单位
+        merchant = merchant.replacingOccurrences(of: #"\d{1,3}(?:[,\，]\d{3})+(?:\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?|\d+(?:\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?"#,
                                                  with: "", options: .regularExpression)
         for kw in billKw { merchant = merchant.replacingOccurrences(of: kw, with: "") }
         // 多字词（时间/餐次/饮食动词/食物量词）用分组 Alternation；务必放在单字语气助词之前或与之并列
@@ -1041,8 +1053,8 @@ struct ChatView: View {
         let nonMerchantWords: Set<String> = ["晚餐", "早餐", "午饭", "午餐", "夜宵", "加餐", "零食", "宵夜", "饭", "餐"]
         if merchant.isEmpty || nonMerchantWords.contains(merchant) { merchant = "其他消费" }
 
-        // 收入关键词识别（工资/报销/退款等），本地记账场景云端常漏判为支出
-        let incomeKeywords = ["工资","薪资","薪水","收入","报销","退款","返现","奖金","分红","利息","红包","补贴","收款","进账","提成","劳务费","兼职"]
+        // 收入关键词识别（工资/报销/退款等），本地记账场景云端常漏判为支出；
+        // incomeKeywords 已在函数开头定义并用于触发条件。
         let isIncomeText = incomeKeywords.contains { lower.contains($0) || merchant.contains($0) }
         // DB 优先：本地经验库命中则直接用其分类，跳过 AI
         var (cat, metaIncome) = MerchantMetaStore.lookup(merchant, in: context) ?? ("其他", false)
@@ -1052,6 +1064,11 @@ struct ChatView: View {
             cat = hint
         }
         let isIncome = isIncomeText || metaIncome
+        // 收入类：清洗后商户名若仍是泛化词（收入/进账/收款/入账）或空，统一显示为「其他收入」更自然；
+        // 具体收入类型（工资/报销/退款…）保持原样，不外覆。
+        if isIncome, ["收入", "进账", "收款", "入账"].contains(merchant) || merchant.isEmpty {
+            merchant = "其他收入"
+        }
         let category = (isIncome && cat == "其他") ? "收入" : cat
         // 防重复：短时间内重复发送同一句话不重复入库
         if ChatView.checkDuplicateAndRegister(text, type: "bill") {
@@ -1446,11 +1463,12 @@ struct ChatView: View {
                 t = t.replacingOccurrences(of: f, with: placeholders[i])
             }
         }
-        // 先清「花[了]? + 金额」裸写法，再清其它账单关键词
-        let spendPattern = #"花[了]?\s*\d+(\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?|花了?|花掉|付了?|付给|消费|支出|账单|花销|开销|扫码付|记一笔|记账|买了"#
+        // 先清「花[了]? + 金额」裸写法（支持千分位逗号/中文逗号），再清其它账单关键词
+        let amountPattern = #"\d{1,3}(?:[,\，]\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?"#
+        let spendPattern = #"花[了]?\s*\#(amountPattern)\s*(元|块|元钱|块钱|￥|¥)?|花了?|花掉|付了?|付给|消费|支出|账单|花销|开销|扫码付|记一笔|记账|买了"#
         t = t.replacingOccurrences(of: spendPattern, with: "", options: .regularExpression)
-        // 再清残留的所有数字金额（含货币单位，单位可选）
-        t = t.replacingOccurrences(of: #"\d+(\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?"#,
+        // 再清残留的所有数字金额（含货币单位，单位可选；支持千分位）
+        t = t.replacingOccurrences(of: #"\d{1,3}(?:[,\，]\d{3})+(?:\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?|\d+(?:\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?"#,
                                    with: "", options: .regularExpression)
         // 还原受保护的含「花」食物/菜品名
         for (i, f) in protectedFoods.enumerated() {
@@ -1470,7 +1488,7 @@ struct ChatView: View {
         for (i, f) in protectedFoods.enumerated() {
             if t.contains(f) { t = t.replacingOccurrences(of: f, with: placeholders[i]) }
         }
-        t = t.replacingOccurrences(of: #"花[了]?\s*\d+(\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?"#,
+        t = t.replacingOccurrences(of: #"花[了]?\s*(\d{1,3}(?:[,\，]\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*(元|块|元钱|块钱|￥|¥)?"#,
                                    with: "", options: .regularExpression)
         for (i, f) in protectedFoods.enumerated() {
             t = t.replacingOccurrences(of: placeholders[i], with: f)
@@ -1680,26 +1698,31 @@ struct ChatView: View {
         return nil
     }
 
-    /// 从文本提取金额数字（如 35 / 12.5）。
-    /// 优先匹配带金额单位（元/块/￥/¥）的数字；都没有单位时取最后一个数字（金额常在句末，如「记一笔星巴克35」）。
+    /// 从文本提取金额数字（如 35 / 12.5 / 10,000 / 1,234.56）。
+    /// 支持英文逗号、中文逗号作为千分位；优先匹配带金额单位（元/块/￥/¥）的数字；
+    /// 都没有单位时取最后一个数字（金额常在句末，如「记一笔星巴克35」）。
     private func extractAmount(_ text: String) -> Double? {
-        guard let regex = try? NSRegularExpression(pattern: #"(\d+(\.\d+)?)"#) else { return nil }
+        // 千分位可选，小数点可选；逗号用 [,\，] 兼容中英文输入法
+        guard let regex = try? NSRegularExpression(pattern: #"(\d{1,3}(?:[,\，]\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"#) else { return nil }
         let ns = text as NSString
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
         guard !matches.isEmpty else { return nil }
         // 优先带金额单位的数字
         for m in matches {
             let r = m.range(at: 1)
-            let s = ns.substring(with: r)
+            let raw = ns.substring(with: r)
+            let clean = raw.replacingOccurrences(of: #"[,\，]"#, with: "", options: .regularExpression)
             let afterStart = min(r.location + r.length, ns.length)
             let after = ns.substring(from: afterStart)
             if after.hasPrefix("元") || after.hasPrefix("块") || after.hasPrefix("￥") || after.hasPrefix("¥") {
-                return Double(s)
+                return Double(clean)
             }
         }
         // 否则取最后一个数字（句末金额）
         if let last = matches.last {
-            return Double(ns.substring(with: last.range(at: 1)))
+            let raw = ns.substring(with: last.range(at: 1))
+            let clean = raw.replacingOccurrences(of: #"[,\，]"#, with: "", options: .regularExpression)
+            return Double(clean)
         }
         return nil
     }
@@ -1813,6 +1836,48 @@ struct ChatView: View {
         return nil
     }
 
+    /// 解析中文星期表达（下周六、这周六、礼拜天、星期一等），返回目标日期 00:00。
+    /// 修饰词含义：
+    ///   - 「下周 X / 下星期 X / 下礼拜 X」：总是本周 X 之后的下一个 X；
+    ///   - 「这/本/今周 X」或裸「周 X / 星期 X / 礼拜 X」：指即将到来的最近一个 X，若今天就是 X 则指今天。
+    private func parseWeekday(from text: String) -> Date? {
+        let lower = text.lowercased()
+        let cal = Calendar.current
+        let now = Date()
+        let today = cal.component(.weekday, from: now) // 1=周日...7=周六
+
+        let weekdayMap: [String: Int] = [
+            "日": 1, "天": 1, "一": 2, "二": 3, "三": 4,
+            "四": 5, "五": 6, "六": 7
+        ]
+        let digitMap: [String: Int] = [
+            "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7
+        ]
+        func targetWeekday(_ c: Character) -> Int? {
+            weekdayMap[String(c)] ?? digitMap[String(c)]
+        }
+
+        // 按优先级：下 X > 这/本/今 X > 裸 X
+        let patterns = [
+            ("下(周|星期|礼拜)([一二三四五六七日天1234567])", true),   // 总是下一个
+            ("(这|本|今)(周|星期|礼拜)([一二三四五六七日天1234567])", false), // 最近一个
+            ("(周|星期|礼拜)([一二三四五六七日天1234567])", false)          // 最近一个
+        ]
+        for (pat, forceNext) in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pat),
+                  let match = regex.firstMatch(in: lower, range: NSRange(location: 0, length: lower.utf16.count)) else { continue }
+            let groupIdx = match.numberOfRanges - 1
+            let groupStr = (lower as NSString).substring(with: match.range(at: groupIdx))
+            guard let c = groupStr.first, let target = targetWeekday(c) else { continue }
+            var offset = (target - today + 7) % 7
+            if forceNext, offset == 0 { offset = 7 }
+            return cal.date(byAdding: .day, value: offset, to: now).flatMap {
+                cal.date(bySettingHour: 0, minute: 0, second: 0, of: $0)
+            }
+        }
+        return nil
+    }
+
     /// 把中文数字（如「二」「十二」「两」）转成 Int；阿拉伯数字直接返回。
     private static func parseChineseNumber(_ string: String) -> Int? {
         if let n = Int(string) { return n }
@@ -1878,6 +1943,9 @@ struct ChatView: View {
             } else if lower.contains("明天") || lower.contains("明日") {
                 due = cal.date(byAdding: .day, value: 1, to: now) ?? now
                 dateFound = true
+            } else if let weekdayDate = parseWeekday(from: text) {
+                due = weekdayDate
+                dateFound = true
             }
         }
 
@@ -1891,6 +1959,9 @@ struct ChatView: View {
         } else if !dateFound {
             // 既没日期也没时间：默认 1 小时后提醒
             due = cal.date(byAdding: .hour, value: 1, to: now) ?? now
+        } else {
+            // 有日期但用户没说具体时间：默认当天 8:00，避免变成 00:00 的尴尬提醒
+            due = cal.date(bySettingHour: 8, minute: 0, second: 0, of: due) ?? due
         }
 
         // 提取标题：先移除前缀动词，再移除日期、时段词和「提醒/待办」后缀
@@ -1905,6 +1976,8 @@ struct ChatView: View {
         }
         title = title.replacingOccurrences(of: datePattern, with: "", options: .regularExpression)
         title = title.replacingOccurrences(of: "明天|后天|明日", with: "", options: .regularExpression)
+        // 移除星期词（下周六/这周六/礼拜天/星期一等），避免标题残留
+        title = title.replacingOccurrences(of: "(这|本|今|下)?(周|星期|礼拜)([一二三四五六七日天])", with: "", options: .regularExpression)
         // 移除相对时间表达，避免标题里保留「2分钟后」「1小时后」等词
         title = title.replacingOccurrences(of: "([\\d一二两三四五六七八九十]+)\\s*[分钟小时](后|以后)", with: "", options: .regularExpression)
         title = title.replacingOccurrences(of: "半小时(后|以后)?|一刻钟(后|以后)?", with: "", options: .regularExpression)
