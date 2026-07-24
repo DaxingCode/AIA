@@ -1022,47 +1022,53 @@ struct EditTodoView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                AIATheme.fillSoft.ignoresSafeArea()
-                ScrollView {
-                    VStack(spacing: 16) {
-                        titleCard
-                        dueCard
-                        alertCard
-                        noteCard
-                        propertyCard
-                        deleteCard
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+        // 注意：本 view 有 2 个调用点：
+        // ① ContentView.swift case .editTodo(let r) 在 navigationDestination(for: HomeRoute.self) 内 push
+        //   → 已经在父级 NavigationStack 里，**不能再自己包 NavigationStack**（嵌套会触发
+        //     AnyNavigationPath.Error.comparisonTypeMismatch try! 崩，2026-07-24 第 9 轮踩坑）
+        // ② AllRecordsView.swift .sheet(item: $editTodo) 弹 sheet → sheet 自身是独立 NavigationContext，
+        //   必须用 EditTodoSheet（带 NavigationStack 包装）调用。
+        // 因此本 body 直接是 ScrollView，调用方按场景选 EditTodoView 或 EditTodoSheet。
+        ZStack {
+            AIATheme.fillSoft.ignoresSafeArea()
+            ScrollView {
+                VStack(spacing: 16) {
+                    titleCard
+                    dueCard
+                    alertCard
+                    noteCard
+                    propertyCard
+                    deleteCard
                 }
-                .scrollDismissesKeyboard(.immediately)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
-            .navigationTitle("编辑待办")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }
-                        .font(AIATheme.Font.callout.weight(.semibold))
-                        .foregroundStyle(AIATheme.blue)
-                }
+            .scrollDismissesKeyboard(.immediately)
+        }
+        .navigationTitle("编辑待办")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("取消") { dismiss() }
             }
-            .sheet(item: $editingCustom) { item in
-                customTimeSheet(item: item)
+            ToolbarItem(placement: .confirmationAction) {
+                Button("保存") { save() }
+                    .font(AIATheme.Font.callout.weight(.semibold))
+                    .foregroundStyle(AIATheme.blue)
             }
-            .alert("删除待办", isPresented: $showDeleteConfirm) {
-                Button("取消", role: .cancel) {}
-                Button("删除", role: .destructive) {
-                    pendingDeleteID = reminder.persistentModelID
-                    dismiss()
-                }
-            } message: {
-                Text("删除后不可恢复，确定要删除吗？")
+        }
+        .sheet(item: $editingCustom) { item in
+            customTimeSheet(item: item)
+        }
+        .alert("删除待办", isPresented: $showDeleteConfirm) {
+            Button("取消", role: .cancel) {}
+            Button("删除", role: .destructive) {
+                pendingDeleteID = reminder.persistentModelID
+                dismiss()
             }
+        } message: {
+            Text("删除后不可恢复，确定要删除吗？")
+        }
             .onAppear {
                 // 懒加载备注：首次进入编辑页时按 syncId 取 ReminderNote（1:1，参照 FoodNote 模式）
                 let targetSyncId = reminder.syncId
@@ -1082,7 +1088,6 @@ struct EditTodoView: View {
                     }
                 }
             }
-        }
     }
 
     // MARK: - 卡片
@@ -1467,5 +1472,20 @@ struct EditHealthView: View {
         metric.syncUpdatedAt = .now
         try? context.save()
         dismiss()
+    }
+}
+
+/// EditTodoView 的 sheet 包装：仅 .sheet 路径用，自身包 NavigationStack 提供 toolbar context。
+/// 因为 EditTodoView 自身在 navigationDestination(for: HomeRoute.self) 内被 push，已经在父级 NavigationStack 里，
+/// 不能再自己包 NavigationStack（嵌套会触发 AnyNavigationPath.Error.comparisonTypeMismatch try! 崩）。
+/// 拆开两个入口后：
+/// - navigationDestination 路径用 EditTodoView（无 NavigationStack 包装）
+/// - .sheet 路径用 EditTodoSheet（有 NavigationStack 包装，sheet 自身是独立 NavigationContext）
+struct EditTodoSheet: View {
+    let reminder: Reminder
+    var body: some View {
+        NavigationStack {
+            EditTodoView(reminder: reminder)
+        }
     }
 }

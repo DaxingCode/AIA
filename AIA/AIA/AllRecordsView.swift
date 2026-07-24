@@ -160,7 +160,7 @@ struct AllRecordsView: View {
                 .listStyle(.plain)
                 .sheet(item: $editFood) { EditFoodView(entry: $0) }
                 .sheet(item: $editBill) { EditBillView(bill: $0) }
-                .sheet(item: $editTodo) { EditTodoView(reminder: $0) }
+                .sheet(item: $editTodo) { EditTodoSheet(reminder: $0) }
                 .sheet(item: $editHealth) { EditHealthView(metric: $0) }
             }
             AIBottomBar()
