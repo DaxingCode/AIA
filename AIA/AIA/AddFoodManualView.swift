@@ -28,7 +28,7 @@ struct AddFoodManualView: View {
 
     // 基础信息
     @State private var name: String = ""
-    @State private var meal: String = "午餐"
+    @State private var meal: String = RecognitionSaver.defaultMeal(for: .now)
     @State private var date: Date = Date()
     @State private var weightText: String = "100"
 
