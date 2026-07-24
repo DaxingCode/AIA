@@ -1034,8 +1034,7 @@ struct EditTodoView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     titleCard
-                    dueCard
-                    alertCard
+                    timeAlertCard
                     noteCard
                     propertyCard
                     deleteCard
@@ -1048,9 +1047,7 @@ struct EditTodoView: View {
         .navigationTitle("编辑待办")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("取消") { dismiss() }
-            }
+            // 顶左「取消」已删——与左上系统返回箭头冗余，dismiss 等价于左箭头
             ToolbarItem(placement: .confirmationAction) {
                 Button("保存") { save() }
                     .font(AIATheme.Font.callout.weight(.semibold))
@@ -1104,8 +1101,23 @@ struct EditTodoView: View {
         .card()
     }
 
-    private var dueCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    // MARK: - 时间与提醒（合并 dueCard + alertCard：一个语义=截止时间 + 通知，Divier 分段，更紧凑）
+    private var timeAlertCard: some View {
+        VStack(spacing: 0) {
+            // 段一：截止时间开关 + 日期/时间（hasDue=false 时仅显示开关）
+            dueSection
+            if hasDue {
+                Divider().padding(.leading, 14)
+                alertSection
+            }
+        }
+        .padding(.top, 4)
+        .card()
+    }
+
+    // 段一：截止时间开关 + 日期 + 时间
+    private var dueSection: some View {
+        VStack(spacing: 0) {
             toggleRow(icon: "calendar.badge.clock", label: "设置截止时间", isOn: $hasDue)
             if hasDue {
                 Divider().padding(.leading, 46)
@@ -1133,11 +1145,10 @@ struct EditTodoView: View {
                 .padding(.bottom, 12)
             }
         }
-        .padding(.top, 4)
-        .card()
     }
 
-    private var alertCard: some View {
+    // 段二：提醒通知（依赖 hasDue，逻辑链：截止时间 → 提醒时间）
+    private var alertSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 5) {
                 Image(systemName: "bell.badge")
@@ -1151,55 +1162,48 @@ struct EditTodoView: View {
                     .font(AIATheme.Font.micro)
                     .foregroundStyle(AIATheme.muted)
             }
-            if !hasDue {
-                Text("设置截止时间后，可添加最多 4 个通知时间")
-                    .font(AIATheme.Font.caption)
-                    .foregroundStyle(AIATheme.muted)
-                    .padding(.vertical, 8)
-            } else {
-                VStack(spacing: 0) {
-                    ForEach($alertItems) { $item in
-                        alertRow(item: $item)
-                        if item.id != alertItems.last?.id {
-                            Divider().padding(.leading, 14)
-                        }
+            VStack(spacing: 0) {
+                ForEach($alertItems) { $item in
+                    alertRow(item: $item)
+                    if item.id != alertItems.last?.id {
+                        Divider().padding(.leading, 14)
                     }
                 }
-                .background(AIATheme.surface)
-                .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
-                if alertItems.count < 4 {
-                    Button {
-                        let newItem = AlertItem(option: .before1Hour, customDate: due)
-                        alertItems.append(newItem)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "plus.circle.fill")
-                                .font(AIATheme.Font.body)
-                                .foregroundStyle(AIATheme.blue)
-                            Text("添加提醒时间")
-                                .font(AIATheme.Font.subhead.weight(.medium))
-                                .foregroundStyle(AIATheme.blue)
-                            Spacer()
-                        }
-                        .padding(.vertical, 10)
+            }
+            .background(AIATheme.surface)
+            .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+            if alertItems.count < 4 {
+                Button {
+                    let newItem = AlertItem(option: .before1Hour, customDate: due)
+                    alertItems.append(newItem)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(AIATheme.Font.body)
+                            .foregroundStyle(AIATheme.blue)
+                        Text("添加提醒时间")
+                            .font(AIATheme.Font.subhead.weight(.medium))
+                            .foregroundStyle(AIATheme.blue)
+                        Spacer()
                     }
-                    .buttonStyle(.plain)
+                    .padding(.vertical, 10)
                 }
+                .buttonStyle(.plain)
             }
         }
         .padding(14)
-        .card()
     }
 
     private var propertyCard: some View {
         VStack(spacing: 0) {
+            // 「已完成」提到第一行：状态最常切换，比设置更显眼
+            toggleRow(icon: "checkmark.circle", label: "已完成", isOn: $done)
+            Divider().padding(.leading, 46)
             menuRow(icon: "flag", label: "优先级", selection: $priority,
                     options: priorityOptions.map { ($0.value, $0.label) })
             Divider().padding(.leading, 46)
             menuRow(icon: "arrow.clockwise", label: "重复", selection: $repeatRule,
                     options: repeatOptions.map { ($0.value, $0.label) })
-            Divider().padding(.leading, 46)
-            toggleRow(icon: "checkmark.circle", label: "已完成", isOn: $done)
         }
         .card()
     }
