@@ -353,8 +353,8 @@ struct EditBillView: View {
                 ScrollView {
                     VStack(spacing: 16) {
                         infoCard
-                        noteCard
                         incomeCard
+                        noteCard
                         deleteCard
                     }
                     .padding(.horizontal, 16)
