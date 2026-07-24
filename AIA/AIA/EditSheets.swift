@@ -59,6 +59,24 @@ struct EditFoodView: View {
     @State private var baseSugarText: String       // 糖（每100g克）
     @State private var baseSodiumText: String      // 钠（每100g毫克）
 
+    // 备注栏（文字 + 图片附件，存于 FoodNote，仅本地）
+    @State private var noteText: String = ""
+    @State private var noteImageNames: [String] = []
+    // 来源识别原图（entry.imageName），仅本地；展示但不并入备注图片列表
+    @State private var sourceImageName: String?
+
+    // 图片添加 / 查看
+    @State private var showImageSourceDialog = false
+    @State private var showImagePicker = false
+    @State private var showCameraPicker = false
+    @State private var showFullImage = false
+    @State private var fullImageName: String? = nil
+    @State private var pickedImage: UIImage? = nil
+
+    // 删除
+    @State private var showDeleteConfirm = false
+    @State private var pendingDeleteID: PersistentIdentifier? = nil
+
     init(entry: FoodEntry) {
         self.entry = entry
         let weight = entry.weightGram ?? RecognitionSaver.weightFromPortion(entry.portion)
@@ -81,6 +99,7 @@ struct EditFoodView: View {
             entry.baseSugar ?? (entry.sugar / currentWeight * 100)))
         _baseSodiumText = State(initialValue: String(format: "%.1f",
             entry.baseSodium ?? (entry.sodium / currentWeight * 100)))
+        _sourceImageName = State(initialValue: entry.imageName)
     }
 
     var body: some View {
@@ -92,6 +111,8 @@ struct EditFoodView: View {
                         nameCard
                         infoCard
                         nutritionCard
+                        noteCard
+                        deleteCard
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
@@ -100,6 +121,24 @@ struct EditFoodView: View {
             }
             .navigationTitle("编辑食物")
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $showImagePicker) {
+                ImagePicker(image: $pickedImage)
+            }
+            .fullScreenCover(isPresented: $showCameraPicker) {
+                CameraPicker(image: $pickedImage)
+            }
+            .fullScreenCover(isPresented: $showFullImage) {
+                if let img = LocalImageStore.load(fullImageName) {
+                    FullImageView(image: img)
+                }
+            }
+            .confirmationDialog("添加图片", isPresented: $showImageSourceDialog, titleVisibility: .visible) {
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    Button("拍照") { showCameraPicker = true }
+                }
+                Button("从相册选择") { showImagePicker = true }
+                Button("取消", role: .cancel) {}
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
@@ -108,6 +147,41 @@ struct EditFoodView: View {
                     Button("保存") { save() }
                         .font(AIATheme.Font.callout.weight(.semibold))
                         .foregroundStyle(AIATheme.blue)
+                }
+            }
+            .alert("删除食物记录", isPresented: $showDeleteConfirm) {
+                Button("取消", role: .cancel) {}
+                Button("删除", role: .destructive) {
+                    pendingDeleteID = entry.persistentModelID
+                    dismiss()
+                }
+            } message: {
+                Text("删除后不可恢复，确定要删除吗？")
+            }
+            .onAppear {
+                // 懒加载备注：首次进入编辑页时按 syncId 取 FoodNote（1:1）
+                let targetSyncId = entry.syncId
+                if let existing = try? context.fetch(FetchDescriptor<FoodNote>(
+                    predicate: #Predicate { $0.syncId == targetSyncId })).first {
+                    noteText = existing.note
+                    noteImageNames = existing.imageNames
+                }
+            }
+            .onChange(of: pickedImage) { _, new in
+                guard let img = new else { return }
+                pickedImage = nil
+                if let name = LocalImageStore.save(img) {
+                    noteImageNames.append(name)
+                }
+            }
+            .onDisappear {
+                // 与 EditBillView 同款：先 dismiss 回列表，等动画结束后再执行删除，
+                // 避免 syncDeleted 触发 @Query 重 fetch 与动画叠加卡死。
+                if let id = pendingDeleteID {
+                    pendingDeleteID = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                        SafeDelete.foodByID(id, in: context)
+                    }
                 }
             }
         }
@@ -200,6 +274,132 @@ struct EditFoodView: View {
             .padding(.bottom, 14)
         }
         .card()
+    }
+
+    // MARK: - 备注卡（文字 + 来源原图 + 多图附件）
+    private var noteCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 5) {
+                Image(systemName: "note.text")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                Text("备注")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                Spacer()
+            }
+
+            TextEditor(text: $noteText)
+                .font(AIATheme.Font.body)
+                .foregroundStyle(.primary)
+                .frame(minHeight: 48)
+                .scrollContentBackground(.hidden)
+
+            let hasSource = LocalImageStore.load(sourceImageName) != nil
+            let hasNoteImg = !noteImageNames.isEmpty
+            if hasSource || hasNoteImg {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        // 来源识别原图（绿色角标「来源」），点击看大图
+                        if let sImg = LocalImageStore.load(sourceImageName), let sName = sourceImageName {
+                            thumbnail(image: sImg, badge: "来源",
+                                      onTap: { fullImageName = sName; showFullImage = true },
+                                      onDelete: {
+                                          LocalImageStore.delete(sName)
+                                          sourceImageName = nil
+                                      })
+                        }
+                        // 备注附件图片
+                        ForEach(Array(noteImageNames.enumerated()), id: \.offset) { _, name in
+                            if let img = LocalImageStore.load(name) {
+                                thumbnail(image: img, badge: nil,
+                                          onTap: { fullImageName = name; showFullImage = true },
+                                          onDelete: {
+                                              LocalImageStore.delete(name)
+                                              noteImageNames.removeAll { $0 == name }
+                                          })
+                            }
+                        }
+                        addImageButton
+                    }
+                    .padding(.vertical, 2)
+                }
+            } else {
+                addImageButton
+            }
+        }
+        .padding(14)
+        .card()
+    }
+
+    /// 统一缩略图：点击看大图；右上角 X 删除；可选角标（如「来源」）。
+    private func thumbnail(image: UIImage, badge: String?,
+                           onTap: @escaping () -> Void,
+                           onDelete: @escaping () -> Void) -> some View {
+        Button(action: onTap) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 72, height: 72)
+                .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+                .overlay(alignment: .bottomLeading) {
+                    if let badge {
+                        Text(badge)
+                            .font(AIATheme.Font.micro)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(AIATheme.food)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .padding(4)
+                    }
+                }
+                .overlay(alignment: .topTrailing) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(AIATheme.Font.body)
+                        .foregroundStyle(AIATheme.muted)
+                        .background(Circle().fill(AIATheme.surface))
+                        .offset(x: 8, y: -8)
+                }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var addImageButton: some View {
+        Button {
+            showImageSourceDialog = true
+        } label: {
+            RoundedRectangle(cornerRadius: AIATheme.rSM)
+                .stroke(AIATheme.hairline, lineWidth: 1)
+                .frame(width: 72, height: 72)
+                .overlay {
+                    VStack(spacing: 4) {
+                        Image(systemName: "plus")
+                            .font(AIATheme.Font.headline.weight(.medium))
+                            .foregroundStyle(AIATheme.muted)
+                        Text("图片")
+                            .font(AIATheme.Font.micro)
+                            .foregroundStyle(AIATheme.muted)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var deleteCard: some View {
+        Button {
+            showDeleteConfirm = true
+        } label: {
+            Text("删除食物记录")
+                .font(AIATheme.Font.subhead.weight(.semibold))
+                .foregroundStyle(AIATheme.warn)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(AIATheme.warn.opacity(0.08))
+                .overlay(RoundedRectangle(cornerRadius: AIATheme.rMD).stroke(AIATheme.warn.opacity(0.25), lineWidth: 0.5))
+                .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - 通用行组件
@@ -307,7 +507,25 @@ struct EditFoodView: View {
         entry.sugar = baseSug * weight / 100
         entry.sodium = baseSod * weight / 100
         entry.portion = "\(Int(weight))克"
+        entry.imageName = sourceImageName
         entry.syncUpdatedAt = .now
+
+        // 备注：按 syncId 关联 FoodNote；无内容则删除（若有）
+        let targetSyncId = entry.syncId
+        let existing = try? context.fetch(FetchDescriptor<FoodNote>(
+            predicate: #Predicate { $0.syncId == targetSyncId })).first
+        let noteEmpty = noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if noteEmpty && noteImageNames.isEmpty {
+            if let existing { context.delete(existing) }
+        } else if let existing {
+            existing.note = noteText
+            existing.imageNames = noteImageNames
+            existing.updatedAt = .now
+        } else {
+            let fn = FoodNote(syncId: entry.syncId, note: noteText, imageNames: noteImageNames)
+            context.insert(fn)
+        }
+
         try? context.save()
         dismiss()
     }

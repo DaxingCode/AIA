@@ -578,16 +578,63 @@ enum SchemaVersion9: VersionedSchema {
     }
 }
 
+// MARK: - v10.0.0：新增 WaterLog 模型（手动饮水记录）。
+//            每点 +100ml = 一条 WaterLog，与 FoodEntry.waterIntake 并存：
+//            聊天/拍照识别走 FoodEntry.waterIntake，饮食页 tap 加的水走本表。
+//            本次仅新增模型、不修改已有 @Model 字段，v9→v10 走 lightweight 即可。
+enum SchemaVersion10: VersionedSchema {
+    static var versionIdentifier: Schema.Version = Schema.Version(10, 0, 0)
+    static var models: [any PersistentModel.Type] {
+        [
+            Bill.self,
+            Reminder.self,
+            FoodEntry.self,
+            HealthMetric.self,
+            RecognitionRecord.self,
+            ChatMessage.self,
+            RecurringRule.self, // 外层新版
+            MerchantMeta.self,
+            FoodMeta.self,
+            WaterLog.self       // v10 新增
+        ]
+    }
+}
+
+// MARK: - v11.0.0：新增 FoodNote 模型（食物备注/图片附件）。
+//            关联 FoodEntry.syncId（1:1），用于编辑食物页的备注栏（文字 + 图片）。
+//            本次仅新增模型、不修改已有 @Model 字段，v10→v11 走 lightweight 即可。
+//            注意：FoodNote 仅本地存储，不参与云同步；旧库升 v11 后老食物记录
+//            没有对应 FoodNote（首次进入编辑页时会懒创建）。
+enum SchemaVersion11: VersionedSchema {
+    static var versionIdentifier: Schema.Version = Schema.Version(11, 0, 0)
+    static var models: [any PersistentModel.Type] {
+        [
+            Bill.self,
+            Reminder.self,
+            FoodEntry.self,
+            HealthMetric.self,
+            RecognitionRecord.self,
+            ChatMessage.self,
+            RecurringRule.self,
+            MerchantMeta.self,
+            FoodMeta.self,
+            WaterLog.self,
+            FoodNote.self       // v11 新增
+        ]
+    }
+}
+
 // MARK: - 迁移计划：v1 → v3 仅新增 MerchantMeta 表；v3 → v4 为 RecurringRule 新增 3 个字段；
 //           v4 → v5 为 FoodEntry 新增 5 个可选字段；v5 → v6 新增 FoodMeta 表；
 //           v6 → v7 为 MerchantMeta 新增 3 个 sync 字段；v7 → v8 为 FoodEntry 新增 7 个字段；
-//           v8 → v9 为 RecurringRule 新增 3 个 sync 字段，均为 lightweight。
+//           v8 → v9 为 RecurringRule 新增 3 个 sync 字段；
+//           v9 → v10 新增 WaterLog 表。均为 lightweight。
 //           注意：v1 与 v3 之间的中间版本（如 v2）若模型集合与 v1 完全相同，
 //           其 schema checksum 会与 v1 重复，导致 SwiftData 报
 //           "Duplicate version checksums across stages detected"，故不保留同构中间版本。
 enum AIAMigrationPlan: SchemaMigrationPlan {
-    static var schemas: [VersionedSchema.Type] { [SchemaVersion1.self, SchemaVersion3.self, SchemaVersion4.self, SchemaVersion5.self, SchemaVersion6.self, SchemaVersion7.self, SchemaVersion8.self, SchemaVersion9.self] }
-    static var stages: [MigrationStage] { [migrateV1toV3, migrateV3toV4, migrateV4toV5, migrateV5toV6, migrateV6toV7, migrateV7toV8, migrateV8toV9] }
+    static var schemas: [VersionedSchema.Type] { [SchemaVersion1.self, SchemaVersion3.self, SchemaVersion4.self, SchemaVersion5.self, SchemaVersion6.self, SchemaVersion7.self, SchemaVersion8.self, SchemaVersion9.self, SchemaVersion10.self, SchemaVersion11.self] }
+    static var stages: [MigrationStage] { [migrateV1toV3, migrateV3toV4, migrateV4toV5, migrateV5toV6, migrateV6toV7, migrateV7toV8, migrateV8toV9, migrateV9toV10, migrateV10toV11] }
 
     static let migrateV1toV3 = MigrationStage.lightweight(
         fromVersion: SchemaVersion1.self,
@@ -622,5 +669,15 @@ enum AIAMigrationPlan: SchemaMigrationPlan {
     static let migrateV8toV9 = MigrationStage.lightweight(
         fromVersion: SchemaVersion8.self,
         toVersion: SchemaVersion9.self
+    )
+
+    static let migrateV9toV10 = MigrationStage.lightweight(
+        fromVersion: SchemaVersion9.self,
+        toVersion: SchemaVersion10.self
+    )
+
+    static let migrateV10toV11 = MigrationStage.lightweight(
+        fromVersion: SchemaVersion10.self,
+        toVersion: SchemaVersion11.self
     )
 }

@@ -139,6 +139,10 @@ import SwiftData
     var protein: Double
     var carbs: Double
     var fat: Double
+    var fiber: Double            // 膳食纤维（克）
+    var sugar: Double            // 糖（克）
+    var sodium: Double           // 钠（毫克）
+    var waterIntake: Double      // 饮水量（毫升），0 表示未记录
     var portion: String         // 份量显示文本，如「50克」「1碗」
     var meal: String            // 早餐/午餐/晚餐/加餐
     var date: Date
@@ -151,6 +155,9 @@ import SwiftData
     var baseProtein: Double?
     var baseCarbs: Double?
     var baseFat: Double?
+    var baseFiber: Double?       // 每100g膳食纤维
+    var baseSugar: Double?       // 每100g糖
+    var baseSodium: Double?      // 每100g钠（毫克）
 
     // 本地识别原图文件名（仅本地存储，不参与云同步）
     var imageName: String?
@@ -160,10 +167,13 @@ import SwiftData
     var syncDeleted: Bool
 
     init(name: String, calories: Double, protein: Double = 0, carbs: Double = 0,
-         fat: Double = 0, portion: String = "", meal: String = "午餐", date: Date = .now,
+         fat: Double = 0, fiber: Double = 0, sugar: Double = 0, sodium: Double = 0,
+         waterIntake: Double = 0,
+         portion: String = "", meal: String = "午餐", date: Date = .now,
          weightGram: Double? = nil,
          baseCalories: Double? = nil, baseProtein: Double? = nil,
          baseCarbs: Double? = nil, baseFat: Double? = nil,
+         baseFiber: Double? = nil, baseSugar: Double? = nil, baseSodium: Double? = nil,
          imageName: String? = nil,
          syncId: UUID = UUID(), syncUpdatedAt: Date = .now, syncDeleted: Bool = false) {
         self.name = name
@@ -171,6 +181,10 @@ import SwiftData
         self.protein = protein
         self.carbs = carbs
         self.fat = fat
+        self.fiber = fiber
+        self.sugar = sugar
+        self.sodium = sodium
+        self.waterIntake = waterIntake
         self.portion = portion
         self.meal = meal
         self.date = date
@@ -179,6 +193,9 @@ import SwiftData
         self.baseProtein = baseProtein
         self.baseCarbs = baseCarbs
         self.baseFat = baseFat
+        self.baseFiber = baseFiber
+        self.baseSugar = baseSugar
+        self.baseSodium = baseSodium
         self.imageName = imageName
         self.syncId = syncId
         self.syncUpdatedAt = syncUpdatedAt
@@ -253,12 +270,16 @@ import SwiftData
     var protein: Double                     // 每100g蛋白质（克）
     var carbs: Double                       // 每100g碳水（克）
     var fat: Double                         // 每100g脂肪（克）
+    var fiber: Double                       // 每100g膳食纤维（克）
+    var sugar: Double                       // 每100g糖（克）
+    var sodium: Double                      // 每100g钠（毫克）
     var source: String                      // "builtin" / "cloud"
     var hitCount: Int                       // 命中次数
     var lastSeen: Date
 
     init(name: String, displayName: String? = nil,
          kcal: Double, protein: Double, carbs: Double, fat: Double,
+         fiber: Double = 0, sugar: Double = 0, sodium: Double = 0,
          source: String = "cloud", hitCount: Int = 1, lastSeen: Date = .now) {
         self.name = FoodMeta.normalize(name)
         self.displayName = (displayName ?? name).trimmingCharacters(in: .whitespaces)
@@ -266,6 +287,9 @@ import SwiftData
         self.protein = protein
         self.carbs = carbs
         self.fat = fat
+        self.fiber = fiber
+        self.sugar = sugar
+        self.sodium = sodium
         self.source = source
         self.hitCount = hitCount
         self.lastSeen = lastSeen
@@ -275,5 +299,49 @@ import SwiftData
         s.trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
             .replacingOccurrences(of: " ", with: "")
+    }
+}
+
+// 手动饮水记录（独立模型，每点 +100ml = 一条记录）
+// 与 FoodEntry.waterIntake 并存：聊天/拍照识别产生的饮水走 FoodEntry.waterIntake 字段；
+// 饮食页 tap 加的水走本表，按 selectedDate 聚合。
+@Model final class WaterLog {
+    var date: Date              // 记录时间（默认 now，用 selectedDate 决定归属哪天）
+    var amount: Double          // 饮水量（毫升），常驻 100/250/500
+
+    var syncId: UUID
+    var syncUpdatedAt: Date
+    var syncDeleted: Bool
+
+    init(date: Date = .now, amount: Double = 100,
+         syncId: UUID = UUID(), syncUpdatedAt: Date = .now, syncDeleted: Bool = false) {
+        self.date = date
+        self.amount = amount
+        self.syncId = syncId
+        self.syncUpdatedAt = syncUpdatedAt
+        self.syncDeleted = syncDeleted
+    }
+}
+
+// 食物备注（仅本地，不参与云同步）
+// 关联 FoodEntry.syncId（1:1）；同一食物记录最多一条备注。
+// 字段：备注文字 + 附加图片文件名列表（存于 LocalImageStore，仅本地）。
+// 设计取舍：本地优先——饮食是隐私数据，备注里可能有口味/身体反应/禁忌等，
+//          暂不上云；后续若需要跨设备同步可补 CloudSync push/pull，无需再改 schema。
+@Model final class FoodNote {
+    /// 关联 FoodEntry.syncId（1:1）
+    var syncId: UUID
+    /// 备注文字
+    var note: String = ""
+    /// 备注图片文件名列表（仅本地，存于 LocalImageStore）
+    var imageNames: [String] = []
+    /// 最近一次编辑时间
+    var updatedAt: Date = Date.now
+
+    init(syncId: UUID, note: String = "", imageNames: [String] = []) {
+        self.syncId = syncId
+        self.note = note
+        self.imageNames = imageNames
+        self.updatedAt = .now
     }
 }
