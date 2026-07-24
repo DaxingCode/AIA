@@ -131,6 +131,9 @@ struct FoodListView: View {
     /// 水卡按压反馈（缩放 0.94→1.0 spring 回弹）
     @State private var waterPressing: Bool = false
 
+    /// 点行直接弹出「编辑食物」sheet（取代原来的 SelectableCard→FoodDetailView 中间层）。
+    @State private var editFood: FoodEntry? = nil
+
     // 按进入时间自动匹配餐次页签：5-11 早餐、11-16 午餐、16-22 晚餐，其余为加餐
     private static func defaultMeal(for date: Date) -> MealFilter {
         let hour = Calendar.current.component(.hour, from: date)
@@ -553,8 +556,10 @@ struct FoodListView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         ForEach(mealItems) { f in
-                            SelectableCard(
-                                content: VStack(alignment: .leading, spacing: 10) {
+                            Button {
+                                editFood = f
+                            } label: {
+                                VStack(alignment: .leading, spacing: 10) {
                                     // hero：左食物名 + 餐次·份量；右热量大数字
                                     HStack(alignment: .center, spacing: 10) {
                                         Circle()
@@ -597,9 +602,9 @@ struct FoodListView: View {
                                     }
                                 }
                                 .padding(.vertical, 10).padding(.horizontal, 12)
-                                .card(radius: AIATheme.rMD, shadow: false),
-                                destination: FoodDetailView(entry: f)
-                            )
+                                .card(radius: AIATheme.rMD, shadow: false)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -750,6 +755,9 @@ struct FoodListView: View {
             }
             .background(Color(.systemGroupedBackground))
             .presentationDetents([.height(360)])
+        }
+        .sheet(item: $editFood) { food in
+            EditFoodView(entry: food)
         }
         .onAppear { meal = FoodListView.defaultMeal(for: .now) }
         .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker)
