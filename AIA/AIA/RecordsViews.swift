@@ -1348,7 +1348,7 @@ struct BillListView: View {
         let draft = Bill(
             merchant: "",
             amount: 0,
-            category: "其他",
+            category: "餐饮",  // 默认"餐饮"（icon=😋），最常用；用户可在 sheet 内改其他
             time: .now,
             confirmed: true
         )

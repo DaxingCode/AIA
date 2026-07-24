@@ -606,7 +606,9 @@ struct EditBillView: View {
         self.bill = bill
         self.isAdding = isAdding
         _merchant = State(initialValue: bill.merchant)
-        _amountText = State(initialValue: String(format: "%.2f", bill.amount))
+        // 添加模式：amountText 初值空，让 placeholder "0.00" 像"如 星巴克"一样点击消失；
+        // 编辑模式：保留原数值，placeholder 不显示。
+        _amountText = State(initialValue: isAdding ? "" : String(format: "%.2f", bill.amount))
         _category = State(initialValue: bill.category)
         _time = State(initialValue: bill.time)
         _note = State(initialValue: bill.note)
