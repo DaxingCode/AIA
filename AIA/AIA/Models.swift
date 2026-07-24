@@ -336,12 +336,12 @@ import SwiftData
     /// 备注图片文件名列表（仅本地，存于 LocalImageStore）
     var imageNames: [String] = []
     /// 最近一次编辑时间
-    var updatedAt: Date = Date.now
+    var updatedAt: Date
 
-    init(syncId: UUID, note: String = "", imageNames: [String] = []) {
+    init(syncId: UUID, note: String = "", imageNames: [String] = [], updatedAt: Date = .now) {
         self.syncId = syncId
         self.note = note
         self.imageNames = imageNames
-        self.updatedAt = .now
+        self.updatedAt = updatedAt
     }
 }
