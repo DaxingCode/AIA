@@ -1357,7 +1357,7 @@ struct BillListView: View {
                                 if idx < monthlyGroups.count - 1 {
                                     Rectangle()
                                         .fill(AIATheme.hairline)
-                                        .frame(height: 0.5)
+                                        .frame(height: 0.7)
                                         .padding(.horizontal, 12)
                                 }
                             }
@@ -1408,7 +1408,7 @@ struct BillListView: View {
                                     if idx < group.bills.count - 1 {
                                         Rectangle()
                                             .fill(AIATheme.hairline)
-                                            .frame(height: 0.5)
+                                            .frame(height: 0.7)
                                             .padding(.leading, 62)
                                     }
                                 }

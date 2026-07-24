@@ -94,9 +94,11 @@ enum AIATheme {
     // 语义表面（卡片/内层/分隔，自动适配深浅）
     static let surface          = Color.adaptive(light: 0xf7f9fb, dark: 0x1c1c1e)
     static let surfaceSecondary = Color.adaptive(light: 0xf1f3f5, dark: 0x2a2a2c)
-    // 深色值提亮到系统分隔线标准 0x545458：原 0x3a3a3c 在 surface/billBG 上色差仅 ~30 级，
-    // 0.5pt 细线几乎被深色背景吞掉（深色模式行间分隔不明显）；light 保持 0xe6e9ec 不动。
-    static let hairline         = Color.adaptive(light: 0xe6e9ec, dark: 0x545458)
+    // 深色值再提到 0x636366（系统深色 fill 3）：原 0x545458 虽解决了 0x3a3a3c 颜色对比，
+    // 但 0.5pt 细线物理宽度太弱，深色模式卡片上仍「细到几乎看不见」；0x636366 对比度再强一档。
+    // 配套 RecordsViews 行间分隔线宽 0.5→0.7 视觉权重 +40%，两步合击让深色模式分隔清晰可辨。
+    // light 保持 0xe6e9ec 不动。
+    static let hairline         = Color.adaptive(light: 0xe6e9ec, dark: 0x636366)
     static let fillSoft         = Color.adaptive(light: 0xeef1f4, dark: 0x2c2c2e)
     static let track            = Color.adaptive(light: 0xe3e7ea, dark: 0x363638)
 
