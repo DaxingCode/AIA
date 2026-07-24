@@ -1038,8 +1038,10 @@ struct EditTodoView: View {
                 VStack(spacing: 16) {
                     titleCard
                     timeAlertCard
-                    noteCard
+                    // 2026-07-24 顺序调整：propertyCard（状态+设置：已完成/优先级/重复）上移
+                    // 备注 noteCard 下移 —— 用户截图反馈"先看状态/再写备注"更符合视觉流
                     propertyCard
+                    noteCard
                     if !isAdding { deleteCard }    // 添加模式不显示删除按钮
                 }
                 .padding(.horizontal, 16)
