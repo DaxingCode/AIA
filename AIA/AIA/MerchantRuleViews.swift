@@ -140,6 +140,7 @@ struct MerchantRuleEditSheet: View {
     @State private var category: String = ""
     @State private var isIncome: Bool = false
     @State private var showCategoryPicker = false
+    @State private var showDeleteConfirm = false
     @FocusState private var merchantFocused: Bool
 
     private var isEditing: Bool { rule != nil }
@@ -157,6 +158,9 @@ struct MerchantRuleEditSheet: View {
                         merchantInputCard
                         categoryPickerCard
                         incomeToggleCard
+                        if isEditing {
+                            deleteCard
+                        }
                     }
                     .padding()
                 }
@@ -175,6 +179,18 @@ struct MerchantRuleEditSheet: View {
             }
             .sheet(isPresented: $showCategoryPicker) {
                 BillCategoryPickerSheet(selection: $category)
+            }
+            .confirmationDialog(
+                "确定要删除「\(merchant)」的规则吗？",
+                isPresented: $showDeleteConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("删除规则", role: .destructive) {
+                    deleteRule()
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("删除后此商户将恢复默认分类。")
             }
         }
     }
@@ -373,6 +389,36 @@ struct MerchantRuleEditSheet: View {
         .card()
     }
 
+    /// 危险操作卡片：仅编辑模式展示，与其他 card 同宽 + 圆角 + 卡片背景。
+    /// 整行可点 → 弹确认 dialog → 二次确认后才执行删除（防误触）。
+    private var deleteCard: some View {
+        Button {
+            showDeleteConfirm = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "trash.fill")
+                    .font(AIATheme.Font.callout)
+                    .foregroundStyle(AIATheme.over)
+                    .frame(width: 32, height: 32)
+                    .background(AIATheme.over.opacity(0.12))
+                    .clipShape(Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("删除此规则")
+                        .font(AIATheme.Font.callout.weight(.semibold))
+                        .foregroundStyle(AIATheme.over)
+                    Text("删除后此商户将恢复默认分类")
+                        .font(AIATheme.Font.caption)
+                        .foregroundStyle(AIATheme.muted)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     init(rule: MerchantMeta?) {
         self.rule = rule
         if let rule {
@@ -396,6 +442,15 @@ struct MerchantRuleEditSheet: View {
         }
 
         MerchantMetaStore.saveRule(merchant: raw, category: category, isIncome: isIncome, in: context)
+        CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        dismiss()
+    }
+
+    /// 软删当前规则：syncDeleted=true → @Query 谓词过滤掉 → 列表自动消失。
+    /// 与 markDeleted 行为一致（不硬删，保留云同步追溯能力）。
+    private func deleteRule() {
+        guard let rule else { return }
+        MerchantMetaStore.markDeleted(rule)
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
         dismiss()
     }
