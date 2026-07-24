@@ -884,10 +884,10 @@ struct ResultConfirmView: View {
                 editableFoods[0].sodiumPer100g = ref.sodium
                 nutritionSource = "已联网查询营养库「\(ref.name)」并保存"
             } else {
-                nutritionSource = "未查到权威营养数据，以下数值由 AI 看图估算，仅供参考，建议手动核对"
+                nutritionSource = "未查到权威营养数据，以上数值由 AI 看图估算，仅供参考，建议手动核对"
             }
         } catch {
-            nutritionSource = "联网查询失败，以下数值由 AI 看图估算，仅供参考，建议手动核对"
+            nutritionSource = "联网查询失败，以上数值由 AI 看图估算，仅供参考，建议手动核对"
         }
     }
 
