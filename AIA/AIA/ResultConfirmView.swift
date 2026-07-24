@@ -23,6 +23,21 @@ private struct EditableBill: Identifiable {
     var date: Date
 }
 
+/// 确认页里单条食物的可编辑副本。
+private struct EditableFood: Identifiable {
+    let id = UUID()
+    var name: String
+    var meal: String
+    var weightGram: String       // 克，用户可编辑
+    var caloriesPer100g: Double
+    var proteinPer100g: Double
+    var carbsPer100g: Double
+    var fatPer100g: Double
+    var fiberPer100g: Double     // 膳食纤维（克/100g）
+    var sugarPer100g: Double     // 糖（克/100g）
+    var sodiumPer100g: Double    // 钠（毫克/100g）
+}
+
 struct ResultConfirmView: View {
     let result: RecognitionResult
     let rawText: String
@@ -40,48 +55,17 @@ struct ResultConfirmView: View {
     // 查询库中已有账单，用于「相似账单去重提示」（同商户+金额相近+近7天）。
     @Query private var allBills: [Bill]
 
-    // 常用账单分类，供确认页一键 chip 选择（顺手编辑）。
-    private let commonCategories = ["餐饮", "交通", "购物", "住房", "娱乐", "医疗",
-                                    "教育", "通讯", "服饰", "美妆", "旅行", "红包",
-                                    "工资", "其他"]
 
     // 可编辑的本地副本（确认前给用户改）。一图/一消息可能有多条账单，故用数组逐条展示。
     @State private var editableBills: [EditableBill] = []
     @State private var showImageFull = false
     @State private var todoTitle: String = ""
     @State private var todoDueDate: Date = .now
-    @State private var foodName: String = ""
-    @State private var foodMeal: String = "午餐"     // 餐次：早餐/午餐/晚餐/其他，按识别时间自动判定，用户可改
-    @State private var foodWeight: String = "100"   // 克，用户可改
-    @State private var foodCaloriesPer100g: Double = 0
-    @State private var foodProteinPer100g: Double = 0
-    @State private var foodCarbsPer100g: Double = 0
-    @State private var foodFatPer100g: Double = 0
+    // 可编辑食物列表：支持图片/文字识别出多种食物时逐条编辑保存
+    @State private var editableFoods: [EditableFood] = []
     @State private var healthMetric: String = ""
     @State private var healthValue: String = ""
     @State private var nutritionSource: String = ""   // 营养库校正来源提示
-
-    // 根据重量自动计算总热量
-    private var foodCalories: Double {
-        let weight = Double(foodWeight) ?? 100
-        return foodCaloriesPer100g * weight / 100
-    }
-
-    // 根据重量自动计算总蛋白质、碳水、脂肪
-    private var foodProtein: Double {
-        let weight = Double(foodWeight) ?? 100
-        return foodProteinPer100g * weight / 100
-    }
-
-    private var foodCarbs: Double {
-        let weight = Double(foodWeight) ?? 100
-        return foodCarbsPer100g * weight / 100
-    }
-
-    private var foodFat: Double {
-        let weight = Double(foodWeight) ?? 100
-        return foodFatPer100g * weight / 100
-    }
 
     var body: some View {
         NavigationStack {
@@ -201,7 +185,7 @@ struct ResultConfirmView: View {
             parts.append("\(editableBills.count) 笔账单")
         }
         if types.contains("todo"), !todoTitle.isEmpty { parts.append("1 条待办") }
-        if types.contains("food"), !foodName.isEmpty { parts.append("1 条饮食") }
+        if types.contains("food"), !editableFoods.isEmpty { parts.append("\(editableFoods.count) 条饮食") }
         if types.contains("health"), !healthMetric.isEmpty { parts.append("1 条健康") }
         // 单一意图且单条时不显示（无批量含义），多条或多类型才提示
         guard parts.count > 1 || editableBills.count > 1 else { return "" }
@@ -437,6 +421,18 @@ struct ResultConfirmView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             textField(eb.category, placeholder: "输入分类")
                             categoryChips(eb.category)
+                            let willBeIncome = RecognitionSaver.isIncomeSignal(
+                                category: eb.category.wrappedValue,
+                                merchant: eb.merchant.wrappedValue,
+                                rawText: rawText
+                            )
+                            HStack(spacing: 4) {
+                                Image(systemName: willBeIncome ? "arrow.down.circle.fill" : "arrow.up.circle.fill")
+                                    .font(AIATheme.Font.micro)
+                                Text(willBeIncome ? "将记为收入" : "将记为支出")
+                                    .font(AIATheme.Font.micro)
+                            }
+                            .foregroundStyle(willBeIncome ? AIATheme.income : AIATheme.expense)
                         }
                     }
                 }
@@ -444,11 +440,11 @@ struct ResultConfirmView: View {
         }
     }
 
-    // MARK: - 分类快捷选择 chips（一键选常用分类，减少手输）
+    // MARK: - 分类快捷选择 chips（使用与编辑页完全一致的 billCategoryOptions，保证名称、数量、图标统一）
     private func categoryChips(_ selection: Binding<String>) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(commonCategories, id: \.self) { cat in
+                ForEach(billCategoryOptions, id: \.self) { cat in
                     let selected = selection.wrappedValue.trimmingCharacters(in: .whitespaces) == cat
                     Button {
                         selection.wrappedValue = cat
@@ -458,7 +454,7 @@ struct ResultConfirmView: View {
                             Text(BillCategoryHelpers.icon(for: cat))
                                 .font(AIATheme.Font.caption)
                             Text(cat)
-                                .font(.system(size: 12, weight: selected ? .semibold : .regular))
+                                .font(AIATheme.Font.micro.weight(selected ? .semibold : .regular))
                         }
                         .foregroundStyle(selected ? .white : AIATheme.sub)
                         .padding(.horizontal, 10).padding(.vertical, 6)
@@ -487,51 +483,21 @@ struct ResultConfirmView: View {
         }
     }
 
-    // MARK: - 食物卡片
+    // MARK: - 食物卡片（支持多食物列表）
     private var foodCard: some View {
         sectionCard(title: "食物", icon: "fork.knife", color: AIATheme.food) {
             VStack(spacing: 12) {
-                fieldRow(icon: "sun.horizon", label: "餐次") {
-                    Picker("", selection: $foodMeal) {
-                        ForEach(["早餐", "午餐", "晚餐", "加餐"], id: \.self) { Text($0) }
-                    }
-                    .pickerStyle(.segmented)
+                if editableFoods.isEmpty {
+                    Text("未识别到食物")
+                        .font(AIATheme.Font.subhead)
+                        .foregroundStyle(AIATheme.muted)
+                        .padding(.vertical, 8)
                 }
-                fieldRow(icon: "fork.knife", label: "名称") {
-                    textField($foodName, placeholder: "输入食物名称")
+                ForEach(Array(editableFoods.enumerated()), id: \.element.id) { idx, _ in
+                    foodItemCard(idx: idx)
                 }
-                HStack(spacing: 12) {
-                    fieldRow(icon: "scalemass", label: "重量") {
-                        HStack(spacing: 4) {
-                            Spacer()
-                            TextField("100", text: $foodWeight)
-                                .keyboardType(.decimalPad)
-                                .font(AIATheme.Font.title3.weight(.semibold))
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 70)
-                            Text("g")
-                                .font(AIATheme.Font.callout)
-                                .foregroundStyle(AIATheme.muted)
-                        }
-                    }
-                    fieldRow(icon: "flame", label: "热量") {
-                        HStack(spacing: 4) {
-                            Spacer()
-                            Text("\(foodCalories, specifier: "%.1f")")
-                                .font(AIATheme.Font.title3.weight(.semibold))
-                                .foregroundStyle(AIATheme.food)
-                            Text("kcal")
-                                .font(AIATheme.Font.caption)
-                                .foregroundStyle(AIATheme.muted)
-                        }
-                    }
-                }
-                VStack(spacing: 8) {
-                    macroRow("蛋白质", foodProtein, foodProteinPer100g, "g", AIATheme.blue)
-                    macroRow("碳水", foodCarbs, foodCarbsPer100g, "g", AIATheme.amber)
-                    macroRow("脂肪", foodFat, foodFatPer100g, "g", AIATheme.green)
-                }
-                if !nutritionSource.isEmpty {
+                // 营养校正来源提示（仅在单食物且已校正时显示，多食物时不显示以免混淆）
+                if editableFoods.count == 1, !nutritionSource.isEmpty {
                     HStack(spacing: 6) {
                         Image(systemName: "info.circle")
                             .font(AIATheme.Font.micro)
@@ -548,6 +514,76 @@ struct ResultConfirmView: View {
                 }
             }
         }
+    }
+
+    /// 单条食物编辑卡片
+    private func foodItemCard(idx: Int) -> some View {
+        let binding = Binding<EditableFood>(
+            get: { editableFoods[idx] },
+            set: { editableFoods[idx] = $0 }
+        )
+        let food = editableFoods[idx]
+        let weight = Double(food.weightGram) ?? 100
+        let ratio = weight / 100
+        let totalCal = food.caloriesPer100g * ratio
+        let totalPro = food.proteinPer100g * ratio
+        let totalCar = food.carbsPer100g * ratio
+        let totalFat = food.fatPer100g * ratio
+        let totalFiber = food.fiberPer100g * ratio
+        let totalSugar = food.sugarPer100g * ratio
+        let totalSodium = food.sodiumPer100g * ratio
+
+        return VStack(spacing: 10) {
+            // 餐次 + 名称
+            HStack(spacing: 10) {
+                fieldRow(icon: "sun.horizon", label: "餐次") {
+                    Picker("", selection: binding.meal) {
+                        ForEach(["早餐", "午餐", "晚餐", "加餐"], id: \.self) { Text($0) }
+                    }
+                    .pickerStyle(.segmented)
+                }
+            }
+            fieldRow(icon: "fork.knife", label: "名称") {
+                textField(binding.name, placeholder: "输入食物名称")
+            }
+            HStack(spacing: 12) {
+                fieldRow(icon: "scalemass", label: "重量") {
+                    HStack(spacing: 4) {
+                        Spacer()
+                        TextField("100", text: binding.weightGram)
+                            .keyboardType(.decimalPad)
+                            .font(AIATheme.Font.title3.weight(.semibold))
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 70)
+                        Text("g")
+                            .font(AIATheme.Font.callout)
+                            .foregroundStyle(AIATheme.muted)
+                    }
+                }
+                fieldRow(icon: "flame", label: "热量") {
+                    HStack(spacing: 4) {
+                        Spacer()
+                        Text("\(totalCal, specifier: "%.1f")")
+                            .font(AIATheme.Font.title3.weight(.semibold))
+                            .foregroundStyle(AIATheme.food)
+                        Text("kcal")
+                            .font(AIATheme.Font.caption)
+                            .foregroundStyle(AIATheme.muted)
+                    }
+                }
+            }
+            VStack(spacing: 8) {
+                macroRow("蛋白质", totalPro, food.proteinPer100g, "g", AIATheme.blue)
+                macroRow("碳水", totalCar, food.carbsPer100g, "g", AIATheme.amber)
+                macroRow("脂肪", totalFat, food.fatPer100g, "g", AIATheme.green)
+                macroRow("膳食纤维", totalFiber, food.fiberPer100g, "g", AIATheme.purple)
+                macroRow("糖", totalSugar, food.sugarPer100g, "g", AIATheme.warn)
+                macroRow("钠", totalSodium, food.sodiumPer100g, "mg", AIATheme.warning)
+            }
+        }
+        .padding(12)
+        .background(AIATheme.dietBG)
+        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
     }
 
     private func macroRow(_ name: String, _ total: Double, _ per100: Double, _ unit: String, _ color: Color) -> some View {
@@ -648,52 +684,110 @@ struct ResultConfirmView: View {
     // 用模型结果预填表单（展示已自动入库的原始识别 / 或重复待确认的原始识别）
     private func fillFromResult() {
         editableBills = result.billList.enumerated().map { (i, b) in
-            EditableBill(
+            let rawMerchant = b.merchant ?? ""
+            // 收入类（工资/奖金/退款等）截图云端常不返商户名：默认「收入」，
+            // 用户可直接保存，也可改成真实付款方（如公司名）。
+            let defaultMerchant = rawMerchant.isEmpty
+                ? (RecognitionSaver.isIncomeSignal(category: b.category ?? "", merchant: "", rawText: rawText) ? "收入" : "")
+                : rawMerchant
+            return EditableBill(
                 originalIndex: i,
-                merchant: b.merchant ?? "",
+                merchant: defaultMerchant,
                 amount: b.amount.map { "\($0)" } ?? "",
                 category: b.category ?? "",
-                date: RecognitionResult.date(from: b.time) ?? .now
+                date: RecognitionResult.date(from: b.time) ?? Calendar.current.date(bySettingHour: 0, minute: 0, second: 0, of: .now) ?? .now
             )
         }
 
         todoTitle = result.todo?.title ?? ""
         todoDueDate = defaultTodoDueDate()
 
-        foodName = result.food?.name ?? ""
-        foodMeal = RecognitionSaver.defaultMeal(for: .now)
-        foodCaloriesPer100g = result.food?.calories ?? 0
-        foodProteinPer100g = result.food?.protein ?? 0
-        foodCarbsPer100g = result.food?.carbs ?? 0
-        foodFatPer100g = result.food?.fat ?? 0
-
-        // 营养成分表本地 OCR 的标签值是权威，绝不被通用营养库覆盖。
-        // 只有云端/文本模型估算（无真实标签）时，才用营养库做校正。
-        if source == .local {
-            nutritionSource = result.food?.name?.isEmpty == false
-                ? "按包装标签识别"
-                : ""
-        } else if let ref = NutritionLibrary.shared.match(foodName) {
-            foodCaloriesPer100g = ref.kcal
-            foodProteinPer100g = ref.protein
-            foodCarbsPer100g = ref.carbs
-            foodFatPer100g = ref.fat
-            nutritionSource = "已按营养库「\(ref.name)」校正：每100g \(Int(ref.kcal)) kcal"
-        } else {
-            nutritionSource = result.food?.name?.isEmpty == false
-                ? "未匹配营养库，使用模型估算值（可手动改重量）"
-                : ""
+        // 多食物支持：逐条填充 editableFoods（foodList 优先，兼容单条 food）
+        let foods = result.foodList
+        let defaultMeal = RecognitionSaver.defaultMeal(for: .now)
+        editableFoods = foods.map { f in
+            let portion = f.portion ?? "100克"
+            let weight = (portion.range(of: #"\d+"#, options: .regularExpression).map { String(portion[$0]) }) ?? "100"
+            return EditableFood(
+                name: f.name ?? "",
+                meal: f.meal ?? defaultMeal,
+                weightGram: weight,
+                caloriesPer100g: f.calories ?? 0,
+                proteinPer100g: f.protein ?? 0,
+                carbsPer100g: f.carbs ?? 0,
+                fatPer100g: f.fat ?? 0,
+                fiberPer100g: f.fiber ?? 0,
+                sugarPer100g: f.sugar ?? 0,
+                sodiumPer100g: f.sodium ?? 0
+            )
         }
 
-        let portion = result.food?.portion ?? "100克"
-        if let match = portion.range(of: #"\d+"#, options: .regularExpression) {
-            foodWeight = String(portion[match])
-        } else {
-            foodWeight = "100"
+        // 营养成分表本地 OCR 的标签值是权威，绝不被通用营养库覆盖。
+        // 其它食物走三级校正：① 硬编码营养库 → ② 本地联网缓存(FoodMetaStore) → ③ 联网查询并落库。
+        // 仅对单食物做校正；多食物时不做自动校正（避免批次查询慢）
+        if let firstFood = editableFoods.first, editableFoods.count == 1 {
+            let name = firstFood.name
+            if source == .local {
+                nutritionSource = name.isEmpty ? "" : "按包装标签识别"
+            } else if let ref = NutritionLibrary.shared.match(name) {
+                editableFoods[0].caloriesPer100g = ref.kcal
+                editableFoods[0].proteinPer100g = ref.protein
+                editableFoods[0].carbsPer100g = ref.carbs
+                editableFoods[0].fatPer100g = ref.fat
+                editableFoods[0].fiberPer100g = ref.fiber
+                editableFoods[0].sugarPer100g = ref.sugar
+                editableFoods[0].sodiumPer100g = ref.sodium
+                nutritionSource = "已按营养库「\(ref.name)」校正：每100g \(Int(ref.kcal)) kcal"
+            } else if let meta = FoodMetaStore.lookup(name, in: context) {
+                editableFoods[0].caloriesPer100g = meta.kcal
+                editableFoods[0].proteinPer100g = meta.protein
+                editableFoods[0].carbsPer100g = meta.carbs
+                editableFoods[0].fatPer100g = meta.fat
+                editableFoods[0].fiberPer100g = meta.fiber
+                editableFoods[0].sugarPer100g = meta.sugar
+                editableFoods[0].sodiumPer100g = meta.sodium
+                let disp = meta.displayName.isEmpty ? name : meta.displayName
+                nutritionSource = "已用本地营养库「\(disp)」（联网查得）：每100g \(Int(meta.kcal)) kcal"
+            } else if !name.isEmpty {
+                nutritionSource = "正在联网查询营养库…"
+                Task { @MainActor in await resolveFoodNutrition() }
+            }
         }
 
         healthMetric = result.health?.metric ?? ""
         healthValue = result.health?.value ?? ""
+    }
+
+    // 营养库三级校正第 ③ 步：联网查询该食物每100g营养，成功后落库 FoodMetaStore。
+    @MainActor
+    private func resolveFoodNutrition() async {
+        guard editableFoods.count == 1, source != .local else { return }
+        let name = editableFoods[0].name
+        guard !name.isEmpty else { return }
+        // 二次确认本地仍未命中（避免 fillFromResult 已处理或用户已改食物名）
+        if NutritionLibrary.shared.match(name) != nil { return }
+        if FoodMetaStore.lookup(name, in: context) != nil { return }
+        do {
+            if let ref = try await RecognizeService.queryFood(name: name) {
+                FoodMetaStore.upsert(name: name, displayName: ref.name,
+                                     kcal: ref.kcal, protein: ref.protein,
+                                     carbs: ref.carbs, fat: ref.fat,
+                                     fiber: ref.fiber, sugar: ref.sugar, sodium: ref.sodium,
+                                     source: "cloud", in: context)
+                editableFoods[0].caloriesPer100g = ref.kcal
+                editableFoods[0].proteinPer100g = ref.protein
+                editableFoods[0].carbsPer100g = ref.carbs
+                editableFoods[0].fatPer100g = ref.fat
+                editableFoods[0].fiberPer100g = ref.fiber
+                editableFoods[0].sugarPer100g = ref.sugar
+                editableFoods[0].sodiumPer100g = ref.sodium
+                nutritionSource = "已联网查询营养库「\(ref.name)」并保存"
+            } else {
+                nutritionSource = "未查到营养，使用模型估算值（可手动改）"
+            }
+        } catch {
+            nutritionSource = "联网查询失败，使用模型估算值（可手动改）"
+        }
     }
 
     // 把用户表单同步回记录（覆盖），并触发确认后副作用（卡路里/健康同步）。
@@ -738,7 +832,7 @@ struct ResultConfirmView: View {
                     if let amt = Double(eb.amount) { b.amount = amt }
                     b.category = eb.category
                     b.time = eb.date
-                    b.isIncome = RecognitionSaver.isIncomeCategory(eb.category)
+                    b.isIncome = RecognitionSaver.isIncomeSignal(category: eb.category, merchant: eb.merchant, rawText: rawText)
                     b.imageName = session.imageName
                 }
             }
@@ -754,23 +848,58 @@ struct ResultConfirmView: View {
             DefaultReminderSettings.shared.apply(to: r)   // 重算提醒时间点
             ReminderNotificationManager.schedule(r)        // 覆盖旧通知（按 syncId）
         }
-        if types.contains("food"), let f = session.food {
-            let weight = Double(foodWeight) ?? 100
-            let ratio = weight / 100
-            f.name = foodName
-            f.meal = foodMeal
-            f.calories = foodCaloriesPer100g * ratio
-            f.protein = foodProteinPer100g * ratio
-            f.carbs = foodCarbsPer100g * ratio
-            f.fat = foodFatPer100g * ratio
-            f.portion = "\(Int(weight))克"
-            f.weightGram = weight
-            f.baseCalories = foodCaloriesPer100g
-            f.baseProtein = foodProteinPer100g
-            f.baseCarbs = foodCarbsPer100g
-            f.baseFat = foodFatPer100g
-            f.imageName = session.imageName
-            HealthManager.shared.saveCaloriesConsumed(f.calories, date: .now)  // 确认时同步卡路里
+        if types.contains("food") {
+            if editableFoods.count == 1, let f = session.food {
+                // 单食物：沿用原有路径，更新已有的 session.food
+                let weight = Double(editableFoods[0].weightGram) ?? 100
+                let ratio = weight / 100
+                f.name = editableFoods[0].name
+                f.meal = editableFoods[0].meal
+                f.calories = editableFoods[0].caloriesPer100g * ratio
+                f.protein = editableFoods[0].proteinPer100g * ratio
+                f.carbs = editableFoods[0].carbsPer100g * ratio
+                f.fat = editableFoods[0].fatPer100g * ratio
+                f.fiber = editableFoods[0].fiberPer100g * ratio
+                f.sugar = editableFoods[0].sugarPer100g * ratio
+                f.sodium = editableFoods[0].sodiumPer100g * ratio
+                f.portion = "\(Int(weight))克"
+                f.weightGram = weight
+                f.baseCalories = editableFoods[0].caloriesPer100g
+                f.baseProtein = editableFoods[0].proteinPer100g
+                f.baseCarbs = editableFoods[0].carbsPer100g
+                f.baseFat = editableFoods[0].fatPer100g
+                f.baseFiber = editableFoods[0].fiberPer100g
+                f.baseSugar = editableFoods[0].sugarPer100g
+                f.baseSodium = editableFoods[0].sodiumPer100g
+                f.imageName = session.imageName
+                HealthManager.shared.saveCaloriesConsumed(f.calories, date: .now)
+            } else if editableFoods.count > 1 {
+                // 多食物：每食物独立建 FoodEntry（session.food 保留最后一条，不做编辑）
+                for f in editableFoods {
+                    let weight = Double(f.weightGram) ?? 100
+                    let ratio = weight / 100
+                    let cal = f.caloriesPer100g * ratio
+                    let pro = f.proteinPer100g * ratio
+                    let car = f.carbsPer100g * ratio
+                    let fat = f.fatPer100g * ratio
+                    let fiber = f.fiberPer100g * ratio
+                    let sugar = f.sugarPer100g * ratio
+                    let sodium = f.sodiumPer100g * ratio
+                    let entry = FoodEntry(name: f.name, calories: cal, protein: pro, carbs: car, fat: fat,
+                                          fiber: fiber, sugar: sugar, sodium: sodium,
+                                          portion: "\(Int(weight))克", meal: f.meal,
+                                          weightGram: weight,
+                                          baseCalories: f.caloriesPer100g,
+                                          baseProtein: f.proteinPer100g,
+                                          baseCarbs: f.carbsPer100g,
+                                          baseFat: f.fatPer100g,
+                                          baseFiber: f.fiberPer100g,
+                                          baseSugar: f.sugarPer100g,
+                                          baseSodium: f.sodiumPer100g,
+                                          imageName: session.imageName)
+                    context.insert(entry)
+                }
+            }
         }
         if types.contains("health"), let h = session.health {
             h.metric = healthMetric
@@ -830,16 +959,22 @@ struct ResultConfirmView: View {
             let corrected: [String: Any] = ["title": todoTitle, "due": isoString(todoDueDate)]
             return (type, original, corrected)
         case "food":
-            guard let f = result.food else { return nil }
+            guard let f = result.foodList.first else { return nil }
             let original: [String: Any] = [
                 "name": n(f.name), "calories": n(f.calories), "protein": n(f.protein),
-                "carbs": n(f.carbs), "fat": n(f.fat), "portion": n(f.portion)
+                "carbs": n(f.carbs), "fat": n(f.fat),
+                "fiber": n(f.fiber), "sugar": n(f.sugar), "sodium": n(f.sodium),
+                "portion": n(f.portion)
             ]
-            let corrected: [String: Any] = [
-                "name": foodName, "calories": foodCaloriesPer100g,
-                "protein": foodProteinPer100g, "carbs": foodCarbsPer100g,
-                "fat": foodFatPer100g, "portion": "\(Int(Double(foodWeight) ?? 100))克"
-            ]
+            let corrected: [String: Any] = {
+                guard let first = editableFoods.first else { return original }
+                let weight = Double(first.weightGram) ?? 100
+                return ["name": first.name, "calories": first.caloriesPer100g,
+                        "protein": first.proteinPer100g, "carbs": first.carbsPer100g,
+                        "fat": first.fatPer100g,
+                        "fiber": first.fiberPer100g, "sugar": first.sugarPer100g, "sodium": first.sodiumPer100g,
+                        "portion": "\(Int(weight))克"]
+            }()
             return (type, original, corrected)
         case "health":
             guard let h = result.health else { return nil }
@@ -861,7 +996,7 @@ func makeResultConfirmView(_ present: RecognitionPresent) -> ResultConfirmView {
     case .duplicate(let d):
         return ResultConfirmView(result: d.result, rawText: d.rawText, sourceImage: d.sourceImage,
                                  source: d.source, duplicate: d)
-    case .pending(let result, let rawText, let image, let source):
+    case .pending(let result, let rawText, let image, let source, _):
         return ResultConfirmView(result: result, rawText: rawText, sourceImage: image,
                                  source: source, existingSession: nil, duplicate: nil)
     }
