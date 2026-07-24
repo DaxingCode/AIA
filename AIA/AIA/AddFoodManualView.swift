@@ -200,16 +200,22 @@ struct AddFoodManualView: View {
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
     }
 
-    // MARK: - 名称卡片
+    // MARK: - 食用重量卡片（合并自原 nameCard + infoCard 重量行）
 
     private var nameCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("食物名称")
+            Text("食用重量")
                 .font(AIATheme.Font.micro)
                 .foregroundStyle(AIATheme.muted)
-            TextField("如 牛肉、苹果", text: $name)
-                .font(AIATheme.Font.headline)
-                .foregroundStyle(.primary)
+            HStack(spacing: 6) {
+                TextField("100", text: $weightText)
+                    .keyboardType(.decimalPad)
+                    .font(AIATheme.Font.headline.weight(.medium))
+                    .foregroundStyle(.primary)
+                Text("克")
+                    .font(AIATheme.Font.subhead)
+                    .foregroundStyle(AIATheme.muted)
+            }
         }
         .padding(14)
         .card()
@@ -267,30 +273,6 @@ struct AddFoodManualView: View {
             .padding(.vertical, 10)
             .padding(.horizontal, 14)
 
-            Divider().padding(.leading, 46)
-
-            // 重量
-            HStack(spacing: 12) {
-                Image(systemName: "scalemass.fill")
-                    .font(AIATheme.Font.subhead)
-                    .foregroundStyle(AIATheme.muted)
-                    .frame(width: 20, alignment: .center)
-                Text("重量")
-                    .font(AIATheme.Font.callout)
-                    .foregroundStyle(.primary)
-                Spacer()
-                TextField("100", text: $weightText)
-                    .keyboardType(.decimalPad)
-                    .multilineTextAlignment(.trailing)
-                    .font(AIATheme.Font.headline.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .frame(width: 80)
-                Text("g")
-                    .font(AIATheme.Font.subhead)
-                    .foregroundStyle(AIATheme.muted)
-            }
-            .padding(.vertical, 14)
-            .padding(.horizontal, 14)
         }
         .card()
     }
