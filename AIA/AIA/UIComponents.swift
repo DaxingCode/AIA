@@ -555,39 +555,38 @@ struct RecognizingOverlay: View {
     let onBack: () -> Void
 
     var body: some View {
-        ZStack {
-            // 背景：用户照片撑满 + 模糊
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .blur(radius: 25)
-                .ignoresSafeArea()
+        GeometryReader { proxy in
+            ZStack {
+                // 背景：用户照片撑满 + 模糊
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .blur(radius: 25)
+                    .ignoresSafeArea()
 
-            // 半透明白色遮罩，让文字可读
-            Color.white.opacity(0.45)
-                .ignoresSafeArea()
+                // 半透明白色遮罩，让文字可读
+                Color.white.opacity(0.45)
+                    .ignoresSafeArea()
 
-            // 中央：spinner + 双行文字
-            VStack(spacing: 14) {
-                ProgressView()
-                    .controlSize(.large)
-                    .tint(AIATheme.food)
-                VStack(spacing: 4) {
-                    Text("阿宝AI正在识别中")
-                        .font(AIATheme.Font.body.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .multilineTextAlignment(.center)
-                    Text("账单、食物、通知都能识别哦")
-                        .font(AIATheme.Font.footnote)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
+                // 中央：spinner + 双行文字
+                VStack(spacing: 14) {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(AIATheme.food)
+                    VStack(spacing: 4) {
+                        Text("阿宝AI正在识别中")
+                            .font(AIATheme.Font.body.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .multilineTextAlignment(.center)
+                        Text("账单、食物、通知都能识别哦")
+                            .font(AIATheme.Font.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
                 }
-            }
-            .padding(.horizontal, 32)
+                .padding(.horizontal, 32)
 
-            // 底部：返回按钮
-            VStack {
-                Spacer()
+                // 底部 1/3 位置：返回按钮（中心锚定到距顶 2/3 屏高）
                 Button {
                     onBack()
                 } label: {
@@ -603,7 +602,7 @@ struct RecognizingOverlay: View {
                     .background(.ultraThinMaterial)
                     .clipShape(Capsule())
                 }
-                .padding(.bottom, 24)
+                .position(x: proxy.size.width / 2, y: proxy.size.height * 2 / 3)
             }
         }
     }
