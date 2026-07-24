@@ -1001,6 +1001,13 @@ struct EditTodoView: View {
     @State private var alertItems: [AlertItem]
     @State private var editingCustom: AlertItem?
 
+    // 备注（关联 Reminder.syncId → ReminderNote，仅本地，参照 FoodNote 风格）
+    @State private var noteText: String = ""
+
+    // 删除（参照 EditBillView 模式：先 dismiss，等 onDisappear 真正软删）
+    @State private var showDeleteConfirm = false
+    @State private var pendingDeleteID: PersistentIdentifier? = nil
+
     init(reminder: Reminder) {
         self.reminder = reminder
         _title = State(initialValue: reminder.title)
@@ -1021,7 +1028,9 @@ struct EditTodoView: View {
                         titleCard
                         dueCard
                         alertCard
+                        noteCard
                         propertyCard
+                        deleteCard
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
@@ -1042,6 +1051,34 @@ struct EditTodoView: View {
             }
             .sheet(item: $editingCustom) { item in
                 customTimeSheet(item: item)
+            }
+            .alert("删除待办", isPresented: $showDeleteConfirm) {
+                Button("取消", role: .cancel) {}
+                Button("删除", role: .destructive) {
+                    pendingDeleteID = reminder.persistentModelID
+                    dismiss()
+                }
+            } message: {
+                Text("删除后不可恢复，确定要删除吗？")
+            }
+            .onAppear {
+                // 懒加载备注：首次进入编辑页时按 syncId 取 ReminderNote（1:1，参照 FoodNote 模式）
+                let targetSyncId = reminder.syncId
+                if let existing = try? context.fetch(FetchDescriptor<ReminderNote>(
+                    predicate: #Predicate { $0.syncId == targetSyncId })).first {
+                    noteText = existing.note
+                }
+            }
+            .onDisappear {
+                // 与 EditBillView 同款：先 dismiss 回列表，等 sheet 动画完全结束后再执行删除，
+                // 避免 syncDeleted=true 触发 @Query 重 fetch 与动画叠加卡死。
+                // 只保存 ID，不捕获 reminder 对象，防止返回列表后对象被 fault 后访问属性闪退。
+                if let id = pendingDeleteID {
+                    pendingDeleteID = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                        SafeDelete.reminderByID(id, in: context)
+                    }
+                }
             }
         }
     }
@@ -1158,6 +1195,44 @@ struct EditTodoView: View {
             toggleRow(icon: "checkmark.circle", label: "已完成", isOn: $done)
         }
         .card()
+    }
+
+    // MARK: - 备注卡（仅文字，不带图片附件，参照 EditBillView 简洁模式 + FoodNote 1:1 关联风格）
+    private var noteCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 5) {
+                Image(systemName: "note.text")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                Text("备注")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+            }
+            TextEditor(text: $noteText)
+                .font(AIATheme.Font.body)
+                .foregroundStyle(.primary)
+                .frame(minHeight: 60)
+                .scrollContentBackground(.hidden)
+        }
+        .padding(14)
+        .card()
+    }
+
+    // MARK: - 删除卡（与 EditBillView.deleteCard 同款：warn 红 + 半透明背景 + hairline 描边 + 确认弹窗）
+    private var deleteCard: some View {
+        Button {
+            showDeleteConfirm = true
+        } label: {
+            Text("删除待办")
+                .font(AIATheme.Font.subhead.weight(.semibold))
+                .foregroundStyle(AIATheme.warn)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(AIATheme.warn.opacity(0.08))
+                .overlay(RoundedRectangle(cornerRadius: AIATheme.rMD).stroke(AIATheme.warn.opacity(0.25), lineWidth: 0.5))
+                .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - 通用行组件
@@ -1316,6 +1391,22 @@ struct EditTodoView: View {
         } else {
             ReminderNotificationManager.cancel(reminder)
         }
+
+        // 备注：按 syncId 关联 ReminderNote；无内容则删除（若有），参照 FoodNote 懒加载模式
+        let targetSyncId = reminder.syncId
+        let existing = try? context.fetch(FetchDescriptor<ReminderNote>(
+            predicate: #Predicate { $0.syncId == targetSyncId })).first
+        let noteEmpty = noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if noteEmpty {
+            if let existing { context.delete(existing) }
+        } else if let existing {
+            existing.note = noteText
+            existing.updatedAt = .now
+        } else {
+            let rn = ReminderNote(syncId: reminder.syncId, note: noteText)
+            context.insert(rn)
+        }
+        try? context.save()
         dismiss()
     }
 }

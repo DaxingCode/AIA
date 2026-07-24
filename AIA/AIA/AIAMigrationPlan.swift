@@ -624,17 +624,43 @@ enum SchemaVersion11: VersionedSchema {
     }
 }
 
+// MARK: - v12.0.0：新增 ReminderNote 模型（待办备注，1:1 关联 Reminder.syncId）。
+//            用于编辑待办页的备注栏（文字，不带图片附件，参照 Bill.note 简洁模式）。
+//            本次仅新增模型、不修改已有 @Model 字段，v11→v12 走 lightweight（参照 v9→v10
+//            加 WaterLog 表已验证可行）。ReminderNote 仅本地存储，不参与云同步。
+//            旧库升 v12 后老待办记录没有对应 ReminderNote，首次进入编辑页时懒创建。
+enum SchemaVersion12: VersionedSchema {
+    static var versionIdentifier: Schema.Version = Schema.Version(12, 0, 0)
+    static var models: [any PersistentModel.Type] {
+        [
+            Bill.self,
+            Reminder.self,
+            FoodEntry.self,
+            HealthMetric.self,
+            RecognitionRecord.self,
+            ChatMessage.self,
+            RecurringRule.self,
+            MerchantMeta.self,
+            FoodMeta.self,
+            WaterLog.self,
+            FoodNote.self,
+            ReminderNote.self    // v12 新增
+        ]
+    }
+}
+
 // MARK: - 迁移计划：v1 → v3 仅新增 MerchantMeta 表；v3 → v4 为 RecurringRule 新增 3 个字段；
 //           v4 → v5 为 FoodEntry 新增 5 个可选字段；v5 → v6 新增 FoodMeta 表；
 //           v6 → v7 为 MerchantMeta 新增 3 个 sync 字段；v7 → v8 为 FoodEntry 新增 7 个字段；
 //           v8 → v9 为 RecurringRule 新增 3 个 sync 字段；
-//           v9 → v10 新增 WaterLog 表。均为 lightweight。
+//           v9 → v10 新增 WaterLog 表；v10 → v11 新增 FoodNote 表；v11 → v12 新增 ReminderNote 表。
+//           均为 lightweight。
 //           注意：v1 与 v3 之间的中间版本（如 v2）若模型集合与 v1 完全相同，
 //           其 schema checksum 会与 v1 重复，导致 SwiftData 报
 //           "Duplicate version checksums across stages detected"，故不保留同构中间版本。
 enum AIAMigrationPlan: SchemaMigrationPlan {
-    static var schemas: [VersionedSchema.Type] { [SchemaVersion1.self, SchemaVersion3.self, SchemaVersion4.self, SchemaVersion5.self, SchemaVersion6.self, SchemaVersion7.self, SchemaVersion8.self, SchemaVersion9.self, SchemaVersion10.self, SchemaVersion11.self] }
-    static var stages: [MigrationStage] { [migrateV1toV3, migrateV3toV4, migrateV4toV5, migrateV5toV6, migrateV6toV7, migrateV7toV8, migrateV8toV9, migrateV9toV10, migrateV10toV11] }
+    static var schemas: [VersionedSchema.Type] { [SchemaVersion1.self, SchemaVersion3.self, SchemaVersion4.self, SchemaVersion5.self, SchemaVersion6.self, SchemaVersion7.self, SchemaVersion8.self, SchemaVersion9.self, SchemaVersion10.self, SchemaVersion11.self, SchemaVersion12.self] }
+    static var stages: [MigrationStage] { [migrateV1toV3, migrateV3toV4, migrateV4toV5, migrateV5toV6, migrateV6toV7, migrateV7toV8, migrateV8toV9, migrateV9toV10, migrateV10toV11, migrateV11toV12] }
 
     static let migrateV1toV3 = MigrationStage.lightweight(
         fromVersion: SchemaVersion1.self,
@@ -679,5 +705,10 @@ enum AIAMigrationPlan: SchemaMigrationPlan {
     static let migrateV10toV11 = MigrationStage.lightweight(
         fromVersion: SchemaVersion10.self,
         toVersion: SchemaVersion11.self
+    )
+
+    static let migrateV11toV12 = MigrationStage.lightweight(
+        fromVersion: SchemaVersion11.self,
+        toVersion: SchemaVersion12.self
     )
 }

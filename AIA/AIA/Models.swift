@@ -332,16 +332,42 @@ import SwiftData
     /// 关联 FoodEntry.syncId（1:1）
     var syncId: UUID
     /// 备注文字
-    var note: String = ""
+    var note: String
     /// 备注图片文件名列表（仅本地，存于 LocalImageStore）
-    var imageNames: [String] = []
+    var imageNames: [String]
     /// 最近一次编辑时间
     var updatedAt: Date
 
-    init(syncId: UUID, note: String = "", imageNames: [String] = [], updatedAt: Date = .now) {
+    init(syncId: UUID, note: String = "", imageNames: [String] = [], updatedAt: Date = Date()) {
         self.syncId = syncId
         self.note = note
         self.imageNames = imageNames
+        self.updatedAt = updatedAt
+    }
+    // 注意：不要给 Date 属性写 `= .now` 作为默认值——SwiftData 宏会把默认值写进
+    // `defaultValue: .now`，而该参数是 `Any?` 类型，`.now` 成员访问无法解析会编译失败。
+    // 用 `Date()`（构造调用，与 `UUID()` 同理）或依赖自定义 init 的默认即可。
+}
+
+// 待办备注（仅本地，不参与云同步）
+// 关联 Reminder.syncId（1:1）；同一条待办最多一条备注。
+// 字段：备注文字（不带图片附件，参照 Bill.note 简洁模式）。
+// 适用场景：用户的待办可能有上下文背景（如「给 XX 打电话前先看 XXX 文档」），
+//          标题装不下或易过期，写到备注里随编辑页一起展示更顺手。
+// 设计取舍：独立 @Model 而非直接加 `Reminder.note` 字段——参照 FoodNote 风格，
+//          仅本地存储（不上云），且不污染 Reminder 的云同步 payload；
+//          未来若需要图片附件，扩字段即可，不需要再动 schema。
+@Model final class ReminderNote {
+    /// 关联 Reminder.syncId（1:1）
+    var syncId: UUID
+    /// 备注文字
+    var note: String
+    /// 最近一次编辑时间
+    var updatedAt: Date
+
+    init(syncId: UUID, note: String = "", updatedAt: Date = Date()) {
+        self.syncId = syncId
+        self.note = note
         self.updatedAt = updatedAt
     }
 }

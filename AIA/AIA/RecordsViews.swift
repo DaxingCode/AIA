@@ -1773,7 +1773,7 @@ struct ReminderListView: View {
                                     SelectableCard(
                                         leadingAccessory: todoDoneButton(r),
                                         content: todoRowContent(r),
-                                        destination: TodoDetailView(reminder: r)
+                                        destination: EditTodoView(reminder: r)
                                     )
                                 }
                             }
@@ -1867,7 +1867,7 @@ struct ReminderListView: View {
                         SelectableCard(
                             leadingAccessory: EmptyView(),
                             content: todoRowContent(r, hasDoneCircle: false),
-                            destination: TodoDetailView(reminder: r)
+                            destination: EditTodoView(reminder: r)
                         )
                     }
                 }
