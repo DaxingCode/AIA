@@ -43,7 +43,7 @@ struct TodoToolsView: View {
                     NavigationRouter.shared.path.append(HomeRoute.autoSetup)
                 } label: {
                     HStack(spacing: 10) {
-                        Image(systemName: "sparkles.rectangle.portrait.fill")
+                        Image(systemName: "wand.and.stars")
                             .font(AIATheme.Font.title3)
                             .foregroundStyle(AIATheme.todo)
                         VStack(alignment: .leading, spacing: 2) {
