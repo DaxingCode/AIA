@@ -1781,13 +1781,21 @@ struct BillListView: View {
                     }
                     .padding(.bottom, 4)
 
-                    ForEach(dayBills) { b in
+                    // 选中日期账单列表：行间 hairline 分隔（深色模式 0.7pt 物理宽度足够醒目）
+                    ForEach(Array(dayBills.enumerated()), id: \.element.persistentModelID) { idx, b in
                         Button {
                             editBill = b
                         } label: {
                             groupedBillRow(b)
                         }
                         .buttonStyle(.plain)
+                        // 行间分隔：让位 62pt（icon 42 + 间距 12 + 缓冲 8），最后一行不画
+                        if idx < dayBills.count - 1 {
+                            Rectangle()
+                                .fill(AIATheme.hairline)
+                                .frame(height: 0.7)
+                                .padding(.leading, 62)
+                        }
                     }
                 }
             }
