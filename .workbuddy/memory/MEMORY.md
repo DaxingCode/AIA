@@ -25,6 +25,7 @@
 - `Button` 不能嵌 `NavigationLink.label`；行内多交互用 ZStack 分层（底层 NavigationLink 撑满，顶层独立 hit area）。
 - 图标与多行文字用 `HStack(alignment:.firstTextBaseline)`；禁止 NavigationStack 嵌套；SegmentedPicker/列表空态切换加 `.animation(nil,...)`。
 - 禁 `ForEach(0..<数组.count)`+`数组[i]` 遍历 `@Query` 派生数组→用 `ForEach(Array(数组.enumerated()),id:\.offset)`。
+- **导航铁律（2026-07-24 踩坑·崩）**：全 App 用单 `NavigationStack(path: $router.path) + .navigationDestination(for: HomeRoute.self)`（ContentView.swift 77/103）。**所有从首页列表点行进入详情/编辑页必须走 value-based**：`ValueSelectableCard(value: HomeRoute.xxx(记录), content: ...)` + HomeRoute 加 associated value case + navigationDestination switch 加分支。**严禁** `SelectableCard(destination: SomeView)` 闭包式嵌入首页 NavigationStack 根层——AnyNavigationPath 内部 `try!` 比较 path entry 会触发 `comparisonTypeMismatch` 崩溃，整页 NavigationStack 死锁（白屏 + 首页任何按钮点不动）。闭包式 destination 仅允许用于 `.sheet` 自带 NavigationStack 内部（如 EditBillView）。新增列表行跳详情前**先**确认 HomeRoute 有对应 case，否则用 `enum HomeRoute { case xxx(记录) }` 加好再写 UI。
 
 ## 图片识别链路（2026-07-22 重构·单一清晰路径）
 - `recognizeWithLocalPriority(imageData:in:)` 是唯一入口，链路自上而下、命中即返回：
