@@ -344,7 +344,7 @@ struct ResultConfirmView: View {
                     .font(AIATheme.Font.micro)
                     .foregroundStyle(AIATheme.muted)
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: 4)
             content()
         }
         .padding(12)
@@ -566,27 +566,36 @@ struct ResultConfirmView: View {
             HStack(spacing: 12) {
                 // 重量：标题 + 输入框 + 单位 同一行（inlineFieldRow）
                 inlineFieldRow(icon: "scalemass", label: "重量") {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 4) {
                         TextField("100", text: binding.weightGram)
                             .keyboardType(.decimalPad)
-                            .font(AIATheme.Font.title3.weight(.semibold))
+                            .font(AIATheme.Font.callout.weight(.semibold))
                             .multilineTextAlignment(.trailing)
                             .frame(maxWidth: 80, minHeight: 32)
                             .contentShape(Rectangle())
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                         Text("g")
                             .font(AIATheme.Font.callout)
                             .foregroundStyle(AIATheme.muted)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                 }
                 // 热量：标题 + 只读数值 + 单位 同一行（inlineFieldRow）
                 inlineFieldRow(icon: "flame", label: "热量") {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 4) {
                         Text("\(totalCal, specifier: "%.1f")")
-                            .font(AIATheme.Font.title3.weight(.semibold))
+                            .font(AIATheme.Font.callout.weight(.semibold))
                             .foregroundStyle(AIATheme.food)
+                            .lineLimit(1)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: true, vertical: false)
                         Text("kcal")
                             .font(AIATheme.Font.caption)
                             .foregroundStyle(AIATheme.muted)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                 }
             }
@@ -708,7 +717,9 @@ struct ResultConfirmView: View {
                             .resizable()
                             .scaledToFill()
                             .frame(maxWidth: .infinity)
-                            .frame(height: 180)
+                            .frame(height: 360) // 实际渲染高度 = 容器 2×，让顶部 180pt 对应图片上半
+                            .frame(height: 180) // 容器只露 180pt（默认展示图片上半部分）
+                            .clipped()
                             .clipShape(RoundedRectangle(cornerRadius: AIATheme.rLG))
                             .overlay(alignment: .bottomTrailing) {
                                 Label("仅本地", systemImage: "lock.fill")
