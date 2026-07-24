@@ -1258,9 +1258,12 @@ struct BillListView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     if filter == .all {
                         // 聚合入口：周期记账 / 账单导入 / 自动记账
-                        NavigationLink {
-                            BillToolsView()
-                                .environment(\.modelContext, context)
+                        // 2026-07-24：改编程式 push 走根 NavigationStack(path:)，跟 TodoToolsView 入口同源。
+                        // 根因：原闭包 NavigationLink 把 BillToolsView 推到 BillListView 子栈，
+                        // 但 BillToolsView 内部 path.append(.autoSetup) 改的是根栈 → BillToolsView 从根栈消失，
+                        // 自动截屏识别返回时直接回 BillListView，绕过了「记账工具」。
+                        Button {
+                            NavigationRouter.shared.path.append(HomeRoute.billTools)
                         } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: "wand.and.stars")

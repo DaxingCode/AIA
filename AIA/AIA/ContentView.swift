@@ -14,7 +14,7 @@ import Combine
 
 /// 首页可跳转的目的地。统一枚举 → 单个 navigationDestination，规避多 destination 冲突。
 enum HomeRoute: Hashable {
-    case diet, health, bill, todo, todoTools, chat, chatVoice, settings, autoSetup
+    case diet, health, bill, billTools, todo, todoTools, chat, chatVoice, settings, autoSetup
     // 详情/编辑页：用 associated value 携带记录引用，让 .navigationDestination(for: HomeRoute.self) 统一处理
     // 所有 push 目标。**严禁**用 SelectableCard 的闭包式 destination 嵌入本路径——会触发
     // SwiftUI.AnyNavigationPath.Error.comparisonTypeMismatch try! 强解崩溃（2026-07-24 踩坑）。
@@ -112,6 +112,7 @@ struct ContentView: View {
                     case .diet:         FoodListView()
                     case .health:       HealthListView()
                     case .bill:         BillListView()
+                    case .billTools:    BillToolsView()
                     case .todo:         ReminderListView()
                     case .todoTools:    TodoToolsView()
                     case .chat:         ChatView(prefill: router.chatPrefill)
@@ -228,6 +229,7 @@ struct ContentView: View {
         .fullScreenCover(item: $pendingPresent) { present in
             makeResultConfirmView(present)
                 .environment(\.modelContext, context)
+                .interactiveDismissDisabled(true)
                 .onDisappear {
                     ScreenshotStore.clearPending()
                     pendingPresent = nil
@@ -257,8 +259,13 @@ struct ContentView: View {
         let present = RecognitionSaver.preparePresent(result: p.result, rawText: p.rawText,
                                                             image: img, context: context,
                                                             source: p.source ?? .cloud)
-        pendingPresent = present
         isCheckingScreenshotPending = false
+        // 推迟到下一个 runloop 呈现 cover，避免 SwiftUI 环境（NavigationStack/ModelContext）未完全就绪时
+        // 全屏 cover 闪烁/自动关闭再弹出。同一 runloop 中的后续 checkScreenshotPending 会被 isCheckingScreenshotPending 拦截。
+        DispatchQueue.main.async { [present] in
+            guard pendingPresent == nil else { return }
+            pendingPresent = present
+        }
     }
 
     // MARK: - 顶部标题 + 待处理角标
