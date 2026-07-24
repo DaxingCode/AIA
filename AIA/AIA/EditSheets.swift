@@ -1180,7 +1180,10 @@ struct EditTodoView: View {
             .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
             if alertItems.count < 4 {
                 Button {
-                    let newItem = AlertItem(option: .atTime, customDate: due)
+                    // 阶梯式默认 option（按用户截图标注）：
+                    //   第 1 次按 → .atTime（准时）；第 2 次 → .before30（提前 30 分钟）；
+                    //   第 3 次 → .before1Day（提前 1 天）；第 4 次 → .before1Week（提前一周）
+                    let newItem = AlertItem(option: defaultNextOption(), customDate: due)
                     alertItems.append(newItem)
                 } label: {
                     HStack(spacing: 6) {
@@ -1387,6 +1390,19 @@ struct EditTodoView: View {
 
     private func formatCustom(_ date: Date) -> String {
         AppFormat.dateTime.string(from: date)
+    }
+
+    /// 「+ 添加提醒时间」按钮按 N 次的阶梯默认 option（与外层 if alertItems.count < 4 配套；count=4 不会再调用）：
+    /// count=0 → 准时；count=1 → 提前 30 分钟；count=2 → 提前 1 天；count=3 → 提前 1 周。
+    /// 用户每次都可手动改成任意 option（atTime/before15/before30/before1Hour/before1Day/before1Week/custom）。
+    private func defaultNextOption() -> ReminderOption {
+        switch alertItems.count {
+        case 0:  return .atTime
+        case 1:  return .before30
+        case 2:  return .before1Day
+        case 3:  return .before1Week
+        default: return .atTime   // 不会走到（外层已限定 count<4 才能点 + 按钮）
+        }
     }
 
     private func save() {
