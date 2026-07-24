@@ -572,10 +572,11 @@ struct RecognizingOverlay: View {
                     .ignoresSafeArea()
 
                 // 中央：spinner + 双行文字
-                // 关键：显式 frame(maxWidth: .infinity) 强制 VStack 撑满 ZStack 宽度，
-                // 子 view（spinner + 内 VStack）严格在屏幕中线水平居中。
-                // 否则 VStack 走"自然尺寸"在 GeometryReader→ZStack 嵌套下，
-                // 真机（iPhone 15 Pro Max）上会出现整体偏右的偏差。
+                // 关键：`.position(x: W/2, y: H/2)` 绝对锚定到屏幕几何中心，
+                // 100% 水平 + 垂直居中，与设备/字号/安全区/Dynamic Island 无关。
+                // 前版用 `VStack.frame(maxWidth: .infinity, alignment: .center) + .padding(.horizontal, 32)`，
+                // 在 GeometryReader→ZStack→fullScreenCover 嵌套 + iPhone 15 Pro Max 真机上仍有偏差。
+                // 改走几何锚定彻底绕开 ZStack 的 alignment 行为不确定性。
                 VStack(spacing: 14) {
                     ProgressView()
                         .controlSize(.large)
@@ -590,10 +591,8 @@ struct RecognizingOverlay: View {
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                     }
-                    .frame(maxWidth: .infinity, alignment: .center)
                 }
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.horizontal, 32)
+                .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
 
                 // 底部 1/3 位置：返回按钮（中心锚定到距顶 2/3 屏高）
                 Button {
