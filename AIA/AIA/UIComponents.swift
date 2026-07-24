@@ -561,9 +561,14 @@ struct RecognizingOverlay: View {
         GeometryReader { proxy in
             ZStack {
                 // 背景：用户照片撑满 + 模糊
+                // 关键：scaledToFill 在 GeometryReader→ZStack→fullScreenCover 嵌套下
+                // 不会自动锚定到容器中心，必须显式 frame(maxWidth:maxHeight:) + clipped()
+                // 才能让照片居中裁剪、水平不偏移。
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
                     .blur(radius: 25)
                     .ignoresSafeArea()
 
