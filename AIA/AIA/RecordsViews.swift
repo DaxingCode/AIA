@@ -1390,7 +1390,15 @@ struct BillListView: View {
                         // groupedByDate 派生自 @Query，导航 onAppear 的 RecurringBillManager.generateDue
                         // 插入账单/提醒时数组长度会变化，两次求值不一致会导致 groupedByDate[i] 越界闪退。
                         // 用 enumerated() 取 offset 作 id，避免 tuple 需 Hashable 且保证单次 render 内稳定。
-                        ForEach(Array(groupedByDate.enumerated()), id: \.offset) { _, group in
+                        ForEach(Array(groupedByDate.enumerated()), id: \.offset) { idx, group in
+                            // 日期组之间加 hairline 分隔（第一个不加，避免与上方"账单详情"标题区冲突）
+                            if idx > 0 {
+                                Rectangle()
+                                    .fill(AIATheme.hairline)
+                                    .frame(height: 0.7)
+                                    .padding(.top, 14)
+                                    .padding(.bottom, 2)
+                            }
                             VStack(alignment: .leading, spacing: 0) {
                                 dateHeader(group.date, bills: group.bills)
                                 ForEach(Array(group.bills.enumerated()), id: \.element.persistentModelID) { idx, b in
