@@ -347,6 +347,7 @@ struct ResultConfirmView: View {
             Spacer(minLength: 4)
             content()
         }
+        .frame(maxHeight: .infinity)   // 与同行 inlineFieldRow 等高开齐（重量/热量同高）
         .padding(12)
         .background(AIATheme.surfaceSecondary)
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
