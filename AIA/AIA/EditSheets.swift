@@ -1105,10 +1105,10 @@ struct EditTodoView: View {
         .card()
     }
 
-    // MARK: - 时间与提醒（合并 dueCard + alertCard：一个语义=截止时间 + 通知，Divier 分段，更紧凑）
+    // MARK: - 时间与提醒（合并 dueSection + alertSection：一个语义=「在某天某时提醒我」+「最多 4 次提醒」，Divider 分段，更紧凑）
     private var timeAlertCard: some View {
         VStack(spacing: 0) {
-            // 段一：截止时间开关 + 日期/时间（hasDue=false 时仅显示开关）
+            // 段一：提醒时间开关 + 日期/时间（hasDue=false 时仅显示开关，逻辑含义=是否启用提醒）
             dueSection
             if hasDue {
                 Divider().padding(.leading, 14)
@@ -1119,10 +1119,10 @@ struct EditTodoView: View {
         .card()
     }
 
-    // 段一：截止时间开关 + 日期 + 时间
+    // 段一：提醒时间开关 + 日期 + 时间（语义升级：截止时间 → 提醒基准时间）
     private var dueSection: some View {
         VStack(spacing: 0) {
-            toggleRow(icon: "calendar.badge.clock", label: "设置截止时间", isOn: $hasDue)
+            toggleRow(icon: "calendar.badge.clock", label: "设置提醒时间", isOn: $hasDue)
             if hasDue {
                 Divider().padding(.leading, 46)
                 HStack(spacing: 16) {
@@ -1151,14 +1151,14 @@ struct EditTodoView: View {
         }
     }
 
-    // 段二：提醒通知（依赖 hasDue，逻辑链：截止时间 → 提醒时间）
+    // 段二：提醒时间列表（依赖 hasDue=基准时间已设；最多 4 条 option 都相对基准时间偏移：准时/提前 N 分钟/提前 N 天/自定义）
     private var alertSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 5) {
                 Image(systemName: "bell.badge")
                     .font(AIATheme.Font.micro)
                     .foregroundStyle(AIATheme.muted)
-                Text("提醒通知")
+                Text("提醒时间（最多可设置4次提醒）")
                     .font(AIATheme.Font.micro)
                     .foregroundStyle(AIATheme.muted)
                 Spacer()
@@ -1178,7 +1178,7 @@ struct EditTodoView: View {
             .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
             if alertItems.count < 4 {
                 Button {
-                    let newItem = AlertItem(option: .before1Hour, customDate: due)
+                    let newItem = AlertItem(option: .atTime, customDate: due)
                     alertItems.append(newItem)
                 } label: {
                     HStack(spacing: 6) {
