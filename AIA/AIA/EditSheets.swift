@@ -102,6 +102,14 @@ struct EditFoodView: View {
         _sourceImageName = State(initialValue: entry.imageName)
     }
 
+    /// 当前重量下的总热量（用于标题栏右侧 pill 显示）。
+    private var displayedKcalText: String {
+        let base = Double(baseCaloriesText) ?? 0
+        let weight = Double(weightText) ?? 100
+        return String(format: "%.0f", base * weight / 100)
+    }
+
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -233,6 +241,7 @@ struct EditFoodView: View {
 
     private var nutritionCard: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // 标题栏（含按当前重量计算的热量 pill）
             HStack(spacing: 5) {
                 Image(systemName: "chart.bar.fill")
                     .font(AIATheme.Font.micro)
@@ -241,35 +250,41 @@ struct EditFoodView: View {
                     .font(AIATheme.Font.micro)
                     .foregroundStyle(AIATheme.muted)
                 Spacer()
+                if !baseCaloriesText.isEmpty {
+                    HStack(spacing: 3) {
+                        Image(systemName: "flame.fill")
+                            .font(AIATheme.Font.micro)
+                            .foregroundStyle(AIATheme.food)
+                        Text("\(displayedKcalText) kcal")
+                            .font(AIATheme.Font.subhead.weight(.semibold))
+                            .foregroundStyle(AIATheme.food)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(AIATheme.food.opacity(0.10))
+                    .clipShape(Capsule())
+                }
             }
             .padding(.horizontal, 14)
             .padding(.top, 14)
-            .padding(.bottom, 6)
+            .padding(.bottom, 10)
 
-            VStack(spacing: 0) {
-                nutritionRow(icon: "flame.fill", label: "热量", unit: "kcal",
-                             binding: totalBinding(for: $baseCaloriesText), color: AIATheme.food)
-                Divider().padding(.leading, 46)
-                nutritionRow(icon: "fish.fill", label: "蛋白质", unit: "g",
-                             binding: totalBinding(for: $baseProteinText), color: AIATheme.food)
-                Divider().padding(.leading, 46)
-                nutritionRow(icon: "leaf.fill", label: "碳水", unit: "g",
-                             binding: totalBinding(for: $baseCarbsText), color: AIATheme.food)
-                Divider().padding(.leading, 46)
-                nutritionRow(icon: "drop.fill", label: "脂肪", unit: "g",
-                             binding: totalBinding(for: $baseFatText), color: AIATheme.food)
-                Divider().padding(.leading, 46)
-                nutritionRow(icon: "leaf", label: "膳食纤维", unit: "g",
-                             binding: totalBinding(for: $baseFiberText), color: AIATheme.food)
-                Divider().padding(.leading, 46)
-                nutritionRow(icon: "cube.fill", label: "糖", unit: "g",
-                             binding: totalBinding(for: $baseSugarText), color: AIATheme.food)
-                Divider().padding(.leading, 46)
-                nutritionRow(icon: "bolt.fill", label: "钠", unit: "mg",
-                             binding: totalBinding(for: $baseSodiumText), color: AIATheme.food)
+            // 2×3 营养网格：6 大营养素；热量已在标题 pill 展示
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
+                      spacing: 8) {
+                nutritionCell(icon: "fish.fill", label: "蛋白质", unit: "g",
+                              binding: totalBinding(for: $baseProteinText), color: AIATheme.blue)
+                nutritionCell(icon: "leaf.fill", label: "碳水", unit: "g",
+                              binding: totalBinding(for: $baseCarbsText), color: AIATheme.amber)
+                nutritionCell(icon: "drop.fill", label: "脂肪", unit: "g",
+                              binding: totalBinding(for: $baseFatText), color: AIATheme.green)
+                nutritionCell(icon: "leaf", label: "膳食纤维", unit: "g",
+                              binding: totalBinding(for: $baseFiberText), color: AIATheme.health)
+                nutritionCell(icon: "cube.fill", label: "糖", unit: "g",
+                              binding: totalBinding(for: $baseSugarText), color: AIATheme.warn)
+                nutritionCell(icon: "bolt.fill", label: "钠", unit: "mg",
+                              binding: totalBinding(for: $baseSodiumText), color: AIATheme.food)
             }
-            .background(AIATheme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
             .padding(.horizontal, 14)
             .padding(.bottom, 14)
         }
@@ -460,6 +475,38 @@ struct EditFoodView: View {
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 14)
+    }
+
+    /// 营养网格单元：icon + 名称 + 输入框 + 单位，2×3 网格布局使用。
+    /// 视觉上比 nutritionRow 更紧凑，适合等宽 cell。
+    private func nutritionCell(icon: String, label: String, unit: String,
+                               binding: Binding<String>, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(AIATheme.Font.caption)
+                    .foregroundStyle(color)
+                Text(label)
+                    .font(AIATheme.Font.caption)
+                    .foregroundStyle(.primary)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                TextField("0", text: binding)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .font(AIATheme.Font.subhead.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity)
+                Text(unit)
+                    .font(AIATheme.Font.caption)
+                    .foregroundStyle(AIATheme.muted)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AIATheme.fillSoft)
+        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rXS))
     }
 
     /// 把「每100g基准」和「当前重量」映射成「当前重量下的总量」Binding。
