@@ -3,6 +3,7 @@
 // 采用「本地副本 + 保存时回写模型」的方式，点取消即不改动，保证可回退。
 import SwiftUI
 import SwiftData
+import UIKit
 
 private let mealOptions = ["早餐", "午餐", "晚餐", "加餐"]
 private let priorityOptions: [(value: String, label: String)] = [("high", "高"), ("medium", "中"), ("low", "低")]
@@ -54,6 +55,9 @@ struct EditFoodView: View {
     @State private var baseProteinText: String
     @State private var baseCarbsText: String
     @State private var baseFatText: String
+    @State private var baseFiberText: String       // 膳食纤维（每100g克）
+    @State private var baseSugarText: String       // 糖（每100g克）
+    @State private var baseSodiumText: String      // 钠（每100g毫克）
 
     init(entry: FoodEntry) {
         self.entry = entry
@@ -71,6 +75,12 @@ struct EditFoodView: View {
             entry.baseCarbs ?? (entry.carbs / currentWeight * 100)))
         _baseFatText = State(initialValue: String(format: "%.1f",
             entry.baseFat ?? (entry.fat / currentWeight * 100)))
+        _baseFiberText = State(initialValue: String(format: "%.1f",
+            entry.baseFiber ?? (entry.fiber / currentWeight * 100)))
+        _baseSugarText = State(initialValue: String(format: "%.1f",
+            entry.baseSugar ?? (entry.sugar / currentWeight * 100)))
+        _baseSodiumText = State(initialValue: String(format: "%.1f",
+            entry.baseSodium ?? (entry.sodium / currentWeight * 100)))
     }
 
     var body: some View {
@@ -174,6 +184,15 @@ struct EditFoodView: View {
                 Divider().padding(.leading, 46)
                 nutritionRow(icon: "drop.fill", label: "脂肪", unit: "g",
                              binding: totalBinding(for: $baseFatText), color: AIATheme.food)
+                Divider().padding(.leading, 46)
+                nutritionRow(icon: "leaf", label: "膳食纤维", unit: "g",
+                             binding: totalBinding(for: $baseFiberText), color: AIATheme.food)
+                Divider().padding(.leading, 46)
+                nutritionRow(icon: "cube.fill", label: "糖", unit: "g",
+                             binding: totalBinding(for: $baseSugarText), color: AIATheme.food)
+                Divider().padding(.leading, 46)
+                nutritionRow(icon: "bolt.fill", label: "钠", unit: "mg",
+                             binding: totalBinding(for: $baseSodiumText), color: AIATheme.food)
             }
             .background(AIATheme.surface)
             .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
@@ -269,15 +288,24 @@ struct EditFoodView: View {
         let basePro = Double(baseProteinText) ?? 0
         let baseCar = Double(baseCarbsText) ?? 0
         let baseFat = Double(baseFatText) ?? 0
+        let baseFib = Double(baseFiberText) ?? 0
+        let baseSug = Double(baseSugarText) ?? 0
+        let baseSod = Double(baseSodiumText) ?? 0
         entry.weightGram = weight
         entry.baseCalories = baseCal
         entry.baseProtein = basePro
         entry.baseCarbs = baseCar
         entry.baseFat = baseFat
+        entry.baseFiber = baseFib
+        entry.baseSugar = baseSug
+        entry.baseSodium = baseSod
         entry.calories = baseCal * weight / 100
         entry.protein = basePro * weight / 100
         entry.carbs = baseCar * weight / 100
         entry.fat = baseFat * weight / 100
+        entry.fiber = baseFib * weight / 100
+        entry.sugar = baseSug * weight / 100
+        entry.sodium = baseSod * weight / 100
         entry.portion = "\(Int(weight))克"
         entry.syncUpdatedAt = .now
         try? context.save()
@@ -297,7 +325,15 @@ struct EditBillView: View {
     @State private var time: Date
     @State private var note: String
     @State private var isIncome: Bool
+    @State private var imageName: String?
     @State private var showCategoryPicker = false
+    @State private var showImageSourceDialog = false
+    @State private var showImagePicker = false
+    @State private var showCameraPicker = false
+    @State private var showFullImage = false
+    @State private var showDeleteConfirm = false
+    @State private var pickedImage: UIImage? = nil
+    @State private var pendingDeleteID: PersistentIdentifier? = nil
 
     init(bill: Bill) {
         self.bill = bill
@@ -307,6 +343,7 @@ struct EditBillView: View {
         _time = State(initialValue: bill.time)
         _note = State(initialValue: bill.note)
         _isIncome = State(initialValue: bill.isIncome)
+        _imageName = State(initialValue: bill.imageName)
     }
 
     var body: some View {
@@ -318,6 +355,7 @@ struct EditBillView: View {
                         infoCard
                         noteCard
                         incomeCard
+                        deleteCard
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
@@ -337,6 +375,50 @@ struct EditBillView: View {
                     Button("保存") { save() }
                         .font(AIATheme.Font.callout.weight(.semibold))
                         .foregroundStyle(AIATheme.blue)
+                }
+            }
+            .confirmationDialog("添加图片", isPresented: $showImageSourceDialog, titleVisibility: .visible) {
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    Button("拍照") { showCameraPicker = true }
+                }
+                Button("从相册选择") { showImagePicker = true }
+                Button("取消", role: .cancel) {}
+            }
+            .sheet(isPresented: $showImagePicker) {
+                ImagePicker(image: $pickedImage)
+            }
+            .fullScreenCover(isPresented: $showCameraPicker) {
+                CameraPicker(image: $pickedImage)
+            }
+            .fullScreenCover(isPresented: $showFullImage) {
+                if let img = LocalImageStore.load(imageName) {
+                    FullImageView(image: img)
+                }
+            }
+            .alert("删除账单", isPresented: $showDeleteConfirm) {
+                Button("取消", role: .cancel) {}
+                Button("删除", role: .destructive) {
+                    pendingDeleteID = bill.persistentModelID
+                    dismiss()
+                }
+            } message: {
+                Text("删除后不可恢复，确定要删除吗？")
+            }
+            .onChange(of: pickedImage) { _, new in
+                guard let img = new else { return }
+                pickedImage = nil
+                if let name = LocalImageStore.save(img) {
+                    imageName = name
+                }
+            }
+            .onDisappear {
+                // 与 BillDetailView 同款：先 dismiss 回列表，等 sheet 动画完全结束后再执行删除，
+                // 避免 syncDeleted=true 触发 @Query 重 fetch 与动画叠加卡死。
+                if let id = pendingDeleteID {
+                    pendingDeleteID = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                        SafeDelete.billByID(id, in: context)
+                    }
                 }
             }
         }
@@ -391,13 +473,75 @@ struct EditBillView: View {
     }
 
     private var noteCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("备注")
                 .font(AIATheme.Font.micro)
                 .foregroundStyle(AIATheme.muted)
-            TextField("可选，如 和同事聚餐", text: $note)
+            TextEditor(text: $note)
                 .font(AIATheme.Font.body)
                 .foregroundStyle(.primary)
+                .frame(minHeight: 60)
+                .scrollContentBackground(.hidden)
+            if let img = LocalImageStore.load(imageName) {
+                HStack(spacing: 12) {
+                    ZStack(alignment: .topTrailing) {
+                        Button {
+                            showFullImage = true
+                        } label: {
+                            Image(uiImage: img)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 64, height: 64)
+                                .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            imageName = nil
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(AIATheme.Font.body)
+                                .foregroundStyle(AIATheme.muted)
+                                .background(Circle().fill(AIATheme.surface))
+                        }
+                        .buttonStyle(.plain)
+                        .offset(x: 6, y: -6)
+                    }
+
+                    Button {
+                        showImageSourceDialog = true
+                    } label: {
+                        RoundedRectangle(cornerRadius: AIATheme.rSM)
+                            .stroke(AIATheme.hairline, lineWidth: 1)
+                            .frame(width: 64, height: 64)
+                            .overlay {
+                                Image(systemName: "plus")
+                                    .font(AIATheme.Font.headline.weight(.medium))
+                                    .foregroundStyle(AIATheme.muted)
+                            }
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+                }
+            } else {
+                Button {
+                    showImageSourceDialog = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "photo.badge.plus")
+                            .font(AIATheme.Font.subhead)
+                        Text("添加图片")
+                            .font(AIATheme.Font.callout.weight(.medium))
+                    }
+                    .foregroundStyle(AIATheme.sub)
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 14)
+                    .background(AIATheme.surfaceSecondary)
+                    .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(14)
         .card()
@@ -419,6 +563,22 @@ struct EditBillView: View {
         .padding(.vertical, 10)
         .padding(.horizontal, 14)
         .card()
+    }
+
+    private var deleteCard: some View {
+        Button {
+            showDeleteConfirm = true
+        } label: {
+            Text("删除账单")
+                .font(AIATheme.Font.subhead.weight(.semibold))
+                .foregroundStyle(AIATheme.warn)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(AIATheme.warn.opacity(0.08))
+                .overlay(RoundedRectangle(cornerRadius: AIATheme.rMD).stroke(AIATheme.warn.opacity(0.25), lineWidth: 0.5))
+                .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - 分类选择行
@@ -481,6 +641,7 @@ struct EditBillView: View {
         bill.time = time
         bill.note = note
         bill.isIncome = isIncome
+        bill.imageName = imageName
         bill.syncUpdatedAt = .now
         try? context.save()
         dismiss()
