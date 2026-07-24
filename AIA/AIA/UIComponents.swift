@@ -554,6 +554,9 @@ struct RecognizingOverlay: View {
     let image: UIImage
     let onBack: () -> Void
 
+    /// 入场动画状态：返回按钮从「下方 8pt + 透明」上滑淡入到正确位置。
+    @State private var appeared = false
+
     var body: some View {
         GeometryReader { proxy in
             ZStack {
@@ -602,7 +605,19 @@ struct RecognizingOverlay: View {
                     .background(.ultraThinMaterial)
                     .clipShape(Capsule())
                 }
-                .position(x: proxy.size.width / 2, y: proxy.size.height * 2 / 3)
+                .position(x: proxy.size.width / 2,
+                          y: proxy.size.height * 2 / 3 + (appeared ? 0 : 8))
+                .opacity(appeared ? 1 : 0)
+                .onAppear {
+                    // 尊重「减弱动态效果」：开启时直接置位，不播放动画
+                    guard !AIATheme.motionReduce else {
+                        appeared = true
+                        return
+                    }
+                    withAnimation(.easeOut(duration: 0.35)) {
+                        appeared = true
+                    }
+                }
             }
         }
     }
