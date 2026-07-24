@@ -1185,7 +1185,7 @@ struct EditTodoView: View {
                         Image(systemName: "plus.circle.fill")
                             .font(AIATheme.Font.body)
                             .foregroundStyle(AIATheme.blue)
-                        Text("添加提醒时间")
+                        Text("添加提醒时间（最多4次）")
                             .font(AIATheme.Font.subhead.weight(.medium))
                             .foregroundStyle(AIATheme.blue)
                         Spacer()
