@@ -410,18 +410,11 @@ struct ChatView: View {
                     .foregroundStyle(.primary)
                 Spacer()
             }
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(pending.meal) · \(pending.name) · \(pending.portion)")
-                    .font(AIATheme.Font.body)
-                    .foregroundStyle(.primary)
-                Text("约 \(Int(pending.cal)) kcal　蛋白质 \(String(format: "%.1f", pending.protein))g　碳水 \(String(format: "%.1f", pending.carbs))g　脂肪 \(String(format: "%.1f", pending.fat))g")
+            FoodInfoCard(pending: pending)
+            if let amount = pending.amount {
+                Text("支出 ¥\(String(format: "%.2f", amount)) 已保留")
                     .font(AIATheme.Font.micro)
-                    .foregroundStyle(AIATheme.muted)
-                if let amount = pending.amount {
-                    Text("支出 ¥\(String(format: "%.2f", amount)) 已保留")
-                        .font(AIATheme.Font.micro)
-                        .foregroundStyle(AIATheme.sub)
-                }
+                    .foregroundStyle(AIATheme.sub)
             }
             HStack(spacing: 10) {
                 Button {
@@ -446,14 +439,90 @@ struct ChatView: View {
             }
         }
         .padding(12)
-        .background(AIATheme.dietBG)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .background(AIATheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
         .contextMenu {
             Button {
                 UIPasteboard.general.string = "\(pending.meal) · \(pending.name) · \(pending.portion) · \(Int(pending.cal)) kcal"
             } label: {
                 Label("复制", systemImage: "doc.on.doc")
             }
+        }
+    }
+
+    /// 聊天气泡里的「食物信息卡」（B 方案）：顶部 hero（食物名 + 餐次·份量 + 热量大数字），下方 6 列营养明细。
+    private struct FoodInfoCard: View {
+        let pending: PendingFoodConfirm
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 10) {
+                // hero：左食物名 + 餐次·份量；右热量大数字
+                HStack(alignment: .center, spacing: 10) {
+                    Circle()
+                        .fill(AIATheme.food)
+                        .frame(width: 8, height: 8)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(pending.name)
+                            .font(AIATheme.Font.subhead.weight(.semibold))
+                            .foregroundStyle(AIATheme.ink)
+                        Text("\(pending.meal) · \(pending.portion)")
+                            .font(AIATheme.Font.micro)
+                            .foregroundStyle(AIATheme.muted)
+                    }
+                    Spacer()
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text("\(Int(pending.cal))")
+                            .font(AIATheme.Font.title3.weight(.bold))
+                            .foregroundStyle(AIATheme.food)
+                            .contentTransition(.numericText())
+                        Text("kcal")
+                            .font(AIATheme.Font.micro)
+                            .foregroundStyle(AIATheme.sub)
+                    }
+                }
+
+                Divider()
+                    .background(AIATheme.hairline)
+
+                // 6 列营养明细：碳水 / 蛋白 / 脂肪 / 纤维 / 糖 / 钠
+                HStack(spacing: 4) {
+                    macroCell("碳水", pending.carbs, "g")
+                    macroCell("蛋白", pending.protein, "g")
+                    macroCell("脂肪", pending.fat, "g")
+                    macroCell("纤维", pending.fiber, "g")
+                    macroCell("糖", pending.sugar, "g")
+                    macroCell("钠", pending.sodium, "mg")
+                }
+            }
+        }
+
+        private func macroCell(_ title: String, _ value: Double, _ unit: String) -> some View {
+            VStack(spacing: 4) {
+                Text(title)
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                HStack(alignment: .firstTextBaseline, spacing: 1) {
+                    Text(formatValue(value))
+                        .font(AIATheme.Font.callout.weight(.semibold))
+                        .foregroundStyle(AIATheme.ink)
+                    Text(unit)
+                        .font(AIATheme.Font.caption)
+                        .foregroundStyle(AIATheme.sub)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(AIATheme.surfaceSecondary)
+            .clipShape(RoundedRectangle(cornerRadius: AIATheme.rXS))
+        }
+
+        /// 数值格式化：整数显示整数，否则保留 1 位小数（0 显示 0）。
+        private func formatValue(_ v: Double) -> String {
+            if v == 0 { return "0" }
+            if v.truncatingRemainder(dividingBy: 1) == 0 {
+                return "\(Int(v))"
+            }
+            return String(format: "%.1f", v)
         }
     }
 
@@ -772,7 +841,6 @@ struct ChatView: View {
 
             let isYesterday = lower.contains("昨天") || lower.contains("昨日")
             let isRecent = lower.contains("最近") || lower.contains("近")
-            let isToday = !isYesterday && !isRecent
 
             // 优先回答昨天/今天；"最近"用 7 天汇总
             let targetBills: [Bill]
@@ -1973,7 +2041,7 @@ struct ChatView: View {
                             responseText = "好嘞，那就不记「\(pending.name)」啦～"
                         }
                         // 用户明确回复了重量 → 组合创建
-                        else if let (w, p) = ChatView.parseWeightOnly(t) {
+                        else if let (_, p) = ChatView.parseWeightOnly(t) {
                             pendingWeightFood = nil  // 成功才清
                             responseText = createFoodWithWeight(name: pending.name, text: p, meal: pending.meal)
                         }

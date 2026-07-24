@@ -5,6 +5,7 @@ import SwiftUI
 import SwiftData
 import Combine
 import Charts
+import UIKit
 
 // 图表用数据点
 private struct ChartPoint: Identifiable {
@@ -113,6 +114,7 @@ private enum MealFilter: String, CaseIterable {
 struct FoodListView: View {
     @Environment(\.modelContext) private var context
     @Query(filter: #Predicate { !$0.syncDeleted }, sort: \FoodEntry.date, order: .reverse) private var foods: [FoodEntry]
+    @Query(filter: #Predicate<WaterLog> { !$0.syncDeleted }) private var waterLogs: [WaterLog]
     @State private var meal: MealFilter = .lu
     @State private var selectedDate: Date = Date()
     @State private var showDatePicker: Bool = false
@@ -120,11 +122,14 @@ struct FoodListView: View {
     @State private var editedGoal: Double = 0
     @State private var showCamera = false
     @State private var showPicker = false
+    @State private var showAddFood = false
     @StateObject private var health = HealthManager.shared
     @AppStorage("aia.calorieGoalOverride") private var goalOverride: Double = 0
     @AppStorage("aia.calorieGoalIsCustom") private var goalIsCustom: Bool = false
     /// 饮食模块顶部分段：记录/喜好/分析
     @State private var dietTab: DietTab = .records
+    /// 水卡按压反馈（缩放 0.94→1.0 spring 回弹）
+    @State private var waterPressing: Bool = false
 
     // 按进入时间自动匹配餐次页签：5-11 早餐、11-16 午餐、16-22 晚餐，其余为加餐
     private static func defaultMeal(for date: Date) -> MealFilter {
@@ -149,31 +154,175 @@ struct FoodListView: View {
              $0.3 + $1.fiber, $0.4 + $1.sugar, $0.5 + $1.sodium, $0.6 + $1.waterIntake)
         }
     }
-    /// 今日饮水（ml）：汇总 selectedFoods 中所有 waterIntake 之和。
+    /// 选中日期的 WaterLog 总和（手动 tap 加的水）
+    private var manualWaterToday: Double {
+        waterLogs
+            .filter { Calendar.current.isDate($0.date, inSameDayAs: selectedDate) }
+            .reduce(0) { $0 + $1.amount }
+    }
+    /// 今日饮水（ml）= FoodEntry.waterIntake（聊天/拍照）+ WaterLog（tap 手加）。
     private var waterIntakeToday: Double {
-        selectedFoods.reduce(0) { $0 + $1.waterIntake }
+        selectedFoods.reduce(0) { $0 + $1.waterIntake } + manualWaterToday
     }
 
-    /// 「今日饮水」卡片：数字+单位同行，与左侧「净热量」卡同高（撑满 HStack 高度）。
+    /// 点 +100ml：建一条 WaterLog + 触觉反馈；SwiftData @Query 自动刷新 UI。
+    /// 只在「今天」可加（selectedDate == 今天）；历史日期点 tap 无反应（防止乱回填）。
+    private func addWaterTap() {
+        guard Calendar.current.isDateInToday(selectedDate) else { return }
+        let log = WaterLog(date: Date(), amount: 100)
+        context.insert(log)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    /// 「今日饮水」卡片：自动在「正面（今日饮水 + ml）」与「背面（点击 +100ml）」间循环翻转；
+    /// 点击行为不变（每点 +100ml + 震动，由 addWaterTap 提供）。
     private var waterCard: some View {
-        VStack(spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text("\(Int(waterIntakeToday))")
-                    .font(AIATheme.Font.title3.weight(.semibold))
-                    .foregroundStyle(AIATheme.health)
-                Text("ml")
+        WaterFlipCard(
+            totalML: waterIntakeToday,
+            isToday: Calendar.current.isDateInToday(selectedDate),
+            onTap: addWaterTap
+        )
+    }
+
+    /// 「今日饮水」翻转卡本体：3D 翻牌 + 自动循环；尊重系统「减少动态效果」偏好。
+    private struct WaterFlipCard: View {
+        let totalML: Double
+        let isToday: Bool
+        let onTap: () -> Void
+
+        @State private var flipped = false
+        @State private var timer: Timer?
+        /// 点击后上浮的「+100ml」飘字（支持快速多次点击，每个独立飘出）
+        @State private var floats: [FloatBadge] = []
+        /// 每面停留时长（秒）——正面停留 → 0.9s 翻面 → 背面停留 → 0.9s 翻回
+        private let flipInterval: TimeInterval = 2.2
+
+        var body: some View {
+            Button(action: {
+                onTap()
+                floats.append(FloatBadge())
+            }) {
+                ZStack {
+                    // 正面：今日饮水 + ml
+                    frontFace
+                        .rotation3DEffect(.degrees(flipped ? 180 : 0), axis: (x: 0, y: 1, z: 0))
+                        .opacity(flipped ? 0 : 1)
+                    // 背面：点击 +100ml
+                    backFace
+                        .rotation3DEffect(.degrees(flipped ? 180 : 0), axis: (x: 0, y: 1, z: 0))
+                        .opacity(flipped ? 1 : 0)
+                }
+                .frame(height: 44) // 两面统一高度，翻转不跳
+            }
+            .buttonStyle(WaterCardButtonStyle())
+            .frame(width: 86)
+            .padding(.vertical, 8)
+            .background(AIATheme.health.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+            .overlay(
+                RoundedRectangle(cornerRadius: AIATheme.rMD)
+                    .stroke(AIATheme.health.opacity(0.25), lineWidth: 0.5)
+            )
+            // 飘字层：放在 clipShape 之后，不被圆角裁切，可向卡片上方溢出
+            .overlay(
+                ZStack {
+                    ForEach(floats) { badge in
+                        FloatBadgeView(badge: badge) {
+                            floats.removeAll { $0.id == badge.id }
+                        }
+                    }
+                }
+            )
+            // 只在「今天」时启用（历史日期置灰不响应，且不自动翻转）
+            .disabled(!isToday)
+            .opacity(isToday ? 1.0 : 0.55)
+            .onAppear(perform: startTimer)
+            .onDisappear(perform: stopTimer)
+            .onChange(of: isToday) { _, newVal in
+                if newVal { startTimer() } else { stopTimer() }
+            }
+        }
+
+        /// 正面：数字（健康色）+ 单位 + 「今日饮水」小字
+        private var frontFace: some View {
+            VStack(spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text("\(Int(totalML))")
+                        .font(AIATheme.Font.title3.weight(.semibold))
+                        .foregroundStyle(AIATheme.health)
+                        .contentTransition(.numericText())
+                        .animation(.easeOut(duration: 0.25), value: Int(totalML))
+                    Text(NSLocalizedString("food.waterUnit", comment: ""))
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.sub)
+                }
+                Text(NSLocalizedString("food.water", comment: ""))
                     .font(AIATheme.Font.micro)
                     .foregroundStyle(AIATheme.sub)
             }
-            Text(NSLocalizedString("food.water", comment: ""))
-                .font(AIATheme.Font.micro)
-                .foregroundStyle(AIATheme.sub)
         }
-        .frame(width: 86)
-        .frame(maxHeight: .infinity, alignment: .center)
-        .padding(.vertical, 12)
-        .background(AIATheme.health.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+
+        /// 背面：圆形「+」图标 + 「点击 +100ml」提示
+        private var backFace: some View {
+            VStack(spacing: 5) {
+                ZStack {
+                    Circle()
+                        .fill(AIATheme.health)
+                        .frame(width: 26, height: 26)
+                    Image(systemName: "plus")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                Text(NSLocalizedString("food.waterTapHint", comment: ""))
+                    .font(AIATheme.Font.micro.weight(.semibold))
+                    .foregroundStyle(AIATheme.health)
+            }
+            // 预旋转 180°，抵消外层翻牌时的镜像，文字始终正向
+            .rotation3DEffect(.degrees(180), axis: (x: 0, y: 1, z: 0))
+        }
+
+        /// 启动自动翻转定时器（历史日期 / 减少动态效果偏好 → 不翻）
+        private func startTimer() {
+            guard isToday, !UIAccessibility.isReduceMotionEnabled else { return }
+            stopTimer()
+            timer = Timer.scheduledTimer(withTimeInterval: flipInterval, repeats: true) { _ in
+                withAnimation(.easeInOut(duration: 0.9)) { flipped.toggle() }
+            }
+        }
+
+        /// 清理定时器，避免泄漏
+        private func stopTimer() {
+            timer?.invalidate()
+            timer = nil
+        }
+    }
+
+    /// 点击「今日饮水」后上浮的「+100ml」标记
+    private struct FloatBadge: Identifiable {
+        let id = UUID()
+    }
+
+    /// 单个飘字：从卡片中心向上飘起并淡出，结束后回调 onDone 移除自身
+    private struct FloatBadgeView: View {
+        let badge: FloatBadge
+        var onDone: () -> Void
+        @State private var animate = false
+
+        var body: some View {
+            Text("+100ml")
+                .font(AIATheme.Font.micro.weight(.semibold))
+                .foregroundStyle(AIATheme.health)
+                .offset(y: animate ? -42 : 0)
+                .opacity(animate ? 0 : 1)
+                .onAppear {
+                    withAnimation(.easeOut(duration: 0.85)) {
+                        animate = true
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                        onDone()
+                    }
+                }
+        }
     }
 
     private var weekData: [ChartPoint] {
@@ -418,13 +567,23 @@ struct FoodListView: View {
             // 日历按钮只对「饮食记录」tab 有意义（选日期看当日饮食）
             if dietTab == .records {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showDatePicker = true } label: {
-                        Image(systemName: "calendar")
-                            .font(AIATheme.Font.headline)
-                            .foregroundStyle(AIATheme.blue)
+                    HStack(spacing: 4) {
+                        Button { showAddFood = true } label: {
+                            Image(systemName: "plus")
+                                .font(AIATheme.Font.headline.weight(.medium))
+                                .foregroundStyle(AIATheme.blue)
+                        }
+                        Button { showDatePicker = true } label: {
+                            Image(systemName: "calendar")
+                                .font(AIATheme.Font.headline)
+                                .foregroundStyle(AIATheme.blue)
+                        }
                     }
                 }
             }
+        }
+        .fullScreenCover(isPresented: $showAddFood) {
+            AddFoodManualView()
         }
         .sheet(isPresented: $showDatePicker) {
             VStack(spacing: 0) {
@@ -705,6 +864,8 @@ struct BillListView: View {
     @State private var billSelectedDate: Date? = Date()
     @State private var showCamera = false
     @State private var showPicker = false
+    /// 点击账单记录直接弹出「编辑账单」页（sheet 呈现 EditBillView，与其设计意图一致）
+    @State private var editBill: Bill? = nil
 
     private var todayBills: [Bill] {
         bills.filter { Calendar.current.isDateInToday($0.time) }
@@ -1003,10 +1164,12 @@ struct BillListView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 dateHeader(group.date, bills: group.bills)
                                 ForEach(group.bills) { b in
-                                    SelectableCard(
-                                        content: groupedBillRow(b),
-                                        destination: BillDetailView(bill: b)
-                                    )
+                                    Button {
+                                        editBill = b
+                                    } label: {
+                                        groupedBillRow(b)
+                                    }
+                                    .buttonStyle(.plain)
                                 }
                             }
                         }
@@ -1091,6 +1254,10 @@ struct BillListView: View {
             }
             .background(Color(.systemGroupedBackground))
             .presentationDetents([.height(340)])
+        }
+        // 点击账单记录直接弹出「编辑账单」页（EditBillView 自带 NavigationStack，作为 sheet 呈现最契合其设计）
+        .sheet(item: $editBill) { b in
+            EditBillView(bill: b)
         }
     }
 
@@ -1270,10 +1437,12 @@ struct BillListView: View {
                     .padding(.bottom, 4)
 
                     ForEach(dayBills) { b in
-                        SelectableCard(
-                            content: groupedBillRow(b),
-                            destination: BillDetailView(bill: b)
-                        )
+                        Button {
+                            editBill = b
+                        } label: {
+                            groupedBillRow(b)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -1691,7 +1860,7 @@ struct ReminderListView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(r.title).font(AIATheme.Font.footnote.weight(.medium))
                     .strikethrough(r.done)
-                    .foregroundStyle(r.done ? .gray : .primary)
+                    .foregroundStyle(r.done ? AIATheme.sub : .primary)
                 if let due = r.due {
                     Text(AppFormat.dateTime.string(from: due))
                         .font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
@@ -1724,7 +1893,58 @@ struct ReminderListView: View {
             } else {
                 // 之前未完成，现在标记为已完成：取消提醒
                 ReminderNotificationManager.cancel(r)
+                // 如果是重复待办，自动创建下一个周期的新实例
+                createNextRepeatReminder(r)
             }
+        }
+    }
+
+    /// 标记重复待办为已完成时，自动生成下一周期的新实例。
+    /// - daily：下一天同一时间
+    /// - weekly：下一周同一天同一时间
+    /// - monthly：下一月同一天同一时间
+    private func createNextRepeatReminder(_ r: Reminder) {
+        let rule = r.repeatRule.trimmingCharacters(in: .whitespaces)
+        guard rule != "none", !rule.isEmpty, let due = r.due else { return }
+        guard let nextDue = nextDueDate(from: due, rule: rule) else { return }
+
+        let next = Reminder(
+            title: r.title,
+            due: nextDue,
+            repeatRule: rule,
+            priority: r.priority,
+            done: false
+        )
+        // 复制提醒时间配置
+        let times = r.remindTimes.isEmpty ? (r.remindAt.map { [$0] } ?? []) : r.remindTimes
+        if !times.isEmpty {
+            // 根据新的 due 重新计算 remindTimes
+            let diffs = times.compactMap { t -> TimeInterval? in
+                guard let oldDue = r.due else { return nil }
+                return t.timeIntervalSince(oldDue)
+            }
+            if !diffs.isEmpty {
+                next.remindTimes = diffs.map { nextDue.addingTimeInterval($0) }
+            }
+        }
+        DefaultReminderSettings.shared.apply(to: next)
+
+        context.insert(next)
+        ReminderNotificationManager.schedule(next)
+        // 由 SwiftData autosave 持久化
+    }
+
+    private func nextDueDate(from due: Date, rule: String) -> Date? {
+        let cal = Calendar.current
+        switch rule {
+        case "daily":
+            return cal.date(byAdding: .day, value: 1, to: due)
+        case "weekly":
+            return cal.date(byAdding: .weekOfYear, value: 1, to: due)
+        case "monthly":
+            return cal.date(byAdding: .month, value: 1, to: due)
+        default:
+            return nil
         }
     }
 
@@ -1739,9 +1959,10 @@ private struct DietPreferencesView: View {
     @Query(filter: #Predicate { !$0.syncDeleted }, sort: \FoodEntry.date, order: .reverse)
     private var foods: [FoodEntry]
 
-    /// Top 5 最常吃的食物：按 name 分组计数、倒序、取前 5；空数据兜底
+    /// Top 5 最常吃的食物：按 name 分组计数、倒序、取前 5；饮用水不属于饮食，单独分类，不进入此排行
     private var topFoods: [DietFoodRank] {
-        let counts = Dictionary(grouping: foods, by: \.name).mapValues { $0.count }
+        let nonWaterFoods = foods.filter { $0.name != "饮用水" }
+        let counts = Dictionary(grouping: nonWaterFoods, by: \.name).mapValues { $0.count }
         return counts.sorted { $0.value > $1.value }
             .prefix(5)
             .enumerated()
@@ -1890,17 +2111,22 @@ private struct DietRankRow: View {
                 Circle().fill(isTopThree ? AIATheme.food : AIATheme.fillSoft)
                 Text("\(rank.rank)")
                     .font(AIATheme.Font.caption.weight(.semibold))
-                    .foregroundStyle(isTopThree ? .white : AIATheme.muted)
+                    // 4-5 名 badge 数字用 .primary：保证深色模式下与 fillSoft 底有足够对比
+                    .foregroundStyle(isTopThree ? .white : .primary)
             }
             .frame(width: 24, height: 24)
             Text(rank.name)
                 .font(AIATheme.Font.footnote.weight(.medium))
-                .foregroundStyle(AIATheme.ink)
+                // 食物名用 .primary 而非 AIATheme.ink：ink 在 dark 模式值为 0x2c2c2e
+                // （设计用于深色按钮背景，非通用正文色），在深灰卡片底上与背景同色而"消失"。
+                // .primary 会自动深浅适配（light→黑 / dark→白），始终保持最高对比度。
+                .foregroundStyle(.primary)
                 .lineLimit(1)
             Spacer(minLength: 0)
             Text("\(rank.count) 次")
                 .font(AIATheme.Font.footnote.weight(.medium))
-                .foregroundStyle(isTopThree ? AIATheme.food : AIATheme.muted)
+                // 前 3 名保留食物语义橙；后 2 名改用 sub（dark:0xa1a1a6），相比 muted(0x8e8e93) 提亮一档
+                .foregroundStyle(isTopThree ? AIATheme.food : AIATheme.sub)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
@@ -1941,12 +2167,21 @@ private struct DietTintedCard: View {
 private struct DietAnalysisView: View {
     @Query(filter: #Predicate { !$0.syncDeleted }, sort: \FoodEntry.date, order: .reverse)
     private var foods: [FoodEntry]
+    @Query(filter: #Predicate<WaterLog> { !$0.syncDeleted }) private var waterLogs: [WaterLog]
     @State private var period: DietPeriod = .thisWeek
 
     /// 当前周期内的食物（半开区间 [start, end)）
     private var periodFoods: [FoodEntry] {
         let (s, e) = period.range()
         return foods.filter { $0.date >= s && $0.date < e }
+    }
+
+    /// 当前周期内的手动饮水（tap 加的水）总和（ml）
+    private var periodManualWater: Double {
+        let (s, e) = period.range()
+        return waterLogs
+            .filter { $0.date >= s && $0.date < e }
+            .reduce(0) { $0 + $1.amount }
     }
 
     /// 周期汇总：去重天数 / 总条数 / 餐次种类数
@@ -1971,6 +2206,8 @@ private struct DietAnalysisView: View {
             (acc.cal + f.calories, acc.p + f.protein, acc.c + f.carbs, acc.f + f.fat,
              acc.fiber + f.fiber, acc.sugar + f.sugar, acc.sodium + f.sodium, acc.water + f.waterIntake)
         }
+        // 饮水：FoodEntry.waterIntake + WaterLog（手动 tap 加的水）
+        let waterSum = sum.water + periodManualWater
         let d = Double(dayCount)
         return [
             ("热量(kcal)",  String(format: "%.0f", sum.cal / d), AIATheme.food),
@@ -1980,7 +2217,7 @@ private struct DietAnalysisView: View {
             ("膳食纤维(g)", String(format: "%.1f", sum.fiber / d), AIATheme.health),
             ("糖(g)",       String(format: "%.1f", sum.sugar / d), AIATheme.food),
             ("钠(mg)",      String(format: "%.0f", sum.sodium / d), AIATheme.todo),
-            ("饮水(ml)",    String(format: "%.0f", sum.water / d), AIATheme.blue)
+            ("饮水(ml)",    String(format: "%.0f", waterSum / d), AIATheme.blue)
         ]
     }
 
@@ -2097,5 +2334,15 @@ private struct DietNutritionCard: View {
             RoundedRectangle(cornerRadius: AIATheme.rMD)
                 .stroke(AIATheme.hairline, lineWidth: 0.5)
         )
+    }
+}
+
+/// 水卡按压样式：按下 scale 0.94，松手 spring 回弹；同时背景 opacity 从 0.12→0.22，
+/// 让 tap 的视觉反馈比 PressableCardStyle 更明显（用户操作简单、反馈要足）。
+private struct WaterCardButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.94 : 1.0)
+            .animation(.spring(response: 0.28, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }
