@@ -122,7 +122,7 @@ struct OnboardingView: View {
     private var screenshotPage: some View {
         pageContent(kind: .screenshot,
                     title: "自动记账、记待办、记饮食",
-                    message: "设置快捷指令后截屏，阿宝会自动识别内容，归类到账单 / 待办 / 饮食 / 健康，不用手动输入。")
+                    message: "截屏、语音、Siri、拍照、图片、文字，都能自动记账、记待办、记饮食、记健康，超方便的！")
     }
     private var payScreenshotPage: some View {
         pageContent(kind: .screenshot,
