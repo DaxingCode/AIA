@@ -126,7 +126,7 @@ struct OnboardingView: View {
     private var siriPage: some View {
         pageContent(kind: .siri,
                     title: "通过Siri记账、记待办、记饮食",
-                    message: "跟Siri说\"叫阿宝AI管家\"即可唤醒阿宝，然后告诉阿宝你要做什么，阿宝会替你搞定。")
+                    message: "跟Siri说「用阿宝AI管家记」，就可以自动记账、记饮食、记待办，到点自动提醒")
     }
     private var quickActionsPage: some View {
         VStack(spacing: 0) {
