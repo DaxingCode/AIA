@@ -9,7 +9,7 @@ struct OnboardingView: View {
     var onFinish: () -> Void
 
     @State private var page = 0
-    private let total = 8
+    private let total = 9
 
     // 快捷指令配置页状态
     @State private var expandedTrigger: TriggerType? = .assistiveTouch
@@ -42,7 +42,8 @@ struct OnboardingView: View {
                     quickActionsPage.tag(4)
                     shortcutsPage.tag(5)
                     askPage.tag(6)
-                    donePage.tag(7)
+                    healthPage.tag(7)
+                    donePage.tag(8)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .animation(.easeInOut, value: page)
@@ -133,6 +134,11 @@ struct OnboardingView: View {
         pageContent(kind: .ask,
                     title: "都可以问阿宝 AI",
                     message: "账单、饮食、待办、运动、睡眠、健康管理，都可以问「阿宝 AI」")
+    }
+    private var healthPage: some View {
+        pageContent(kind: .health,
+                    title: "已打通苹果健康数据",
+                    message: "睡眠、心率、运动、健康，App 全掌握")
     }
     private var quickActionsPage: some View {
         VStack(spacing: 0) {
