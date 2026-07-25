@@ -9,7 +9,7 @@ struct OnboardingView: View {
     var onFinish: () -> Void
 
     @State private var page = 0
-    private let total = 10
+    private let total = 11
 
     // 快捷指令配置页状态
     @State private var expandedTrigger: TriggerType? = .assistiveTouch
@@ -38,13 +38,14 @@ struct OnboardingView: View {
                     welcomePage.tag(0)
                     screenshotPage.tag(1)
                     payScreenshotPage.tag(2)
-                    voicePage.tag(3)
-                    siriPage.tag(4)
-                    quickActionsPage.tag(5)
-                    shortcutsPage.tag(6)
-                    askPage.tag(7)
-                    healthPage.tag(8)
-                    donePage.tag(9)
+                    payFoodPage.tag(3)
+                    voicePage.tag(4)
+                    siriPage.tag(5)
+                    quickActionsPage.tag(6)
+                    shortcutsPage.tag(7)
+                    askPage.tag(8)
+                    healthPage.tag(9)
+                    donePage.tag(10)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .animation(.easeInOut, value: page)
@@ -125,6 +126,11 @@ struct OnboardingView: View {
         pageContent(kind: .screenshot,
                     title: "付款后截屏自动记账",
                     message: "付款完成，截一张屏，阿宝自动识别金额与商户并记账，不用手动填")
+    }
+    private var payFoodPage: some View {
+        pageContent(kind: .diet,
+                    title: "吃饭拍照自动记营养",
+                    message: "吃饭时拍张照，阿宝自动识别热量、卡路里与营养元素，饮食管理零负担")
     }
     private var voicePage: some View {
         pageContent(kind: .voice,
