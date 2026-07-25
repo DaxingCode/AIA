@@ -70,8 +70,9 @@ struct LoginView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("给你与众不同的")
-                Text("AI 管理体验")
+                Text("自动记账、记待办、记饮食")
+                Text("运动、睡眠、健康管理")
+                Text("一个App全搞定")
             }
             .font(AIATheme.Font.title1.weight(.light))
             .foregroundStyle(.primary)
