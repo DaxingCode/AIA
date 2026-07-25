@@ -113,7 +113,7 @@ struct OnboardingView: View {
     private var welcomePage: some View {
         pageContent(kind: .welcome,
                     title: "你好，我是阿宝 👋",
-                    message: "你的 AI 生活助理。记账、饮食、健康、待办，自动帮你搞定。")
+                    message: "你的专属AI助理，自动记账、记待办、记饮食、管健康，一个App全搞定")
     }
     private var screenshotPage: some View {
         pageContent(kind: .screenshot,
