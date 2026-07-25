@@ -55,15 +55,12 @@ struct LoginView: View {
     private var logoSection: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 8) {
-                // 应用图标：可换成 app logo；先用 sparkles 示意
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(LinearGradient.techAccent)
-                        .frame(width: 44, height: 44)
-                    Image(systemName: "sparkles")
-                        .font(AIATheme.Font.title1.weight(.semibold))
-                        .foregroundStyle(.white)
-                }
+                // 应用图标
+                Image("AppLogo")
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 44, height: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
                 Text("阿宝AI管家")
                     .font(AIATheme.Font.display.weight(.black))
                     .foregroundStyle(AIATheme.blue)
