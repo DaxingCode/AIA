@@ -27,7 +27,7 @@ struct BillDetailView: View {
                 .padding(.vertical, 12)
             }
             .scrollDismissesKeyboard(.immediately)
-            AIBottomBar()
+            AIBottomBar(entrySource: "bill")
         }
         .background(AIATheme.fillSoft.ignoresSafeArea())
         .navigationTitle("账单详情")

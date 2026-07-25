@@ -69,7 +69,7 @@ struct HealthDetailView: View {
                 }
                 .padding()
             }
-            AIBottomBar()
+            AIBottomBar(entrySource: "health")
         }
         .background(Color(.secondarySystemBackground))
         .navigationTitle("健康指标")

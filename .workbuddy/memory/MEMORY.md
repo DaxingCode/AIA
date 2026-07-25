@@ -6,7 +6,7 @@
 ## 环境/工具链
 - **Xcode 路径**：`/Volumes/MacBook/Applications/Xcode.app`（非系统默认 `/Applications`）。调用 `xcodebuild` 时如从 PATH 找不到，用绝对路径：`/Volumes/MacBook/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild`。
 - `xcodebuild` 目标：项目 `AIA/AIA.xcodeproj`，scheme `AIA`。模拟器构建示例：`xcodebuild -project AIA/AIA.xcodeproj -scheme AIA -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build CODE_SIGNING_ALLOWED=NO`。
-- ⚠️ 本机沙箱会拦截 `swift-plugin-server`（Swift 宏插件 External Macro 加载报 `Operation not permitted`），导致含 `@Model`/`@Query` 宏的项目 `xcodebuild` 失败；此非代码问题，需在未受限环境（真机 Xcode / 解除沙箱）构建验证。
+- `xcodebuild` 在本机沙箱内**可正常构建验证**（含 `@Model`/`@Query` 宏的项目 2026-07-25 实测 BUILD SUCCEEDED）。无需解除沙箱或真机即可跑模拟器构建。
 
 ## 关键工程约定
 - **Schema 版本闸门**：@Model 变更必须 `AIAApp.schemaVersion`+1，否则旧 store 白屏；集中由指定责任人管，禁止多对话各自+1。
@@ -49,7 +49,6 @@ struct EditTodoSheet: View {
 - **已删除**：免费/付费档位对视觉的硬拦截（`AppUserTier` 不再拦视觉）、`degrade()` 空账单降级、`localWins()`、多账单 `detectMultiBillList` 提前分支、OCR 空/非空分支。这些是「食物被当空账单」「7月被当商户」的根因。
 - `UserTier`/`AppUserTier` 仅 SettingsView 展示剩余额度用，识别链路不再消费额度。`recognizeOCRText`（文本模型）保留但主链路不再调用，供未来成本优先回退用。
 - 时间规则：只取「支付/付款/交易/创建时间」标签下时间戳；绝不把状态栏 HH:MM 当支付时间（列表项显示时间例外，用户明确是支付时间）。
-- 账单支付时间：只取「支付/付款/交易/创建时间」标签下时间戳；绝不把状态栏 HH:MM 当支付时间（列表项显示时间例外，用户明确是支付时间）。
 - 营养库匹配：精确→别名(`aliases`)→子串(头名词靠后优先)→调料前缀护栏(`seasoningPrefixes`)；异名走 `aliases` 不塞 `rows`。
 
 ## 云同步铁律
@@ -68,6 +67,15 @@ struct EditTodoSheet: View {
 - 空态垂直居中（`EmptyStateView`+`frame(maxWidth:.infinity,maxHeight:.infinity)`）。
 - 底部栏 `AIBottomBar` 单体玻璃胶囊；箭头由 `iconOrder` 单一真源推导，勿手写 `←/→`。
 - 动效走 `AIATheme.Motion`+`PressableCardStyle`，禁散写 `Animation.xxx`。
+- **账单行间 hairline 铁律（2026-07-24 多次踩坑）**：账单管理页有 3 个独立账单列表渲染入口，凡是「账单行间加 hairline」必须**全 3 处一起检查 + 一起改**：
+  1. **「全部」tab**：`groupedByDate`（`RecordsViews.swift:1393+`）
+  2. **「在日历查看」tab**：`billCalendarView`（`RecordsViews.swift:1784+`，易漏——独立 ForEach 不是 groupedByDate）
+  3. **「按月查看」tab**：`MonthlyBillListView`（独立文件）
+  统一模式：`ForEach(Array(xxx.enumerated()), id: ...)` + `Rectangle().fill(AIATheme.hairline).frame(height: 0.7).padding(.leading, 62)`。下次再有反馈先用 `grep -n "ForEach.*[Bb]ills"` 一键扫全 3 处，避免「改一处忘两处」。
+- **深色模式细线设计铁律（2026-07-24 多次踩坑）**：`AIATheme.hairline` 深色值标准 = `0x636366`（系统深色 fill 3，已取代旧值 `0x545458`）；light 值保持 `0xe6e9ec` 不动；**细线宽度硬性下限 = 0.7pt**（0.5pt 物理权重太弱，单独提亮颜色救不了「细到几乎看不见」的视觉问题）。**双管齐下**：颜色对比（dark `0x636366` vs 表面 `0x1c1c1e`）+ 物理宽度（≥0.7pt）任一缺失都判不合格。所有行间分隔/列表 hairline 必须用此标准；卡片描边（1pt）用 `0x636366` 同样协调不突兀。
+- **「按字段分组的列表」必须显式加分隔铁律（2026-07-24 踩坑）**：`dateHeader` 纯文字（无 chip/无背景/无 hairline）时，相邻分组在深色模式 + 小字号 + 高密度布局下完全看不出分组。**改法**：相邻 daySection 之间的 VStack 之前插 `Rectangle hairline 0.7pt + padding(.top, 14).padding(.bottom, 2)`（第一个不加避免与上方标题冲突）；颜色宽度自动继承 `AIATheme.hairline` 标准。**适用范围**：所有按日期/类型/状态分组的列表（饮食/待办/健康/账单）。
+- **NavigationStack 推入方式一致性铁律（2026-07-24 踩坑）**：要么全用编程式 `path.append(...)` 推入（与根栈 `.navigationDestination(for: HomeRoute.self)` 配对，能被 `path.removeLast()` 正确回退），要么全用闭包 `NavigationLink`（在同一子栈内可正确管理）。**混用（闭包推 + 编程式推）** 会导致中间页从根栈消失，绕过特定层级——典型表现：从深层 page 返回时**绕过中间页**直接落到更早页。**判别法**：把每个工具页（聚合入口页、子工具页）都提升为 `HomeRoute` case，走编程式 push，让所有 page 都在根 path 上才能保证 `path.removeLast()` 步进正确。`TodoToolsView`/`billTools` 是合格范式。
+- 列表 cell 图标：用语义色 SF Symbol **直显**（不包 Circle 背景，与 `.card()` 同级）。**避坑：避开 `sparkles.rectangle.portrait.fill` 等 iOS 新版复杂 symbol**，2026-07-24 实测 iOS 26.5 模拟器 + title3 字号下渲染退化、视觉等同空白。优先 iOS 13-14+ 经典稳定符号：`wand.and.stars`（自动/AI）/ `bell.badge.fill`（提醒）/ `sparkles`（AI）/ `viewfinder.circle`（截屏）/ `rectangle.dashed`（选区）。
 
 ## 多对话并行协作协议（强制）
 - 多 WorkBuddy 对话并行改同仓，协调中枢=`多团队协作分工表.md`。

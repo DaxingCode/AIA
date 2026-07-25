@@ -50,7 +50,8 @@ enum RecognitionSaver {
         guard let dueString = dueString, !dueString.isEmpty else { return todayAtEight }
 
         var baseDate: Date?
-        if let d = ISO8601DateFormatter().date(from: dueString) {
+        let isoFmt = ISO8601DateFormatter(); isoFmt.timeZone = .current
+        if let d = isoFmt.date(from: dueString) {
             baseDate = d
         } else {
             let f = DateFormatter()
@@ -114,8 +115,9 @@ enum RecognitionSaver {
 
         if types.contains("bill") {
             for b in result.billList {
-                guard let amt = b.amount,
-                      let merchant = b.merchant, !merchant.isEmpty else { continue }
+                guard let amt = b.amount else { continue }
+                // 空商户兜底：用分类名或"账单"，绝不 continue（曾致 Siri 说"记下了"但账单未存）。
+                let merchant = (b.merchant ?? "").isEmpty ? (b.category ?? "账单") : b.merchant!
                 // 时间解析失败时用今天零点（绝不 .now，否则截图时间 15:41 会污染支付记录）
                 let fallbackTime = Calendar.current.date(bySettingHour: 0, minute: 0, second: 0, of: .now) ?? .now
                 let time = RecognitionResult.date(from: b.time) ?? fallbackTime

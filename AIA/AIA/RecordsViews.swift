@@ -631,7 +631,7 @@ struct FoodListView: View {
                 AIPrompt(text: "点麦克风，语音记录饮食", pointsTo: .mic),
                 AIPrompt(text: "阿宝帮总结今天的饮食情况", pointsTo: nil),
                 AIPrompt(text: "点相册上传、记录美食", pointsTo: .album)
-            ])
+            ], entrySource: "food")
         }
         .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("food.navTitle"))
@@ -982,7 +982,7 @@ struct HealthListView: View {
                 }
                 .padding()
             }
-            AIBottomBar()
+            AIBottomBar(entrySource: "health")
         }
         .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("health.navTitle"))
@@ -1432,7 +1432,7 @@ struct BillListView: View {
                 AIPrompt(text: "点麦克风，语音记录账单", pointsTo: .mic),
                 AIPrompt(text: "阿宝帮总结这个月的消费情况", pointsTo: nil),
                 AIPrompt(text: "点相册上传，自动记账", pointsTo: .album)
-            ])
+            ], entrySource: "bill")
         }
         .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("tab.bill"))
@@ -2065,7 +2065,7 @@ struct ReminderListView: View {
                 AIPrompt(text: "点麦克风，语音记录待办", pointsTo: .mic),
                 AIPrompt(text: "阿宝帮总结最近有什么事要做", pointsTo: nil),
                 AIPrompt(text: "点相册上传，自动识别待办", pointsTo: .album)
-            ])
+            ], entrySource: "todo")
         }
         .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("tab.todo"))

@@ -115,8 +115,8 @@ struct ContentView: View {
                     case .billTools:    BillToolsView()
                     case .todo:         ReminderListView()
                     case .todoTools:    TodoToolsView()
-                    case .chat:         ChatView(prefill: router.chatPrefill)
-                    case .chatVoice:    ChatView(autostartVoice: true)
+                    case .chat:         ChatView(prefill: router.chatPrefill, entrySource: router.chatEntrySource)
+                    case .chatVoice:    ChatView(autostartVoice: true, entrySource: "voice")
                     case .settings:     SettingsView()
                     case .autoSetup:    AutoRecognitionSetupView()
                     case .healthDetail(let m):
@@ -781,8 +781,10 @@ struct ContentView: View {
             // 拉起相机（识别流程由 cameraRecognitionFlow 处理）；延迟到视图就绪后再弹，规避冷启动时序竞态。
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showCamera = true }
         case .chat:
+            router.chatEntrySource = "home"
             jump(to: .chat)
         case .voice:
+            router.chatEntrySource = "voice"
             jump(to: .chatVoice)
         case .todo:
             jump(to: .todo)

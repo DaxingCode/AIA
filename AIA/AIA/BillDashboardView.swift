@@ -453,10 +453,10 @@ struct BillDashboardView: View {
                         visibleMonth = prevMonth
                     } label: {
                         Image(systemName: "chevron.left")
-                            .font(AIATheme.Font.subhead.weight(.medium))
-                            .foregroundStyle(AIATheme.ink)
-                            .frame(width: 32, height: 32)
-                            .background(AIATheme.surfaceSecondary)
+                            .font(AIATheme.Font.body.weight(.semibold))
+                            .foregroundStyle(AIATheme.blue)
+                            .frame(width: 36, height: 36)
+                            .background(AIATheme.blue.opacity(0.12))
                             .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
@@ -478,10 +478,10 @@ struct BillDashboardView: View {
                         visibleMonth = nextMonth
                     } label: {
                         Image(systemName: "chevron.right")
-                            .font(AIATheme.Font.subhead.weight(.medium))
-                            .foregroundStyle(AIATheme.ink)
-                            .frame(width: 32, height: 32)
-                            .background(AIATheme.surfaceSecondary)
+                            .font(AIATheme.Font.body.weight(.semibold))
+                            .foregroundStyle(AIATheme.blue)
+                            .frame(width: 36, height: 36)
+                            .background(AIATheme.blue.opacity(0.12))
                             .clipShape(Circle())
                     }
                     .buttonStyle(.plain)

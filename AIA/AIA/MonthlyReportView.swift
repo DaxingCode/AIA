@@ -17,8 +17,7 @@ private struct MonthReportData {
 
 struct MonthlyReportView: View {
     @Environment(\.modelContext) private var context
-    @Query(sort: \Bill.time, order: .reverse) private var bills: [Bill]
-
+    @Query(filter: #Predicate<Bill> { !$0.syncDeleted }, sort: \Bill.time, order: .reverse) private var bills: [Bill]
     @State private var selectedMonth: Date = startOfMonth(Date())
     @State private var sharePayload: SharePayload? = nil
     @State private var exporting = false

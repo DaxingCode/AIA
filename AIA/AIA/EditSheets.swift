@@ -47,6 +47,9 @@ struct EditFoodView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
 
+    // 食物库本地缓存（hitCount 倒序，热词靠前）
+    @Query(sort: \FoodMeta.hitCount, order: .reverse) private var foodMetas: [FoodMeta]
+
     @State private var name: String
     @State private var meal: String
     @State private var weightText: String
@@ -76,6 +79,15 @@ struct EditFoodView: View {
     // 删除
     @State private var showDeleteConfirm = false
     @State private var pendingDeleteID: PersistentIdentifier? = nil
+
+    // 食物库搜索（与手动添加页共用 FoodSearcher，改名时自动检索 → 用户确认 → 营养自动更新）
+    @State private var searchText: String = ""
+    @State private var searchResults: [FoodSearchResult] = []
+    @State private var isSearching: Bool = false
+    @State private var showSearchResults: Bool = false
+    @State private var isCloudSearching: Bool = false
+    @State private var cloudErrorMessage: String? = nil
+    @State private var searchTask: Task<Void, Never>? = nil
 
     init(entry: FoodEntry) {
         self.entry = entry
@@ -182,6 +194,9 @@ struct EditFoodView: View {
                     noteImageNames.append(name)
                 }
             }
+            .onChange(of: name) { _, newValue in
+                performSearch(newValue)
+            }
             .onDisappear {
                 // 与 EditBillView 同款：先 dismiss 回列表，等动画结束后再执行删除，
                 // 避免 syncDeleted 触发 @Query 重 fetch 与动画叠加卡死。
@@ -191,6 +206,9 @@ struct EditFoodView: View {
                         SafeDelete.foodByID(id, in: context)
                     }
                 }
+                // 取消未完成的联网任务，避免野指针
+                searchTask?.cancel()
+                searchTask = nil
             }
         }
     }
@@ -198,15 +216,82 @@ struct EditFoodView: View {
     // MARK: - 卡片
     private var nameCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("食物名称")
-                .font(AIATheme.Font.micro)
-                .foregroundStyle(AIATheme.muted)
+            HStack(spacing: 6) {
+                Text("食物名称")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                Spacer()
+                if isSearching {
+                    ProgressView().scaleEffect(0.7)
+                }
+            }
             TextField("如 牛肉", text: $name)
                 .font(AIATheme.Font.headline)
                 .foregroundStyle(.primary)
+                .autocorrectionDisabled()
+
+            if showSearchResults && !searchResults.isEmpty {
+                searchResultList
+            } else if isCloudSearching {
+                HStack(spacing: 6) {
+                    ProgressView().scaleEffect(0.7)
+                    Text("联网搜索中...")
+                        .font(AIATheme.Font.caption)
+                        .foregroundStyle(AIATheme.blue)
+                }
+            } else if let err = cloudErrorMessage {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.warning)
+                    Text(err)
+                        .font(AIATheme.Font.caption)
+                        .foregroundStyle(AIATheme.warning)
+                }
+            } else if showSearchResults && !name.isEmpty && searchResults.isEmpty {
+                Text("未找到匹配食物，请手动填写下方营养信息")
+                    .font(AIATheme.Font.caption)
+                    .foregroundStyle(AIATheme.muted)
+            }
         }
         .padding(14)
         .card()
+    }
+
+    private var searchResultList: some View {
+        VStack(spacing: 0) {
+            ForEach(searchResults) { result in
+                Button {
+                    applySearchResult(result)
+                } label: {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(result.name)
+                                .font(AIATheme.Font.subhead.weight(.medium))
+                                .foregroundStyle(.primary)
+                            Text("\(Int(result.kcal)) kcal/100g · P\(Int(result.protein)) C\(Int(result.carbs)) F\(Int(result.fat))")
+                                .font(AIATheme.Font.micro)
+                                .foregroundStyle(AIATheme.sub)
+                        }
+                        Spacer(minLength: 0)
+                        sourceBadge(result.source)
+                        Image(systemName: "arrow.right.circle.fill")
+                            .font(AIATheme.Font.body)
+                            .foregroundStyle(AIATheme.blue)
+                    }
+                    .padding(.vertical, 10)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if result.id != searchResults.last?.id {
+                    Divider().padding(.leading, 4)
+                }
+            }
+        }
+        .padding(10)
+        .background(AIATheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
     }
 
     private var infoCard: some View {
@@ -576,6 +661,126 @@ struct EditFoodView: View {
 
         try? context.save()
         dismiss()
+    }
+
+    // MARK: - 食物库搜索（与 AddFoodManualView 共用 FoodSearcher）
+
+    /// 结果项来源 badge：内置库（绿） / 历史缓存（灰） / 联网查询（蓝）
+    @ViewBuilder
+    private func sourceBadge(_ source: String) -> some View {
+        switch source {
+        case "cloud":
+            Text("联网查询")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.blue)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(AIATheme.blue.opacity(0.12))
+                .clipShape(Capsule())
+        case "cache":
+            Text("历史缓存")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(AIATheme.surfaceSecondary)
+                .clipShape(Capsule())
+        default:
+            Text("内置库")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.green)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(AIATheme.green.opacity(0.12))
+                .clipShape(Capsule())
+        }
+    }
+
+    /// 当食物名变化时触发检索。流程与 AddFoodManualView.performSearch 完全一致：
+    /// 本地 NutritionLibrary + FoodMeta → 无命中时联网兜底（600ms 防抖）。
+    private func performSearch(_ query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        searchTask?.cancel()
+        guard !trimmed.isEmpty else {
+            searchResults = []
+            showSearchResults = false
+            isCloudSearching = false
+            cloudErrorMessage = nil
+            return
+        }
+        isSearching = true
+        showSearchResults = true
+        cloudErrorMessage = nil
+        isCloudSearching = false
+
+        let results = FoodSearcher.localSearch(trimmed, foodMetas: foodMetas)
+        searchResults = results
+        isSearching = false
+
+        if results.isEmpty {
+            searchTask = Task { @MainActor in
+                do {
+                    try await Task.sleep(nanoseconds: 600_000_000)
+                    if Task.isCancelled { return }
+                    isCloudSearching = true
+                    cloudErrorMessage = nil
+
+                    let result: FoodSearchResult?
+                    do {
+                        result = try await FoodSearcher.cloudSearch(name: trimmed)
+                    } catch {
+                        isCloudSearching = false
+                        cloudErrorMessage = "联网搜索失败，请稍后重试或手动填写"
+                        return
+                    }
+                    if Task.isCancelled { return }
+
+                    guard let result else {
+                        isCloudSearching = false
+                        cloudErrorMessage = "联网未找到该食物，请手动填写"
+                        return
+                    }
+
+                    FoodMetaStore.upsert(
+                        name: result.name, displayName: result.name,
+                        kcal: result.kcal, protein: result.protein,
+                        carbs: result.carbs, fat: result.fat,
+                        source: "cloud", in: context
+                    )
+
+                    if Task.isCancelled { return }
+                    searchResults = [result]
+                    isCloudSearching = false
+                } catch {
+                    isCloudSearching = false
+                    if !Task.isCancelled {
+                        cloudErrorMessage = "联网搜索失败，请稍后重试或手动填写"
+                    }
+                }
+            }
+        } else {
+            cloudErrorMessage = nil
+        }
+    }
+
+    /// 用户点击搜索结果：把 base* 字段全部覆盖为该食物每 100g 营养。
+    /// 重量保留用户当前值（用户可能之前手动改过），由 displayedKcalText 按比例算出当前份量下的总热量。
+    private func applySearchResult(_ result: FoodSearchResult) {
+        name = result.name
+        baseCaloriesText = String(format: "%.1f", result.kcal)
+        baseProteinText = result.protein > 0 ? String(format: "%.1f", result.protein) : ""
+        baseCarbsText = result.carbs > 0 ? String(format: "%.1f", result.carbs) : ""
+        baseFatText = result.fat > 0 ? String(format: "%.1f", result.fat) : ""
+        baseFiberText = result.fiber > 0 ? String(format: "%.1f", result.fiber) : ""
+        baseSugarText = result.sugar > 0 ? String(format: "%.1f", result.sugar) : ""
+        baseSodiumText = result.sodium > 0 ? String(format: "%.1f", result.sodium) : ""
+        searchText = result.name
+        searchResults = []
+        showSearchResults = false
+
+        FoodMetaStore.upsert(
+            name: result.name, displayName: result.name,
+            kcal: result.kcal, protein: result.protein,
+            carbs: result.carbs, fat: result.fat,
+            source: result.source, in: context
+        )
     }
 }
 
@@ -1320,7 +1525,7 @@ struct EditTodoView: View {
 
     // MARK: - 提醒时间行
     private func alertRow(item: Binding<AlertItem>) -> some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Menu {
                     ForEach(reminderOptions) { option in
@@ -1365,6 +1570,7 @@ struct EditTodoView: View {
                     .foregroundStyle(AIATheme.warn)
             }
             .buttonStyle(.plain)
+            .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] }
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 14)

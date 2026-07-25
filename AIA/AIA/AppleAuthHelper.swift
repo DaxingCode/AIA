@@ -71,13 +71,18 @@ final class AppleAuthHelper: NSObject, ASAuthorizationControllerDelegate, ASAuth
     // MARK: - ASAuthorizationControllerPresentationContextProviding
 
     func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
-        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let delegate = scene.delegate as? AppDelegate,
-              let window = delegate.window else {
-            // 兜底：新建一个看不见的窗口（极少触发）
-            return UIWindow()
+        let windowScene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first
+        if let scene = windowScene,
+           let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first {
+            return window
         }
-        return window
+        // 兜底：基于首个 windowScene 创建窗口（iOS 26 要求用 init(windowScene:)）
+        if let scene = windowScene {
+            return UIWindow(windowScene: scene)
+        }
+        return UIWindow()
     }
 }
 

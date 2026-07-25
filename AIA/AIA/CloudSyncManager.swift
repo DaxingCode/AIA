@@ -8,6 +8,16 @@ import Foundation
 import SwiftData
 import Combine
 
+/// 一次同步的增量统计，供设置页「同步状态」卡片展示。
+struct SyncStats: Equatable {
+    let localTotal: Int      // 本地各类型记录总条数
+    let uploaded: Int        // 本次增量发送条数（决定云端 doc.get 读调用量）
+    let cloudWritten: Int    // 云端实际落库条数（≤ uploaded，陈旧记录被跳过）
+    let pulled: Int          // 从云端拉回的增量条数
+    let skipped: Int         // 因未变更被跳过的本地条数 = localTotal - uploaded
+    let at: Date
+}
+
 @MainActor
 final class CloudSyncManager: ObservableObject {
     static let shared = CloudSyncManager()
@@ -15,6 +25,8 @@ final class CloudSyncManager: ObservableObject {
     @Published var status: String = "未同步"
     @Published var lastSyncAt: Date? = UserDefaults.standard.object(forKey: "aia_last_sync") as? Date
     @Published var isSyncing: Bool = false
+    /// 上一次同步的增量对比数据；初始为 nil（尚未同步过）。
+    @Published var lastSyncStats: SyncStats? = nil
 
     // MARK: - 同步账号（多设备共享同值 = 同一份数据）
     /// 已登录时绑定到登录账号（aia.userId），实现「同账号登录 = 同一份云数据」；
@@ -118,13 +130,21 @@ final class CloudSyncManager: ObservableObject {
             let pulled = try await pull(context: context)
             // 清理本地已同步删除的墓碑（cloud 已收到 deleted=true）。
             // 涵盖 Bill / FoodEntry / Reminder / HealthMetric / RecognitionRecord /
-            // ChatMessage / MerchantMeta 等所有通过 buildPushItems 同步的类型。
+            // ChatMessage / MerchantMeta / WaterLog / RecurringRule 等所有通过 buildPushItems 同步的类型。
             cleanupSyncedTombstones(context: context)
             let now = Date()
             lastSyncAt = now
             UserDefaults.standard.set(now, forKey: "aia_last_sync")
-            status = "已同步 · 上传 \(pushed) 条 / 更新 \(pulled) 条"
-            print("[sync] 同步完成 pushed=\(pushed), pulled=\(pulled), userId=\(uid)")
+            lastSyncStats = SyncStats(
+                localTotal: pushed.localTotal,
+                uploaded: pushed.sent,
+                cloudWritten: pushed.upserted,
+                pulled: pulled,
+                skipped: max(0, pushed.localTotal - pushed.sent),
+                at: now
+            )
+            status = "已同步 · 上传 \(pushed.upserted) 条 / 更新 \(pulled) 条"
+            print("[sync] 同步完成 · 上传对比 → 发送 \(pushed.sent) 条 / 云端实际写入 \(pushed.upserted) 条 | 拉取 \(pulled) 条, userId=\(uid)")
         } catch {
             status = "同步失败：\(error.localizedDescription)"
             print("[sync] 同步失败：\(error.localizedDescription), userId=\(uid)")
@@ -133,10 +153,13 @@ final class CloudSyncManager: ObservableObject {
     }
 
     // MARK: - 上传
-    private func push(context: ModelContext) async throws -> Int {
-        let items = buildPushItems(context: context)
-        print("[sync] push 准备上传 items 数量 = \(items.count)，userId = \(Self.userId)")
-        guard !items.isEmpty else { return 0 }
+    /// 返回 (sent: 本次增量发送的记录条数, upserted: 云端实际落库的条数, localTotal: 本地各类型总条数)。
+    private func push(context: ModelContext) async throws -> (sent: Int, upserted: Int, localTotal: Int) {
+        let since = lastSyncAt?.timeIntervalSince1970
+        let result = buildPushItems(context: context, since: since)
+        let items = result.items
+        print("[sync] push 准备上传 items 数量 = \(items.count)（增量 since=\(String(describing: since))），userId = \(Self.userId)")
+        guard !items.isEmpty else { return (sent: 0, upserted: 0, localTotal: result.localTotal) }
 
         let body: [String: Any] = [
             "action": "push",
@@ -146,17 +169,29 @@ final class CloudSyncManager: ObservableObject {
         let resp = try await postJSON(body)
         let upserted = (resp["upserted"] as? NSNumber)?.intValue
         print("[sync] push 云端返回 = \(resp)，解析 upserted = \(String(describing: upserted))")
-        return upserted ?? items.count
+        return (sent: items.count, upserted: upserted ?? items.count, localTotal: result.localTotal)
     }
 
-    private func buildPushItems(context: ModelContext) -> [[String: Any]] {
+    /// 只上传「上次同步后有变动」的记录（syncUpdatedAt > since），把 push 从全量上传改为增量上传，
+    /// 直接削减云端按记录粒度的 doc.get 调用（每次 /sync 的数据库读次数 ≈ 本端发出的记录条数）。
+    /// - since == nil 表示首次/登录后全量同步，发送全部本地记录（与 pull 的 since=0 对齐）。
+    /// - 软删记录（syncDeleted == true）在本地删除时会同步刷新 syncUpdatedAt，因此仍会被纳入本次上传，
+    ///   确保云端收到 deleted=true 墓碑；push 成功后才由 cleanupSyncedTombstones 清本地墓碑。
+    /// 返回 (items: 增量筛选后的上传记录, localTotal: 本地各类型记录总条数）。
+    private func buildPushItems(context: ModelContext, since: Double?) -> (items: [[String: Any]], localTotal: Int) {
         // 注意：payload 故意不包含 imageName —— 识别原图仅存本地（Documents/attachments），
         // 绝不上云。新增字段时请勿把 imageName 加进任何 payload。
         var items: [[String: Any]] = []
+        // 增量边界：since == nil（首次/登录后）时取 0，timeIntervalSince1970 恒为正，等价"全量发送"。
+        let sinceTime = since ?? 0
+        // 本地各类型总条数（用于打印"增量上传省了多少"）。
+        var totalFetched = 0
 
         if let bills = try? context.fetch(FetchDescriptor<Bill>()) {
             print("[sync] 本地 bills 数量 = \(bills.count)")
+            totalFetched += bills.count
             for b in bills {
+                guard b.syncUpdatedAt.timeIntervalSince1970 > sinceTime else { continue }
                 items.append(item(id: b.syncId, type: "bill", updatedAt: b.syncUpdatedAt,
                                   deleted: b.syncDeleted,                                   payload: [
                                     "merchant": b.merchant,
@@ -172,7 +207,9 @@ final class CloudSyncManager: ObservableObject {
         }
         if let reminders = try? context.fetch(FetchDescriptor<Reminder>()) {
             print("[sync] 本地 reminders 数量 = \(reminders.count)")
+            totalFetched += reminders.count
             for r in reminders {
+                guard r.syncUpdatedAt.timeIntervalSince1970 > sinceTime else { continue }
                 items.append(item(id: r.syncId, type: "reminder", updatedAt: r.syncUpdatedAt,
                                   deleted: r.syncDeleted, payload: [
                                     "title": r.title,
@@ -188,7 +225,9 @@ final class CloudSyncManager: ObservableObject {
         }
         if let foods = try? context.fetch(FetchDescriptor<FoodEntry>()) {
             print("[sync] 本地 foods 数量 = \(foods.count)")
+            totalFetched += foods.count
             for f in foods {
+                guard f.syncUpdatedAt.timeIntervalSince1970 > sinceTime else { continue }
                 items.append(item(id: f.syncId, type: "food", updatedAt: f.syncUpdatedAt,
                                   deleted: f.syncDeleted, payload: [
                                     "name": f.name,
@@ -209,7 +248,9 @@ final class CloudSyncManager: ObservableObject {
         }
         if let healths = try? context.fetch(FetchDescriptor<HealthMetric>()) {
             print("[sync] 本地 healths 数量 = \(healths.count)")
+            totalFetched += healths.count
             for h in healths {
+                guard h.syncUpdatedAt.timeIntervalSince1970 > sinceTime else { continue }
                 items.append(item(id: h.syncId, type: "health", updatedAt: h.syncUpdatedAt,
                                   deleted: h.syncDeleted, payload: [
                                     "metric": h.metric,
@@ -221,7 +262,9 @@ final class CloudSyncManager: ObservableObject {
         }
         if let recognitions = try? context.fetch(FetchDescriptor<RecognitionRecord>()) {
             print("[sync] 本地 recognitions 数量 = \(recognitions.count)")
+            totalFetched += recognitions.count
             for r in recognitions {
+                guard r.syncUpdatedAt.timeIntervalSince1970 > sinceTime else { continue }
                 items.append(item(id: r.syncId, type: "recognition", updatedAt: r.syncUpdatedAt,
                                   deleted: r.syncDeleted, payload: [
                                     "recognizedAt": r.recognizedAt.timeIntervalSince1970,
@@ -233,7 +276,9 @@ final class CloudSyncManager: ObservableObject {
         }
         if let metas = try? context.fetch(FetchDescriptor<MerchantMeta>()) {
             print("[sync] 本地 merchantMetas 数量 = \(metas.count)")
+            totalFetched += metas.count
             for m in metas {
+                guard m.syncUpdatedAt.timeIntervalSince1970 > sinceTime else { continue }
                 items.append(item(id: m.syncId, type: "merchant_meta", updatedAt: m.syncUpdatedAt,
                                   deleted: m.syncDeleted, payload: [
                                     "merchant": m.merchant,
@@ -246,7 +291,9 @@ final class CloudSyncManager: ObservableObject {
         }
         if let chats = try? context.fetch(FetchDescriptor<ChatMessage>()) {
             print("[sync] 本地 chats 数量 = \(chats.count)")
+            totalFetched += chats.count
             for c in chats {
+                guard c.syncUpdatedAt.timeIntervalSince1970 > sinceTime else { continue }
                 items.append(item(id: c.syncId, type: "chat", updatedAt: c.syncUpdatedAt,
                                   deleted: c.syncDeleted, payload: [
                                     "role": c.roleRaw,
@@ -255,7 +302,41 @@ final class CloudSyncManager: ObservableObject {
                                   ]))
             }
         }
-        return items
+        // 饮水（WaterLog）—— 让阿宝可经云端管理
+        if let waters = try? context.fetch(FetchDescriptor<WaterLog>()) {
+            totalFetched += waters.count
+            for w in waters {
+                guard w.syncUpdatedAt.timeIntervalSince1970 > sinceTime else { continue }
+                items.append(item(id: w.syncId, type: "water", updatedAt: w.syncUpdatedAt,
+                                  deleted: w.syncDeleted, payload: [
+                                    "amount": w.amount,
+                                    "date": w.date.timeIntervalSince1970
+                                  ]))
+            }
+        }
+        // 周期排程（RecurringRule）—— 让阿宝可经云端管理
+        if let rules = try? context.fetch(FetchDescriptor<RecurringRule>()) {
+            totalFetched += rules.count
+            for r in rules {
+                guard r.syncUpdatedAt.timeIntervalSince1970 > sinceTime else { continue }
+                items.append(item(id: r.syncId, type: "recurring_rule", updatedAt: r.syncUpdatedAt,
+                                  deleted: r.syncDeleted, payload: [
+                                    "merchant": r.merchant,
+                                    "amount": r.amount,
+                                    "category": r.category,
+                                    "note": r.note,
+                                    "isIncome": r.isIncome,
+                                    "dayOfMonth": r.dayOfMonth,
+                                    "startDate": r.startDate.timeIntervalSince1970,
+                                    "lastGeneratedAt": r.lastGeneratedAt?.timeIntervalSince1970 ?? 0,
+                                    "cycleRaw": r.cycleRaw ?? "monthly",
+                                    "customValue": r.customValue,
+                                    "customUnitRaw": r.customUnitRaw ?? "month"
+                                  ]))
+            }
+        }
+        print("[sync] push 本地共 \(totalFetched) 条，增量筛选后上传 \(items.count) 条（跳过未变更 \(totalFetched - items.count) 条）")
+        return (items: items, localTotal: totalFetched)
     }
 
     private func item(id: UUID, type: String, updatedAt: Date, deleted: Bool, payload: [String: Any]) -> [String: Any] {
@@ -307,6 +388,10 @@ final class CloudSyncManager: ObservableObject {
                 merged += applyMerchantMeta(context: context, id: id, remoteDate: remoteDate, deleted: deleted, payload: payload)
             case "chat":
                 merged += applyChat(context: context, id: id, remoteDate: remoteDate, deleted: deleted, payload: payload)
+            case "water":
+                merged += applyWater(context: context, id: id, remoteDate: remoteDate, deleted: deleted, payload: payload)
+            case "recurring_rule":
+                merged += applyRecurring(context: context, id: id, remoteDate: remoteDate, deleted: deleted, payload: payload)
             default:
                 break
             }
@@ -451,6 +536,64 @@ final class CloudSyncManager: ObservableObject {
         }
     }
 
+    private func applyWater(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
+        if let existing = (try? context.fetch(FetchDescriptor<WaterLog>(predicate: #Predicate { $0.syncId == id })))?.first {
+            if deleted { context.delete(existing); return 1 }
+            guard existing.syncUpdatedAt < remoteDate else { return 0 }
+            existing.amount = (payload["amount"] as? Double) ?? existing.amount
+            if let d = payload["date"] as? Double { existing.date = Date(timeIntervalSince1970: d) }
+            existing.syncUpdatedAt = remoteDate
+            return 1
+        } else {
+            if deleted { return 0 }
+            let amount = (payload["amount"] as? Double) ?? 0
+            let date = (payload["date"] as? Double).map { Date(timeIntervalSince1970: $0) } ?? Date()
+            let w = WaterLog(date: date, amount: amount, syncId: id, syncUpdatedAt: remoteDate)
+            context.insert(w)
+            return 1
+        }
+    }
+
+    private func applyRecurring(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
+        if let existing = (try? context.fetch(FetchDescriptor<RecurringRule>(predicate: #Predicate { $0.syncId == id })))?.first {
+            if deleted { context.delete(existing); return 1 }
+            guard existing.syncUpdatedAt < remoteDate else { return 0 }
+            existing.merchant = (payload["merchant"] as? String) ?? existing.merchant
+            existing.amount = (payload["amount"] as? Double) ?? existing.amount
+            existing.category = (payload["category"] as? String) ?? existing.category
+            existing.note = (payload["note"] as? String) ?? existing.note
+            existing.isIncome = (payload["isIncome"] as? Bool) ?? existing.isIncome
+            existing.dayOfMonth = (payload["dayOfMonth"] as? Int) ?? existing.dayOfMonth
+            if let sd = payload["startDate"] as? Double { existing.startDate = Date(timeIntervalSince1970: sd) }
+            if let lg = payload["lastGeneratedAt"] as? Double, lg > 0 { existing.lastGeneratedAt = Date(timeIntervalSince1970: lg) }
+            existing.cycleRaw = (payload["cycleRaw"] as? String) ?? existing.cycleRaw
+            existing.customValue = (payload["customValue"] as? Int) ?? existing.customValue
+            existing.customUnitRaw = (payload["customUnitRaw"] as? String) ?? existing.customUnitRaw
+            existing.syncUpdatedAt = remoteDate
+            return 1
+        } else {
+            if deleted { return 0 }
+            let lg = payload["lastGeneratedAt"] as? Double
+            let lastGen: Date? = (lg != nil && lg! > 0) ? Date(timeIntervalSince1970: lg!) : nil
+            let r = RecurringRule(
+                merchant: (payload["merchant"] as? String) ?? "",
+                amount: (payload["amount"] as? Double) ?? 0,
+                category: (payload["category"] as? String) ?? "",
+                note: (payload["note"] as? String) ?? "",
+                isIncome: (payload["isIncome"] as? Bool) ?? false,
+                dayOfMonth: (payload["dayOfMonth"] as? Int) ?? 1,
+                startDate: (payload["startDate"] as? Double).map { Date(timeIntervalSince1970: $0) } ?? Date(),
+                lastGeneratedAt: lastGen,
+                cycleRaw: (payload["cycleRaw"] as? String) ?? "monthly",
+                customValue: (payload["customValue"] as? Int) ?? 1,
+                customUnitRaw: (payload["customUnitRaw"] as? String) ?? "month",
+                syncId: id, syncUpdatedAt: remoteDate
+            )
+            context.insert(r)
+            return 1
+        }
+    }
+
     private func applyHealth(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
         if let existing = (try? context.fetch(FetchDescriptor<HealthMetric>(predicate: #Predicate { $0.syncId == id })))?.first {
             if deleted { context.delete(existing); return 1 }
@@ -543,6 +686,12 @@ final class CloudSyncManager: ObservableObject {
         }
         if let metas = try? context.fetch(FetchDescriptor<MerchantMeta>(predicate: #Predicate { $0.syncDeleted == true })) {
             for m in metas { context.delete(m); total += 1 }
+        }
+        if let waters = try? context.fetch(FetchDescriptor<WaterLog>(predicate: #Predicate { $0.syncDeleted == true })) {
+            for w in waters { context.delete(w); total += 1 }
+        }
+        if let rules = try? context.fetch(FetchDescriptor<RecurringRule>(predicate: #Predicate { $0.syncDeleted == true })) {
+            for r in rules { context.delete(r); total += 1 }
         }
 
         if total > 0 { print("[sync] 清理本地墓碑 \(total) 条") }

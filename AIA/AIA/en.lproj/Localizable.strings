@@ -4,6 +4,8 @@
 "common.delete" = "Delete";
 "common.other" = "Other";
 "common.cancel" = "Cancel";
+"common.confirmDelete" = "Confirm Delete";
+"common.deleteCount" = "Delete %d items?";
 "common.selectAll" = "Select All";
 "common.deselectAll" = "Deselect All";
 "common.delete" = "Delete";
@@ -89,6 +91,8 @@
 "food.burned" = "Burned";
 "food.tdeeLabel" = "TDEE kcal";
 "food.water" = "Water";
+"food.waterUnit" = "ml";
+"food.waterTapHint" = "Tap +100ml";
 "food.nutrition" = "Nutrition";
 "food.nutritionTarget" = "Goal Protein %d / Carb %d / Fat %d g";
 "food.macro.protein" = "Protein";

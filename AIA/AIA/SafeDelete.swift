@@ -71,6 +71,27 @@ enum SafeDelete {
         }
     }
 
+    static func waterLog(_ w: WaterLog, in context: ModelContext) {
+        DispatchQueue.main.async {
+            w.syncDeleted = true
+            w.syncUpdatedAt = Date()
+        }
+    }
+
+    static func chatMessage(_ m: ChatMessage, in context: ModelContext) {
+        DispatchQueue.main.async {
+            m.syncDeleted = true
+            m.syncUpdatedAt = Date()
+        }
+    }
+
+    static func merchantMeta(_ m: MerchantMeta, in context: ModelContext) {
+        DispatchQueue.main.async {
+            m.syncDeleted = true
+            m.syncUpdatedAt = Date()
+        }
+    }
+
     // MARK: - ID 版本（避免捕获已 fault 的对象）
     /// 详情页 pop 后若没有任何视图再引用该对象，SwiftData 可能把它标记为 fault。
     /// 此时若直接访问传入对象的属性会触发 fault 异常并闪退。
@@ -99,6 +120,21 @@ enum SafeDelete {
         guard let r = context.model(for: id) as? RecognitionRecord else { return }
         recognitionRecord(r, in: context)
     }
+
+    static func waterLogByID(_ id: PersistentIdentifier, in context: ModelContext) {
+        guard let w = context.model(for: id) as? WaterLog else { return }
+        waterLog(w, in: context)
+    }
+
+    static func chatMessageByID(_ id: PersistentIdentifier, in context: ModelContext) {
+        guard let m = context.model(for: id) as? ChatMessage else { return }
+        chatMessage(m, in: context)
+    }
+
+    static func merchantMetaByID(_ id: PersistentIdentifier, in context: ModelContext) {
+        guard let m = context.model(for: id) as? MerchantMeta else { return }
+        merchantMeta(m, in: context)
+    }
 }
 
 /// 需要支持软删除的模型统一遵循此协议（所有 @Model 均已拥有 syncDeleted / syncUpdatedAt 字段）。
@@ -114,3 +150,4 @@ extension HealthMetric: SyncDeletable {}
 extension RecognitionRecord: SyncDeletable {}
 extension ChatMessage: SyncDeletable {}
 extension MerchantMeta: SyncDeletable {}
+extension WaterLog: SyncDeletable {}

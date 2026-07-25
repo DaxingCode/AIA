@@ -196,9 +196,36 @@ struct AutoSyncSettingsView: View {
                     .foregroundStyle(statusColor)
                     .multilineTextAlignment(.trailing)
             }
+            if let stats = sync.lastSyncStats {
+                Divider().background(AIATheme.hairline)
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("同步明细")
+                        .font(AIATheme.Font.subhead)
+                        .foregroundStyle(.primary)
+                    syncStatRow(label: "本地记录", value: "\(stats.localTotal) 条")
+                    syncStatRow(label: "本次上传", value: "\(stats.uploaded) 条", highlight: true)
+                    if stats.skipped > 0 {
+                        syncStatRow(label: "已跳过（未变更）", value: "\(stats.skipped) 条", dimmed: true)
+                    }
+                    syncStatRow(label: "云端写入", value: "\(stats.cloudWritten) 条")
+                    syncStatRow(label: "拉取更新", value: "\(stats.pulled) 条")
+                }
+            }
         }
         .padding(14)
         .card()
+    }
+
+    private func syncStatRow(label: String, value: String, highlight: Bool = false, dimmed: Bool = false) -> some View {
+        HStack {
+            Text(label)
+                .font(AIATheme.Font.footnote)
+                .foregroundStyle(dimmed ? AIATheme.muted : AIATheme.sub)
+            Spacer()
+            Text(value)
+                .font(AIATheme.Font.footnote.weight(.medium))
+                .foregroundStyle(highlight ? AIATheme.green : .primary)
+        }
     }
 
     private var statusIcon: String {

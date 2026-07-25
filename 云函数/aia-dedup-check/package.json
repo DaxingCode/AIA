@@ -1,0 +1,9 @@
+{
+  "name": "aia-dedup-check",
+  "version": "1.0.0",
+  "private": true,
+  "description": "核对 aia_records 集合中账单重复记录的 _id 是否互不相同",
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}

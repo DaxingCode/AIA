@@ -6,8 +6,8 @@
 import SwiftUI
 import SwiftData
 
-// MARK: - 食物搜索结果
-private struct FoodSearchResult: Identifiable {
+// MARK: - 食物搜索结果（全局，EditFoodView / AddFoodManualView 共用）
+struct FoodSearchResult: Identifiable, Hashable {
     let id = UUID()
     let name: String
     let kcal: Double
@@ -17,7 +17,57 @@ private struct FoodSearchResult: Identifiable {
     var fiber: Double
     var sugar: Double
     var sodium: Double
-    var source: String  // "library" / "cache"
+    var source: String  // "library" / "cache" / "cloud"
+}
+
+/// 食物搜索核心逻辑（本地 + 联网兜底）。两边页面共用，避免代码重复。
+enum FoodSearcher {
+    private static let library = NutritionLibrary.shared
+
+    /// 本地搜：先 NutritionLibrary 命中（精确/别名/子串三级），再 FoodMeta 缓存命中。
+    /// 返回结果已按「归一化名称」去重，library 优先于 cache。
+    static func localSearch(_ query: String, foodMetas: [FoodMeta]) -> [FoodSearchResult] {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return [] }
+
+        var results: [FoodSearchResult] = []
+
+        // ① NutritionLibrary 命中
+        if let ref = library.match(trimmed) {
+            results.append(FoodSearchResult(
+                name: ref.name, kcal: ref.kcal, protein: ref.protein,
+                carbs: ref.carbs, fat: ref.fat, fiber: ref.fiber,
+                sugar: ref.sugar, sodium: ref.sodium, source: "library"
+            ))
+        }
+
+        // ② FoodMeta 缓存命中（按归一化名 contains 子串）
+        let normQuery = FoodMeta.normalize(trimmed)
+        let matchedMetas = foodMetas.filter { meta in
+            meta.name.contains(normQuery) || FoodMeta.normalize(meta.displayName).contains(normQuery)
+        }
+        for meta in matchedMetas {
+            if !results.contains(where: { FoodMeta.normalize($0.name) == meta.name }) {
+                results.append(FoodSearchResult(
+                    name: meta.displayName, kcal: meta.kcal, protein: meta.protein,
+                    carbs: meta.carbs, fat: meta.fat, fiber: meta.fiber,
+                    sugar: meta.sugar, sodium: meta.sodium, source: "cache"
+                ))
+            }
+        }
+
+        return results
+    }
+
+    /// 联网兜底：调云端 queryFood 拿该食物每 100g 营养。
+    static func cloudSearch(name: String) async throws -> FoodSearchResult? {
+        guard let ref = try await RecognizeService.queryFood(name: name) else { return nil }
+        return FoodSearchResult(
+            name: ref.name, kcal: ref.kcal, protein: ref.protein,
+            carbs: ref.carbs, fat: ref.fat, fiber: ref.fiber,
+            sugar: ref.sugar, sodium: ref.sodium, source: "cloud"
+        )
+    }
 }
 
 struct AddFoodManualView: View {
@@ -437,35 +487,12 @@ struct AddFoodManualView: View {
         cloudErrorMessage = nil
         isCloudSearching = false
 
-        // ① 本地查 NutritionLibrary（精确/别名/子串 三级，NutritionLibrary.match 内部已处理）
-        var results: [FoodSearchResult] = []
-        if let ref = library.match(trimmed) {
-            results.append(FoodSearchResult(
-                name: ref.name, kcal: ref.kcal, protein: ref.protein,
-                carbs: ref.carbs, fat: ref.fat, fiber: ref.fiber,
-                sugar: ref.sugar, sodium: ref.sodium, source: "library"
-            ))
-        }
-
-        // ② 本地查 FoodMeta 缓存（归一化名称包含搜索词的）
-        let normQuery = FoodMeta.normalize(trimmed)
-        let matchedMetas = foodMetas.filter { meta in
-            meta.name.contains(normQuery) || FoodMeta.normalize(meta.displayName).contains(normQuery)
-        }
-        for meta in matchedMetas {
-            if !results.contains(where: { FoodMeta.normalize($0.name) == meta.name }) {
-                results.append(FoodSearchResult(
-                    name: meta.displayName, kcal: meta.kcal, protein: meta.protein,
-                    carbs: meta.carbs, fat: meta.fat, fiber: meta.fiber,
-                    sugar: meta.sugar, sodium: meta.sodium, source: "cache"
-                ))
-            }
-        }
-
+        // ① 本地搜（FoodSearcher 内部已合并 NutritionLibrary + FoodMeta 缓存）
+        let results = FoodSearcher.localSearch(trimmed, foodMetas: foodMetas)
         searchResults = results
         isSearching = false
 
-        // ③ 本地无命中 → 启 Task 联网兜底（600ms 防抖 + 取消旧任务）
+        // ② 本地无命中 → 启 Task 联网兜底（600ms 防抖 + 取消旧任务）
         if results.isEmpty {
             searchTask = Task { @MainActor in
                 do {
@@ -474,9 +501,9 @@ struct AddFoodManualView: View {
                     isCloudSearching = true
                     cloudErrorMessage = nil
 
-                    let ref: FoodRef?
+                    let result: FoodSearchResult?
                     do {
-                        ref = try await RecognizeService.queryFood(name: trimmed)
+                        result = try await FoodSearcher.cloudSearch(name: trimmed)
                     } catch {
                         isCloudSearching = false
                         cloudErrorMessage = "联网搜索失败，请稍后重试或手动填写"
@@ -484,7 +511,7 @@ struct AddFoodManualView: View {
                     }
                     if Task.isCancelled { return }
 
-                    guard let ref else {
+                    guard let result else {
                         isCloudSearching = false
                         cloudErrorMessage = "联网未找到该食物，请手动填写"
                         return
@@ -492,20 +519,15 @@ struct AddFoodManualView: View {
 
                     // 落库 FoodMeta，下次直接命中
                     FoodMetaStore.upsert(
-                        name: ref.name,
-                        displayName: ref.name,
-                        kcal: ref.kcal, protein: ref.protein,
-                        carbs: ref.carbs, fat: ref.fat,
+                        name: result.name,
+                        displayName: result.name,
+                        kcal: result.kcal, protein: result.protein,
+                        carbs: result.carbs, fat: result.fat,
                         source: "cloud", in: context
                     )
 
-                    let cloudResult = FoodSearchResult(
-                        name: ref.name, kcal: ref.kcal, protein: ref.protein,
-                        carbs: ref.carbs, fat: ref.fat, fiber: ref.fiber,
-                        sugar: ref.sugar, sodium: ref.sodium, source: "cloud"
-                    )
                     if Task.isCancelled { return }
-                    searchResults = [cloudResult]
+                    searchResults = [result]
                     isCloudSearching = false
                 } catch {
                     // CancellationError 或其他（兜底）

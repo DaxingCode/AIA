@@ -1,0 +1,18 @@
+[
+  // 第一步：不限 deleted，含软删一起看更全面
+  { "$match": { "type": "bill" } },
+  { "$group": {
+      "_id": {
+        "merchant": "$payload.merchant",
+        "amount": "$payload.amount",
+        "category": "$payload.category",
+        "isIncome": "$payload.isIncome"
+      },
+      "count": { "$sum": 1 },
+      "ids": { "$push": "$_id" },
+      "times": { "$push": "$payload.time" },
+      "deletedFlags": { "$push": "$deleted" }
+  }},
+  { "$match": { "count": { "$gt": 1 } } },
+  { "$sort": { "count": -1 } }
+]

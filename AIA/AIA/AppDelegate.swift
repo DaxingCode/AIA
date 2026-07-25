@@ -118,6 +118,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UIWindowSceneDelegate, UN
             // 未登录：展示登录页；容器同时注入，便于登录成功后无缝切换。
             window.rootViewController = UIHostingController(
                 rootView: LoginView()
+                    .modelContainer(container)
                     .environmentObject(AuthManager.shared)
             )
         } else {
@@ -190,7 +191,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UIWindowSceneDelegate, UN
     /// 用户点击通知或进入 App 后，应清除桌面图标角标。
     static func resetBadgeCount() {
         DispatchQueue.main.async {
-            UIApplication.shared.applicationIconBadgeNumber = 0
+            UNUserNotificationCenter.current().setBadgeCount(0)
             // 同时清空通知中心里已 delivered 的通知，避免角标残留
             UNUserNotificationCenter.current().removeAllDeliveredNotifications()
         }
@@ -224,7 +225,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UIWindowSceneDelegate, UN
         #if DEBUG
         print("[Auth] currentWindow: fallback to UIApplication.shared.windows")
         #endif
-        return UIApplication.shared.windows.first
+        return UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.windows.first }
+            .first
     }
 
     static func switchToMainInterface() {

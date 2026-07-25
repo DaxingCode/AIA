@@ -53,7 +53,10 @@ enum RecognitionPresent: Identifiable {
         switch self {
         case .saved(let s): return "saved-\(s.id.uuidString)"
         case .duplicate(let d): return "dup-\(d.hash)"
-        case .pending: return "pending-\(UUID().uuidString)"
+        case .pending(let result, let rawText, _, _):
+            // 基于内容生成确定性 id，避免每次访问 UUID() 产生新值导致 SwiftUI 误认为不同 item 而反复关闭/重现 cover
+            let summary = RecognitionSaver.summary(of: result)
+            return "pending-\(rawText.hashValue)-\(summary.hash)"
         }
     }
 }

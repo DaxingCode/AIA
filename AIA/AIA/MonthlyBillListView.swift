@@ -11,6 +11,11 @@ struct MonthlyBillListView: View {
     /// 点击账单行 → 直接弹出「编辑账单」sheet（与主账单页 / 食物 / 待办 列表点击行为统一）
     @State private var editBill: Bill? = nil
 
+    // MARK: 多选删除
+    @State private var multiSelectMode = false
+    @State private var selectedIDs = Set<PersistentIdentifier>()
+    @State private var showDeleteConfirm = false
+
     private var monthTitle: String {
         "\(String(year))年\(month)月"
     }
@@ -63,11 +68,72 @@ struct MonthlyBillListView: View {
         }
         .navigationTitle(monthTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .overlay(alignment: .bottom) {
+            if multiSelectMode {
+                MultiSelectBottomBar(
+                    count: selectedIDs.count,
+                    totalCount: sortedBills.count,
+                    onCancel: {
+                        multiSelectMode = false
+                        selectedIDs.removeAll()
+                    },
+                    onSelectAll: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        let allIDs = Set(sortedBills.map(\.persistentModelID))
+                        if selectedIDs.isSuperset(of: allIDs) {
+                            selectedIDs.subtract(allIDs)
+                        } else {
+                            selectedIDs.formUnion(allIDs)
+                        }
+                    },
+                    onDelete: {
+                        guard !selectedIDs.isEmpty else { return }
+                        showDeleteConfirm = true
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.22), value: multiSelectMode)
+        .alert(NSLocalizedString("common.confirmDelete", comment: ""), isPresented: $showDeleteConfirm) {
+            Button(NSLocalizedString("common.cancel", comment: ""), role: .cancel) { }
+            Button(NSLocalizedString("common.delete", comment: ""), role: .destructive) {
+                batchDeleteMonthly()
+            }
+        } message: {
+            Text(String(format: NSLocalizedString("common.deleteCount", comment: ""), selectedIDs.count))
+        }
         .background(AIATheme.fillSoft.ignoresSafeArea())
         // 账单行点击 → 直接弹「编辑账单」sheet（与主账单页/食物/待办统一体验）
         .sheet(item: $editBill) { b in
             EditBillView(bill: b)
         }
+    }
+
+    // MARK: 多选删除
+
+    private func enterMonthlyMultiSelect(_ id: PersistentIdentifier) {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        multiSelectMode = true
+        selectedIDs.insert(id)
+    }
+
+    private func toggleMonthlySelection(_ id: PersistentIdentifier) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        if selectedIDs.contains(id) {
+            selectedIDs.remove(id)
+            if selectedIDs.isEmpty { multiSelectMode = false }
+        } else {
+            selectedIDs.insert(id)
+        }
+    }
+
+    private func batchDeleteMonthly() {
+        for id in selectedIDs {
+            SafeDelete.billByID(id, in: context)
+        }
+        multiSelectMode = false
+        selectedIDs.removeAll()
     }
 
     // MARK: - 本月收支概览
@@ -126,22 +192,23 @@ struct MonthlyBillListView: View {
             .padding(.top, 12)
             .padding(.bottom, 8)
 
-            ForEach(Array(bills.enumerated()), id: \.offset) { idx, b in
+            ForEach(Array(bills.enumerated()), id: \.element.persistentModelID) { idx, b in
                 if idx > 0 {
                     Divider()
                         .padding(.leading, 62)
                         .background(AIATheme.hairline)
                 }
 
-                // 改为 Button + .sheet：与 BillListView / FoodListView / ReminderListView
-                // 列表行点击行为统一（直接弹 EditBillView sheet，不再走「详情页→编辑」两段式）。
-                // 原 NavigationLink → BillDetailView 删掉，避免用户在「详情」页再点一次才到编辑页。
-                Button {
-                    editBill = b
-                } label: {
+                SelectableRow(
+                    isSelecting: multiSelectMode,
+                    isSelected: selectedIDs.contains(b.persistentModelID),
+                    onTap: { editBill = b },
+                    onLongPress: { enterMonthlyMultiSelect(b.persistentModelID) },
+                    onToggle: { toggleMonthlySelection(b.persistentModelID) },
+                    onDelete: { SafeDelete.bill(b, in: context) }
+                ) {
                     billRow(b)
                 }
-                .buttonStyle(.plain)
             }
         }
         .padding(.bottom, 10)

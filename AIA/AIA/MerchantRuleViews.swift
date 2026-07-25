@@ -7,16 +7,41 @@ import SwiftData
 struct MerchantRuleListView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \MerchantMeta.lastSeen, order: .reverse)
+    @Query(filter: #Predicate<MerchantMeta> { !$0.syncDeleted }, sort: \MerchantMeta.lastSeen, order: .reverse)
     private var rules: [MerchantMeta]
 
     @State private var editingRule: MerchantMeta?
     @State private var showAddSheet = false
-    @State private var ruleToDelete: MerchantMeta?
-    @State private var showDeleteConfirm = false
+    // 多选删除
+    @State private var multiSelectMode = false
+    @State private var selectedRuleIDs = Set<PersistentIdentifier>()
+    @State private var showMultiDeleteConfirm = false
 
-    private var visibleRules: [MerchantMeta] {
-        rules.filter { !$0.syncDeleted }
+    private var visibleRules: [MerchantMeta] { rules }
+
+    private func toggleSelection(_ id: PersistentIdentifier) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        if selectedRuleIDs.contains(id) {
+            selectedRuleIDs.remove(id)
+            if selectedRuleIDs.isEmpty { multiSelectMode = false }
+        } else {
+            selectedRuleIDs.insert(id)
+        }
+    }
+
+    private func enterMultiSelect(_ id: PersistentIdentifier) {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        multiSelectMode = true
+        selectedRuleIDs.insert(id)
+    }
+
+    private func deleteSelectedRules() {
+        for id in selectedRuleIDs {
+            SafeDelete.merchantMetaByID(id, in: context)
+        }
+        multiSelectMode = false
+        selectedRuleIDs.removeAll()
+        CloudSyncManager.shared.syncAfterLocalChange(context: context)
     }
 
     var body: some View {
@@ -32,7 +57,19 @@ struct MerchantRuleListView: View {
                 } else {
                     LazyVStack(spacing: 10) {
                         ForEach(visibleRules) { rule in
-                            ruleRow(rule)
+                            SelectableRow(
+                                isSelecting: multiSelectMode,
+                                isSelected: selectedRuleIDs.contains(rule.persistentModelID),
+                                onTap: { editingRule = rule },
+                                onLongPress: { enterMultiSelect(rule.persistentModelID) },
+                                onToggle: { toggleSelection(rule.persistentModelID) },
+                                onDelete: {
+                                    SafeDelete.merchantMeta(rule, in: context)
+                                    CloudSyncManager.shared.syncAfterLocalChange(context: context)
+                                }
+                            ) {
+                                ruleRowContent(rule)
+                            }
                         }
                     }
                     .padding(.horizontal)
@@ -44,12 +81,14 @@ struct MerchantRuleListView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    editingRule = nil
-                    showAddSheet = true
-                } label: {
-                    Image(systemName: "plus")
-                        .font(AIATheme.Font.headline.weight(.semibold))
+                if !multiSelectMode {
+                    Button {
+                        editingRule = nil
+                        showAddSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(AIATheme.Font.headline.weight(.semibold))
+                    }
                 }
             }
         }
@@ -61,67 +100,80 @@ struct MerchantRuleListView: View {
             MerchantRuleEditSheet(rule: rule)
                 .environment(\.modelContext, context)
         }
-        .confirmationDialog("确认删除规则？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
-            Button("删除", role: .destructive) {
-                if let rule = ruleToDelete {
-                    MerchantMetaStore.markDeleted(rule)
-                    CloudSyncManager.shared.syncAfterLocalChange(context: context)
-                }
-                ruleToDelete = nil
+        .overlay(alignment: .bottom) {
+            if multiSelectMode {
+                MultiSelectBottomBar(
+                    count: selectedRuleIDs.count,
+                    totalCount: visibleRules.count,
+                    onCancel: {
+                        multiSelectMode = false
+                        selectedRuleIDs.removeAll()
+                    },
+                    onSelectAll: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        let allIDs = Set(visibleRules.map(\.persistentModelID))
+                        if selectedRuleIDs.isSuperset(of: allIDs) {
+                            selectedRuleIDs.subtract(allIDs)
+                        } else {
+                            selectedRuleIDs.formUnion(allIDs)
+                        }
+                    },
+                    onDelete: {
+                        guard !selectedRuleIDs.isEmpty else { return }
+                        showMultiDeleteConfirm = true
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            Button("取消", role: .cancel) { ruleToDelete = nil }
+        }
+        .animation(.easeInOut(duration: 0.22), value: multiSelectMode)
+        .alert(
+            NSLocalizedString("common.confirmDelete", comment: ""),
+            isPresented: $showMultiDeleteConfirm
+        ) {
+            Button(NSLocalizedString("common.cancel", comment: ""), role: .cancel) { }
+            Button(NSLocalizedString("common.delete", comment: ""), role: .destructive) {
+                deleteSelectedRules()
+            }
         } message: {
-            Text("删除后将不再自动为该商户归类，规则也会从云端移除。")
+            Text(String(format: NSLocalizedString("common.deleteCount", comment: ""), selectedRuleIDs.count))
         }
     }
 
-    private func ruleRow(_ rule: MerchantMeta) -> some View {
-        Button {
-            editingRule = rule
-        } label: {
-            HStack(spacing: 12) {
-                Text(BillCategoryHelpers.icon(for: rule.category))
-                    .font(AIATheme.Font.title1)
-                    .frame(width: 36, height: 36)
-                    .background(BillCategoryHelpers.color(for: rule.category).opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+    private func ruleRowContent(_ rule: MerchantMeta) -> some View {
+        HStack(spacing: 12) {
+            Text(BillCategoryHelpers.icon(for: rule.category))
+                .font(AIATheme.Font.title1)
+                .frame(width: 36, height: 36)
+                .background(BillCategoryHelpers.color(for: rule.category).opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(rule.merchant)
-                        .font(AIATheme.Font.callout.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(rule.merchant)
+                    .font(AIATheme.Font.callout.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
 
-                    HStack(spacing: 6) {
-                        Text(rule.category)
-                            .font(AIATheme.Font.caption.weight(.medium))
-                            .foregroundStyle(BillCategoryHelpers.color(for: rule.category))
-                        Text("·")
-                            .foregroundStyle(AIATheme.muted)
-                        Text(rule.isIncome ? "收入" : "支出")
-                            .font(AIATheme.Font.caption)
-                            .foregroundStyle(rule.isIncome ? AIATheme.income : AIATheme.expense)
-                    }
+                HStack(spacing: 6) {
+                    Text(rule.category)
+                        .font(AIATheme.Font.caption.weight(.medium))
+                        .foregroundStyle(BillCategoryHelpers.color(for: rule.category))
+                    Text("·")
+                        .foregroundStyle(AIATheme.muted)
+                    Text(rule.isIncome ? "收入" : "支出")
+                        .font(AIATheme.Font.caption)
+                        .foregroundStyle(rule.isIncome ? AIATheme.income : AIATheme.expense)
                 }
+            }
 
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(AIATheme.Font.footnote.weight(.medium))
-                    .foregroundStyle(AIATheme.muted)
-            }
-            .padding(12)
-            .card()
-            .contentShape(Rectangle())
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(AIATheme.Font.footnote.weight(.medium))
+                .foregroundStyle(AIATheme.muted)
         }
-        .buttonStyle(.plain)
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) {
-                ruleToDelete = rule
-                showDeleteConfirm = true
-            } label: {
-                Label("删除", systemImage: "trash")
-            }
-        }
+        .padding(12)
+        .card()
+        .contentShape(Rectangle())
     }
 }
 
@@ -330,9 +382,16 @@ struct MerchantRuleEditSheet: View {
         let before = String(name[..<range.lowerBound])
         let match = String(name[range])
         let after = String(name[range.upperBound...])
-        return Text(before).foregroundStyle(.primary)
-            + Text(match).foregroundStyle(AIATheme.blue).fontWeight(.semibold)
-            + Text(after).foregroundStyle(.primary)
+        var result = AttributedString(before)
+        result.swiftUI.foregroundColor = .primary
+        var matched = AttributedString(match)
+        matched.swiftUI.foregroundColor = AIATheme.blue
+        matched.swiftUI.font = .body.weight(.semibold)
+        var tail = AttributedString(after)
+        tail.swiftUI.foregroundColor = .primary
+        result.append(matched)
+        result.append(tail)
+        return Text(result)
     }
 
     private var categoryPickerCard: some View {

@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="UTF-8">
+<title>修待办点行崩溃 · Before/After</title>
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --card: #ffffff;
+    --ink: #1a1a1a;
+    --sub: #6b7280;
+    --blue: #2f7bff;
+    --red: #e23b3b;
+    --green: #10b981;
+    --amber: #f59e0b;
+    --border: #e7e9ee;
+    --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 14px rgba(0,0,0,.04);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+    background: var(--bg); color: var(--ink);
+  }
+  .container { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  .sub { color: var(--sub); font-size: 13px; margin-bottom: 28px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px; box-shadow: var(--shadow); }
+  .panel h2 { font-size: 15px; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+  .tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+  .tag.bad { background: #fee2e2; color: var(--red); }
+  .tag.good { background: #d1fae5; color: #047857; }
+  pre {
+    background: #0f172a; color: #e2e8f0;
+    border-radius: 10px; padding: 12px 14px;
+    font-size: 11.5px; line-height: 1.55;
+    overflow-x: auto; margin: 8px 0 0;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  pre .c { color: #94a3b8; }
+  pre .k { color: #f472b6; }
+  pre .s { color: #86efac; }
+  pre .r { color: #fbbf24; }
+  .flow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+  .step { background: #f3f4f6; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; }
+  .step.bad { background: #fee2e2; border-color: #fca5a5; color: #991b1b; }
+  .step.good { background: #d1fae5; border-color: #6ee7b7; color: #047857; }
+  .arrow { color: var(--sub); font-size: 14px; }
+  .err {
+    background: #fef2f2; border: 1px solid #fca5a5; color: #7f1d1d;
+    border-radius: 8px; padding: 10px 12px; font-size: 12px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; margin: 8px 0;
+  }
+  .fix-list { margin: 6px 0 0 0; padding-left: 20px; font-size: 13px; line-height: 1.7; }
+  .fix-list li { margin-bottom: 4px; }
+  .fix-list code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .phone {
+    background: linear-gradient(180deg, #1a1a1a, #0a0a0a);
+    border-radius: 36px; padding: 14px; max-width: 280px; margin: 12px auto;
+    box-shadow: 0 4px 20px rgba(0,0,0,.18);
+  }
+  .phone-screen { background: #f7f8fa; border-radius: 24px; padding: 14px 12px; }
+  .phone-row {
+    background: #fff; border: 1px solid #e7e9ee; border-radius: 10px;
+    padding: 10px 12px; font-size: 13px; margin: 6px 0;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .phone-row .dot { width: 18px; height: 18px; border: 1.5px solid #cbd5e1; border-radius: 50%; }
+  .meta { color: var(--sub); font-size: 12px; margin-top: 4px; }
+  .compare-arrow { text-align: center; font-size: 24px; color: var(--sub); margin: 6px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>修点待办/健康行崩溃 · AnyNavigationPath.comparisonTypeMismatch</h1>
+  <p class="sub">commit <code>a427a2f</code> · 4 文件改动 +70/-24 · BUILD SUCCEEDED · 2026-07-24 15:01</p>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>🔴 改前：闭包式 destination 违反铁律</h2>
+      <div class="err">Fatal error: 'try!' expression unexpectedly raised an error:<br>
+      &nbsp;&nbsp;SwiftUI.AnyNavigationPath.Error.comparisonTypeMismatch</div>
+      <div class="flow">
+        <div class="step">点 Reminder 行</div>
+        <span class="arrow">→</span>
+        <div class="step bad">EditTodoView 推入 path</div>
+        <span class="arrow">→</span>
+        <div class="step bad">类型 ≠ HomeRoute</div>
+        <span class="arrow">→</span>
+        <div class="step bad">try! 比较崩溃</div>
+      </div>
+      <pre><span class="c">// ❌ 违反 UIComponents.swift:646 铁律</span>
+<span class="c">// "不能再用 NavigationLink(destination:) 闭包式</span>
+<span class="c">//  ——它位于首页 NavigationStack(path:) 根层"</span>
+SelectableCard(
+  leadingAccessory: todoDoneButton(r),
+  content: todoRowContent(r),
+  <span class="r">destination: EditTodoView(reminder: r)</span>  <span class="c">// 闭包式</span>
+)</pre>
+      <p class="meta">副作用：整页 NavigationStack path 坏掉 → 白屏 + 首页任何按钮点不动</p>
+    </div>
+
+    <div class="panel">
+      <h2>🟢 改后：value-based 推父级 path</h2>
+      <div class="flow">
+        <div class="step">点 Reminder 行</div>
+        <span class="arrow">→</span>
+        <div class="step good">HomeRoute.editTodo(r) 入 path</div>
+        <span class="arrow">→</span>
+        <div class="step good">navigationDestination 命中</div>
+        <span class="arrow">→</span>
+        <div class="step good">正常 push EditTodoView</div>
+      </div>
+      <pre><span class="c">// ✅ 走 "统一走这一条 path" 原则</span>
+ValueSelectableCard(
+  value: <span class="s">HomeRoute.editTodo(r)</span>,            <span class="c">// 推进父级 path</span>
+  leadingAccessory: todoDoneButton(r),
+  content: todoRowContent(r)
+)
+<span class="c">// 内部：</span>
+<span class="k">NavigationLink</span>(value: value) { content }   <span class="c">// 不是闭包</span></pre>
+      <p class="meta">根治：value 类型 = HomeRoute，path 类型校验恒成立</p>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top: 16px;">
+    <h2>🔧 完整改动清单</h2>
+    <ul class="fix-list">
+      <li><code>SelectionComponents.swift</code>：新增 <code>ValueSelectableCard&lt;Value: Hashable&gt;</code>（用 <code>NavigationLink(value:)</code>）+ EmptyView 重载。旧 <code>SelectableCard(destination:)</code> 闭包 init 保留供 .sheet 子 NavigationStack 内部用。</li>
+      <li><code>ContentView.swift</code>：<code>enum HomeRoute</code> 加 <code>case editTodo(Reminder)</code> + <code>case healthDetail(HealthMetric)</code> 两个 associated value case；<code>navigationDestination(for: HomeRoute.self)</code> switch 加 2 个分支。</li>
+      <li><code>RecordsViews.swift</code> 3 处 <code>SelectableCard</code> 全部改 <code>ValueSelectableCard</code>：
+        <ul>
+          <li>行 1773 — <code>ReminderListView</code> 分组行（点行跳 EditTodoView）</li>
+          <li>行 1867 — <code>ReminderListView</code> 日历模式当天行</li>
+          <li>行 879 — <code>HealthListView</code> 健康记录行（顺手修，避免下次点健康行也崩）</li>
+        </ul>
+      </li>
+      <li>永久铁律补强：<b>SelectableCard 旧 init(destination:) 闭包式仅供 .sheet 子 NavigationStack 内部用</b>；嵌在首页 NavigationStack(path:) 根层下<b>必须</b>走 ValueSelectableCard 配 HomeRoute。</li>
+    </ul>
+  </div>
+
+  <div class="panel" style="margin-top: 16px;">
+    <h2>📱 效果对比</h2>
+    <div class="grid">
+      <div>
+        <p class="meta" style="text-align:center; margin-bottom: 4px;">改前：点行 → 白屏 → 卡死</p>
+        <div class="phone">
+          <div class="phone-screen">
+            <div class="phone-row" style="opacity:.4;">
+              <div class="dot"></div>
+              <div>
+                <div>三年建百人团队招募技巧训练营</div>
+                <div class="meta">7月28日 09:00</div>
+              </div>
+            </div>
+            <div class="phone-row" style="opacity:.4;">
+              <div class="dot"></div>
+              <div>
+                <div>去江南分院体检</div>
+                <div class="meta">7月30日 08:00</div>
+              </div>
+            </div>
+            <div style="height: 100px; display:flex; align-items:center; justify-content:center; color:#ef4444; font-size:12px;">
+              ✗ 点击即触发 try! 崩溃
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <p class="meta" style="text-align:center; margin-bottom: 4px;">改后：点行 → 正常 push 编辑页</p>
+        <div class="phone">
+          <div class="phone-screen">
+            <div class="phone-row" style="background:#f0f9ff; border-color:#2f7bff;">
+              <div class="dot"></div>
+              <div>
+                <div style="color:#2f7bff;">三年建百人团队招募技巧训练营</div>
+                <div class="meta">7月28日 09:00 · 已选中</div>
+              </div>
+            </div>
+            <div class="phone-row">
+              <div class="dot"></div>
+              <div>
+                <div>去江南分院体检</div>
+                <div class="meta">7月30日 08:00</div>
+              </div>
+            </div>
+            <div style="height: 100px; display:flex; align-items:center; justify-content:center; color:#10b981; font-size:12px;">
+              ✓ 推进 HomeRoute.editTodo(r) → 渲染 EditTodoView
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>营养成分 cell 居中化 · 前后对比</title>
+<style>
+  :root {
+    --bg: #F5F6FA;
+    --surface: #FFFFFF;
+    --ink: #1A1F2C;
+    --muted: #8A8F9C;
+    --sub: #6B7280;
+    --hairline: #EDEFF3;
+    --fillSoft: #F2F4F7;
+    --food: #F59E0B;
+    --blue: #3B82F6;
+    --green: #10B981;
+    --purple: #8B5CF6;
+    --warn: #F97316;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    padding: 32px 24px;
+    line-height: 1.5;
+  }
+  .container { max-width: 1120px; margin: 0 auto; }
+  .title {
+    font-size: 24px; font-weight: 700; text-align: center; margin-bottom: 8px;
+  }
+  .subtitle {
+    font-size: 14px; color: var(--sub); text-align: center; margin-bottom: 32px;
+  }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .panel {
+    background: var(--surface); border-radius: 18px; padding: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .panel-label {
+    display: inline-block; font-size: 12px; font-weight: 600;
+    padding: 4px 10px; border-radius: 999px; margin-bottom: 16px;
+  }
+  .label-old { background: #FEE2E2; color: #B91C1C; }
+  .label-new { background: #DCFCE7; color: #166534; }
+  .card-title {
+    font-size: 13px; color: var(--sub); margin-bottom: 14px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .pill-old { /* 改前 */ }
+  .pill-new {
+    margin-left: auto;
+    display: inline-flex; align-items: center; gap: 4px;
+    background: rgba(245,158,11,0.10); color: var(--food);
+    padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600;
+  }
+  .grid-cells { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .cell {
+    background: var(--fillSoft); border-radius: 8px;
+    padding: 10px; min-height: 72px;
+    display: flex; flex-direction: column;
+  }
+  .cell.old { align-items: flex-start; }
+  .cell.new { align-items: center; }
+  .cell-header { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+  .cell-value {
+    margin-top: 6px; display: flex; align-items: baseline; gap: 2px;
+    font-size: 14px; font-weight: 500;
+  }
+  .cell-value .unit { font-size: 12px; color: var(--muted); font-weight: 400; }
+  .cell.old .cell-value { /* left default */ }
+  .cell.new .cell-value { justify-content: center; }
+  .icon-protein  { color: var(--blue); }
+  .icon-carbs    { color: var(--food); }
+  .icon-fat      { color: var(--green); }
+  .icon-fiber    { color: var(--purple); }
+  .icon-sugar    { color: var(--warn); }
+  .icon-sodium   { color: #B45309; }
+  .footer {
+    text-align: center; color: var(--sub); font-size: 12px; margin-top: 24px;
+  }
+  .diff-table {
+    margin: 24px auto 0; max-width: 720px;
+    background: var(--surface); border-radius: 12px; padding: 16px 20px;
+  }
+  .diff-table h3 { font-size: 14px; margin-bottom: 8px; }
+  .diff-table table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .diff-table th, .diff-table td { padding: 8px 6px; text-align: left; border-bottom: 1px solid var(--hairline); }
+  .diff-table th { color: var(--sub); font-weight: 500; }
+</style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="title">营养成分 cell 居中化</h1>
+    <p class="subtitle">2×3 网格内每个 cell 的图标+名称 / 数值+单位 全部水平居中</p>
+
+    <div class="grid">
+      <!-- 改前：左对齐 -->
+      <div class="panel">
+        <span class="panel-label label-old">改前 · 左对齐</span>
+        <div class="card-title">
+          <span style="font-size:11px;">📊</span>
+          营养成分（按当前重量）
+        </div>
+        <div class="grid-cells">
+          <!-- Row 1 -->
+          <div class="cell old">
+            <div class="cell-header"><span class="icon-protein">🐟</span><span>蛋白质</span></div>
+            <div class="cell-value">26<span class="unit">g</span></div>
+          </div>
+          <div class="cell old">
+            <div class="cell-header"><span class="icon-carbs">🌿</span><span>碳水</span></div>
+            <div class="cell-value">0<span class="unit">g</span></div>
+          </div>
+          <div class="cell old">
+            <div class="cell-header"><span class="icon-fat">💧</span><span>脂肪</span></div>
+            <div class="cell-value">16<span class="unit">g</span></div>
+          </div>
+          <!-- Row 2 -->
+          <div class="cell old">
+            <div class="cell-header"><span class="icon-fiber">🌱</span><span>膳食纤维</span></div>
+            <div class="cell-value">0<span class="unit">g</span></div>
+          </div>
+          <div class="cell old">
+            <div class="cell-header"><span class="icon-sugar">🧊</span><span>糖</span></div>
+            <div class="cell-value">0<span class="unit">g</span></div>
+          </div>
+          <div class="cell old">
+            <div class="cell-header"><span class="icon-sodium">⚡</span><span>钠</span></div>
+            <div class="cell-value">70<span class="unit">mg</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 改后：居中对齐 -->
+      <div class="panel">
+        <span class="panel-label label-new">改后 · 居中</span>
+        <div class="card-title">
+          <span style="font-size:11px;">📊</span>
+          营养成分（按当前重量）
+          <span class="pill-new">🔥 250 kcal</span>
+        </div>
+        <div class="grid-cells">
+          <!-- Row 1 -->
+          <div class="cell new">
+            <div class="cell-header"><span class="icon-protein">🐟</span><span>蛋白质</span></div>
+            <div class="cell-value">26<span class="unit">g</span></div>
+          </div>
+          <div class="cell new">
+            <div class="cell-header"><span class="icon-carbs">🌿</span><span>碳水</span></div>
+            <div class="cell-value">0<span class="unit">g</span></div>
+          </div>
+          <div class="cell new">
+            <div class="cell-header"><span class="icon-fat">💧</span><span>脂肪</span></div>
+            <div class="cell-value">16<span class="unit">g</span></div>
+          </div>
+          <!-- Row 2 -->
+          <div class="cell new">
+            <div class="cell-header"><span class="icon-fiber">🌱</span><span>膳食纤维</span></div>
+            <div class="cell-value">0<span class="unit">g</span></div>
+          </div>
+          <div class="cell new">
+            <div class="cell-header"><span class="icon-sugar">🧊</span><span>糖</span></div>
+            <div class="cell-value">0<span class="unit">g</span></div>
+          </div>
+          <div class="cell new">
+            <div class="cell-header"><span class="icon-sodium">⚡</span><span>钠</span></div>
+            <div class="cell-value">70<span class="unit">mg</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="diff-table">
+      <h3>改造要点</h3>
+      <table>
+        <tr><th>层级</th><th>改前</th><th>改后</th></tr>
+        <tr><td>外层 VStack</td><td>alignment: .leading</td><td>alignment: .center</td></tr>
+        <tr><td>顶部 HStack（icon+名称）</td><td>无 frame</td><td>.frame(maxWidth: .infinity, alignment: .center)</td></tr>
+        <tr><td>底部 HStack（数值+单位）</td><td>无 frame</td><td>.frame(maxWidth: .infinity, alignment: .center)</td></tr>
+        <tr><td>TextField 光标</td><td>.multilineTextAlignment(.trailing)</td><td>.multilineTextAlignment(.center)</td></tr>
+        <tr><td>cell 最外层 frame</td><td>alignment: .leading</td><td>alignment: .center</td></tr>
+      </table>
+    </div>
+
+    <p class="footer">commit cc948db · 看板释放 6732e46 · BUILD SUCCEEDED · 2 文件 +10/-8</p>
+  </div>
+</body>
+</html>

@@ -49,7 +49,8 @@ enum RecurrenceUnit: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-/// 周期账单规则（本地模型，无 syncId：CloudSyncManager 显式列举同步类型，本模型不在列表中故不会上云）。
+/// 周期账单规则（本地模型：持有 syncId/syncUpdatedAt/syncDeleted 元数据字段，
+/// 但 CloudSyncManager.buildPushItems 未列举本模型，故不会上云；字段仅本地预留）。
 @Model final class RecurringRule {
     var merchant: String        // 商户，如「链家房租」
     var amount: Double          // 金额
@@ -62,6 +63,11 @@ enum RecurrenceUnit: String, Codable, CaseIterable, Identifiable {
     var startDate: Date
     /// 上次已自动生成的账期日期（nil=从未生成）。生成后更新为最近一次生成的账期，用于去重与补生成。
     var lastGeneratedAt: Date?
+
+    // MARK: 云同步字段（v9 新增；本模型不进 push 列表，仅本地预留，不会上云）
+    var syncId: UUID
+    var syncUpdatedAt: Date
+    var syncDeleted: Bool
 
     // MARK: 周期相关（v4 新增）
     /// 周期类型：daily/weekly/monthly/quarterly/yearly/custom
@@ -87,7 +93,8 @@ enum RecurrenceUnit: String, Codable, CaseIterable, Identifiable {
          note: String = "", isIncome: Bool = false, dayOfMonth: Int = 1,
          startDate: Date = .now, lastGeneratedAt: Date? = nil,
          cycleRaw: String = RecurrenceCycle.monthly.rawValue,
-         customValue: Int = 1, customUnitRaw: String = RecurrenceUnit.month.rawValue) {
+         customValue: Int = 1, customUnitRaw: String = RecurrenceUnit.month.rawValue,
+         syncId: UUID = UUID(), syncUpdatedAt: Date = .now, syncDeleted: Bool = false) {
         self.merchant = merchant
         self.amount = amount
         self.category = category
@@ -99,6 +106,9 @@ enum RecurrenceUnit: String, Codable, CaseIterable, Identifiable {
         self.cycleRaw = cycleRaw
         self.customValue = max(customValue, 1)
         self.customUnitRaw = customUnitRaw
+        self.syncId = syncId
+        self.syncUpdatedAt = syncUpdatedAt
+        self.syncDeleted = syncDeleted
     }
 }
 
@@ -192,7 +202,7 @@ enum RecurringBillManager {
         }
         quarterMonths.sort()
 
-        var comps = cal.dateComponents([.year, .month, .day], from: after)
+        let comps = cal.dateComponents([.year, .month, .day], from: after)
         let year = comps.year ?? 0
         let month = comps.month ?? 1
         let dayAfter = comps.day ?? 0
@@ -213,7 +223,7 @@ enum RecurringBillManager {
         let cal = Calendar.current
         let month = cal.component(.month, from: rule.startDate)
         let day = min(max(rule.dayOfMonth, 1), 28)
-        var comps = cal.dateComponents([.year, .month, .day], from: after)
+        let comps = cal.dateComponents([.year, .month, .day], from: after)
         let year = comps.year ?? 0
         let currentMonth = comps.month ?? 1
         let currentDay = comps.day ?? 0

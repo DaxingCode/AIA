@@ -4,6 +4,8 @@
 "common.delete" = "删除";
 "common.other" = "其他";
 "common.cancel" = "取消";
+"common.confirmDelete" = "确认删除";
+"common.deleteCount" = "删除 %d 条记录？";
 "common.selectAll" = "全选";
 "common.deselectAll" = "取消全选";
 "common.delete" = "删除";
@@ -89,6 +91,8 @@
 "food.burned" = "今日消耗";
 "food.tdeeLabel" = "TDEE kcal";
 "food.water" = "今日饮水";
+"food.waterUnit" = "ml";
+"food.waterTapHint" = "点击 +100ml";
 "food.nutrition" = "营养构成";
 "food.nutritionTarget" = "目标 蛋白%d / 碳水%d / 脂肪%d g";
 "food.macro.protein" = "蛋白质";

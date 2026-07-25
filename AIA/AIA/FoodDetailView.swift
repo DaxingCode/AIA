@@ -96,7 +96,7 @@ struct FoodDetailView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
-        AIBottomBar()
+        AIBottomBar(entrySource: "food")
     }
     .background(Color(.secondarySystemBackground))
     .navigationTitle("食物详情")

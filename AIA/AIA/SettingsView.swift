@@ -16,10 +16,10 @@ struct SettingsView: View {
     @AppStorage("aia.appearance") private var appearanceRaw = "system"
     // 智能问答 Agent 总开关（与「云同步」同组）。默认关，零污染。
     @AppStorage("aia.agentEnabled") private var agentEnabled = false
-    // 模型供应商选择（云端 PROVIDERS 已配齐四家视觉+文本，前端只传 provider 标识）。默认商汤 SenseNova。
-    @AppStorage("aia.modelProvider") private var modelProvider = "sensenova"
-    // 视觉识别模型单独选择（截图理解），默认商汤 SenseNova，与文本模型解耦。
-    @AppStorage("aia.visionModelProvider") private var visionModelProvider = "sensenova"
+    // 模型供应商选择（云端 PROVIDERS 已配齐五家文字+视觉，前端只传 provider 标识）。默认智谱 GLM。
+    @AppStorage("aia.modelProvider") private var modelProvider = "glm"
+    // 视觉识别模型单独选择（截图理解），默认智谱 GLM，与文本模型解耦。
+    @AppStorage("aia.visionModelProvider") private var visionModelProvider = "glm"
     @State private var showCopied = false
     @State private var toastText = "已复制同步账号"
     @State private var showShortcutGuide = false
@@ -247,7 +247,7 @@ struct SettingsView: View {
                     .foregroundStyle(.primary)
                 Spacer()
             }
-            Text("问答与截图识别可分别选择模型（默认均为商汤 SenseNova）。需在云端对应环境变量已配置该供应商 Key。")
+            Text("问答与截图识别可分别选择模型（默认均为智谱 GLM）。需在云端对应环境变量已配置该供应商 Key。")
                 .font(AIATheme.Font.micro)
                 .foregroundStyle(AIATheme.muted)
                 .lineSpacing(2)
@@ -264,19 +264,23 @@ struct SettingsView: View {
                 .pickerStyle(.menu)
                 .tint(AIATheme.blue)
             }
-            // 视觉模型（截图识别）
+            // 视觉模型（截图识别）。仅展示支持视觉的 provider，过滤掉 DeepSeek（仅文字）。
             VStack(alignment: .leading, spacing: 4) {
                 Text("截图识别模型")
                     .font(AIATheme.Font.micro.weight(.medium))
                     .foregroundStyle(AIATheme.muted)
                 Picker("识别模型", selection: $visionModelProvider) {
-                    ForEach(AIAModelProvider.allCases) { p in
+                    ForEach(AIAModelProvider.visionCases) { p in
                         Text(p.displayName).tag(p.rawValue)
                     }
                 }
                 .pickerStyle(.menu)
                 .tint(AIATheme.blue)
             }
+            Text("DeepSeek 仅支持文字，对话体验更好但不能用于截图识别（视觉 Picker 已自动隐藏）。Agent 模式推荐用 DeepSeek，function-calling 准确度高于其他。")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+                .lineSpacing(2)
         }
         .padding(14)
         .card()

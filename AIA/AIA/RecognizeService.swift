@@ -5,12 +5,13 @@ import Vision
 import SwiftData
 
 /// 可切换的模型供应商（设置页选择）。rawValue 是前端持久化标识；
-/// visionProvider / textProvider 是对应的云端 PROVIDERS key（云端已配齐四家视觉+文本，零改动）。
+/// visionProvider / textProvider 是对应的云端 PROVIDERS key（云端已配齐多家视觉+文本，零改动）。
 enum AIAModelProvider: String, CaseIterable, Identifiable {
     case sensenova = "sensenova"
     case qwen = "qwen"
     case glm = "glm"
     case qianfan = "qianfan"
+    case deepseek = "deepseek"
     var id: String { rawValue }
     var displayName: String {
         switch self {
@@ -18,15 +19,24 @@ enum AIAModelProvider: String, CaseIterable, Identifiable {
         case .qwen:      return "阿里通义千问"
         case .glm:       return "智谱 GLM"
         case .qianfan:   return "百度千帆"
+        case .deepseek:  return "深度求索 DeepSeek"
         }
     }
-    /// 视觉识别用的 provider（截图理解）
+    /// 是否支持视觉（截图识别）。DeepSeek 仅文字，不支持视觉。
+    var supportsVision: Bool {
+        switch self {
+        case .deepseek: return false
+        default:        return true
+        }
+    }
+    /// 视觉识别用的 provider（截图理解）。DeepSeek 不支持视觉，回落商汤 SenseNova。
     var visionProvider: String {
         switch self {
         case .sensenova: return "sensenova"
         case .qwen:      return "qwen"
         case .glm:       return "glm4vFlash"
         case .qianfan:   return "qianfan"
+        case .deepseek:  return "sensenova"  // 无视觉，自动回落
         }
     }
     /// 文本问答 / Agent 用的 provider
@@ -36,17 +46,24 @@ enum AIAModelProvider: String, CaseIterable, Identifiable {
         case .qwen:      return "qwenText"
         case .glm:       return "glmText"
         case .qianfan:   return "qianfanText"
+        case .deepseek:  return "deepseek"
         }
     }
-    /// 当前问答 / Agent 文本模型；缺省或非法值回落商汤 SenseNova（向后兼容）
+    /// 当前问答 / Agent 文本模型；默认智谱 GLM（GLM-4.7-Flash，200K 上下文，免费，function calling 增强）。
+    /// 缺省或非法值回落智谱 GLM。
     static var textCurrent: AIAModelProvider {
-        let raw = UserDefaults.standard.string(forKey: "aia.modelProvider") ?? "sensenova"
-        return AIAModelProvider(rawValue: raw) ?? .sensenova
+        let raw = UserDefaults.standard.string(forKey: "aia.modelProvider") ?? "glm"
+        return AIAModelProvider(rawValue: raw) ?? .glm
     }
-    /// 当前视觉识别模型；缺省或非法值回落商汤 SenseNova（向后兼容）
+    /// 当前视觉识别模型；默认智谱 GLM（GLM-4V-Flash，永久免费视觉）。
+    /// 缺省或非法值回落智谱 GLM。
     static var visionCurrent: AIAModelProvider {
-        let raw = UserDefaults.standard.string(forKey: "aia.visionModelProvider") ?? "sensenova"
-        return AIAModelProvider(rawValue: raw) ?? .sensenova
+        let raw = UserDefaults.standard.string(forKey: "aia.visionModelProvider") ?? "glm"
+        return AIAModelProvider(rawValue: raw) ?? .glm
+    }
+    /// 仅含支持视觉的 provider（用于视觉 Picker，过滤掉 DeepSeek）
+    static var visionCases: [AIAModelProvider] {
+        allCases.filter { $0.supportsVision }
     }
 }
 
@@ -325,6 +342,35 @@ struct RecognizeService {
         return reply
     }
 
+    /// 阿宝招呼语专用：进入聊天页时基于本地数据生成自然开场白。
+    /// 云端 mode='greeting' 走专用 prompt（单轮、不调工具）；返回空/超时 → App 端走本地 buildGreeting() 兜底。
+    static func agentChatGreeting(context: [String: Any], userId: String) async throws -> String {
+        var req = URLRequest(url: endpoint)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // 招呼要求快速返回（最多 12s：云函数 + 模型 + 网络；超时直接走本地兜底，不影响体验）。
+        req.timeoutInterval = 12
+
+        let body: [String: Any] = [
+            "mode": "greeting",
+            "context": context,
+            "userId": userId,
+            "provider": AIAModelProvider.textCurrent.textProvider,
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (respData, response) = try await URLSession.shared.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200...299).contains(status) else {
+            throw NSError(domain: "Greeting", code: -3, userInfo: [NSLocalizedDescriptionKey: "招呼请求失败 (HTTP \(status))"])
+        }
+        let wrapper = try JSONDecoder().decode(ChatResponse.self, from: respData)
+        guard wrapper.ok, let reply = wrapper.reply, !reply.isEmpty else {
+            throw NSError(domain: "Greeting", code: -2, userInfo: [NSLocalizedDescriptionKey: wrapper.error ?? "招呼返回为空"])
+        }
+        return reply
+    }
+
     // MARK: - 本地优先识别层（OCR + 规则，0 成本、离线）
     // 设计：截图/照片先跑设备端 OCR，再用规则解析金额/商户/日期，并查本地 MerchantMeta 经验库补全分类。
     // 能解析出明确账单则直接返回（跳过云端视觉模型，成本≈0）；否则回退云端。
@@ -343,8 +389,10 @@ struct RecognizeService {
 
     /// 设备端 OCR：同时返回文字和所有文本块的 bounding box，供营养成分表等需要版面分析的模块使用。
     /// - Parameter customWords: 可选词典偏置（已知商户名/常见商户名），提升易混字识别率。
+    /// - Parameter minTextHeight: 最小文字高度（占图高比例），默认 0.008；营养成分表小字可降到 0.005。
     private static func localOCR(from imageData: Data,
-                                 customWords: [String]? = nil) -> (text: String, observations: [VNRecognizedTextObservation], candidates: [[(string: String, confidence: Float)]])? {
+                                 customWords: [String]? = nil,
+                                 minTextHeight: CGFloat = 0.008) -> (text: String, observations: [VNRecognizedTextObservation], candidates: [[(string: String, confidence: Float)]])? {
         guard let cgImage = UIImage(data: imageData)?.cgImage else { return nil }
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
@@ -355,7 +403,7 @@ struct RecognizeService {
         if let words = customWords, !words.isEmpty {
             request.customWords = Array(Set(words)).map { $0 as String }
         }
-        request.minimumTextHeight = 0.008
+        request.minimumTextHeight = Float(minTextHeight)
         let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
         do {
             try handler.perform([request])
@@ -489,7 +537,9 @@ struct RecognizeService {
             ?? (timeCands.flatMap { $0 }.isEmpty ? nil : extractISODateTimeCandidates(timeCands, referenceDate: referenceDate))
             ?? parseListItemTime(preferredTimeLine, referenceDate: referenceDate, defaultYesterday: defaultListItemYesterday)
             ?? (defaultListItemYesterday ? yesterdayStart(referenceDate: referenceDate) : nil)
-            ?? ISO8601DateFormatter().string(from: .now)
+            ?? {
+                let f = ISO8601DateFormatter(); f.timeZone = .current; return f.string(from: Date())
+            }()
 
         // 4) 分类：优先 MerchantMeta 经验库，未命中按关键词猜
         var category = "其他"
@@ -768,7 +818,8 @@ struct RecognizeService {
 
     /// 判断 OCR 文本是否包含「营养成分表」及核心项目，避免普通食物描述被误判。
     private static func hasNutritionTable(in lines: [String]) -> Bool {
-        let tableSignals = ["营养成分表", "营养成份表", "nutrition information", "nutrition facts"]
+        let tableSignals = ["营养成分表", "营养成份表", "营养表", "营养素参考值", "营养成份",
+                            "nutrition information", "nutrition facts", "nutrition label"]
         let itemSignals = ["能量", "蛋白质", "脂肪", "碳水化合物"]
         let hasTable = lines.contains { line in
             let lowered = line.lowercased()
@@ -777,7 +828,14 @@ struct RecognizeService {
         let hasItems = lines.contains { line in
             itemSignals.contains { line.localizedCaseInsensitiveContains($0) }
         }
-        return hasTable && hasItems
+        // 有些简版营养标签没有标题行，但含「每100g」「项目/每100克」头 + 能量+蛋白质+脂肪
+        let hasHeader = lines.contains { $0.localizedCaseInsensitiveContains("每100") || $0.localizedCaseInsensitiveContains("每 100") }
+        let hasEnergyProteinFat = lines.count { line in
+            line.localizedCaseInsensitiveContains("能量") ||
+            line.localizedCaseInsensitiveContains("蛋白质") ||
+            line.localizedCaseInsensitiveContains("脂肪")
+        } >= 2
+        return (hasTable && hasItems) || (hasHeader && hasEnergyProteinFat)
     }
 
     /// 从营养成分表行中提取能量（优先 kJ → kcal）。
@@ -851,10 +909,14 @@ struct RecognizeService {
 
         // 2) 营养成分表上方最近的非噪声短文本
         guard let tableIdx = lines.firstIndex(where: { $0.localizedCaseInsensitiveContains("营养成分") ||
+                                                         $0.localizedCaseInsensitiveContains("营养") ||
                                                          $0.localizedCaseInsensitiveContains("nutrition") }) else { return nil }
         let noise = ["配料", "成分", "贮存", "保质期", "生产日期", "产品标准", "温馨提示", "注意事项",
                      "产地", "地址", "电话", "传真", "网址", "含有", "本产品", "添加", "果酱", "添加量",
-                     "生产商", "制造商", "出品", "集团", "股份", "有限公司", "有限责任公司"]
+                     "生产商", "制造商", "出品", "集团", "股份", "有限公司", "有限责任公司",
+                     "主要成分", "成分表", "产品类型", "食品名称", "规格", "净含量", "产品规格",
+                     "产品说明", "使用方法", "食用方法", "贮藏方法", "储藏方法", "储存条件",
+                     "标准", "编码", "条码", "条形码", "许可证", "sc", "qs", "执行标准", "gb", "gb/t"]
         for i in (0..<tableIdx).reversed() {
             let line = lines[i]
             if line.count < 4 || line.count > 40 { continue }
@@ -1085,7 +1147,17 @@ struct RecognizeService {
                 print("[识别] 营养成分表本地解析命中，source=local")
                 return (food, cleanText, .local)
             }
-            // 检测到成分表但本地解析失败：先让视觉模型试着读品牌/名称，失败再用占位 food。
+            // 检测到成分表但标准 OCR 版面解析失败：可能是小字被阈值过滤，
+            // 用更低最小文字高度（0.005）二次 OCR 再试，提升小号数字/标签的捕获率。
+            let fineOcr = localOCR(from: imageData, customWords: merchantBiasWords(in: context), minTextHeight: 0.005)
+            if let fineText = fineOcr?.text.trimmingCharacters(in: .whitespacesAndNewlines), !fineText.isEmpty,
+               let refinedLines = fineOcr?.observations,
+               let food = localParseNutritionTable(observations: refinedLines)
+                           ?? localParseNutritionTable(text: fineText) {
+                print("[识别] 营养成分表二次 OCR（小字）本地解析命中，source=local")
+                return (food, fineText, .local)
+            }
+            // 仍失败：先让视觉模型试着读品牌/名称，失败再用占位 food。
             // 关键：绝不落到账单路径（避免把「3.1g/12.0g」当金额）。
             print("[识别] 营养成分表检测到但本地解析失败，改走视觉模型，失败则占位 food")
             do {
@@ -1147,6 +1219,18 @@ struct RecognizeService {
                 if let local = localParseBill(text: cleanText, in: context, candidates: ocr?.candidates ?? []) {
                     print("[识别] 视觉失败，本地单账单规则兜底命中，source=local")
                     return (local, cleanText, .local)
+                }
+            }
+            // 标准 OCR 兜底也失败：用小字阈值二次 OCR 再试，捕获被最小高度过滤掉的小号数字
+            let fineOcr = localOCR(from: imageData, customWords: merchantBiasWords(in: context), minTextHeight: 0.005)
+            if let fineText = fineOcr?.text.trimmingCharacters(in: .whitespacesAndNewlines), !fineText.isEmpty {
+                if let localMulti = localParseMultiBillsIfNeeded(text: fineText, in: context) {
+                    print("[识别] 视觉失败，二次 OCR（小字）多账单兜底命中，source=local")
+                    return (localMulti, fineText, .local)
+                }
+                if let local = localParseBill(text: fineText, in: context, candidates: fineOcr?.candidates ?? []) {
+                    print("[识别] 视觉失败，二次 OCR（小字）单账单兜底命中，source=local")
+                    return (local, fineText, .local)
                 }
             }
             // 本地也兜不住：抛错让上层提示「识别失败，请重试」，绝不返回 0.00 空账单。
@@ -1946,12 +2030,12 @@ struct RecognizeService {
         let cal = Calendar.current
         let shanghai = TimeZone(identifier: "Asia/Shanghai")!
         guard let yesterday = cal.date(byAdding: .day, value: -1, to: ref) else {
-            return ISO8601DateFormatter().string(from: ref)
+            let f = ISO8601DateFormatter(); f.timeZone = shanghai; return f.string(from: ref)
         }
         var comps = cal.dateComponents(in: shanghai, from: yesterday)
         comps.hour = 0; comps.minute = 0; comps.second = 0
         guard let d = cal.date(from: comps) else {
-            return ISO8601DateFormatter().string(from: ref)
+            let f = ISO8601DateFormatter(); f.timeZone = shanghai; return f.string(from: ref)
         }
         let f = ISO8601DateFormatter(); f.timeZone = shanghai
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -2005,6 +2089,7 @@ struct RecognizeService {
             }
             if let date = Calendar.current.date(from: comps) {
                 let formatter = ISO8601DateFormatter()
+                formatter.timeZone = comps.timeZone ?? .current
                 if hasTime {
                     formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
                 } else {

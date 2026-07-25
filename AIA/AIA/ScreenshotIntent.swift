@@ -126,12 +126,12 @@ struct AIAAppShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: TellAIAIntent(),
             phrases: [
-                "跟\(.applicationName)说",
                 "用\(.applicationName)记",
-                "让\(.applicationName)提醒",
-                "呼叫\(.applicationName)"
+                "\(.applicationName)记账",
+                "跟\(.applicationName)记一笔",
+                "记账用\(.applicationName)"
             ],
-            shortTitle: "跟阿宝说",
+            shortTitle: "用阿宝记",
             systemImageName: "mic.fill"
         )
     }

@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>手动添加食物 · 搜索结果点击自动填 100g</title>
+<style>
+  :root {
+    --bg: #f2f3f7;
+    --surface: #ffffff;
+    --line: #e6e6ec;
+    --muted: #8a8a93;
+    --text: #1c1c1e;
+    --blue: #007aff;
+    --green: #34c759;
+    --warn: #ff3b30;
+    --old-bg: #ffeaea;
+    --new-bg: #e7f6ec;
+  }
+  * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+  body {
+    margin: 0; padding: 28px 16px 60px;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+    color: var(--text); background: var(--bg);
+  }
+  h1 { font-size: 22px; font-weight: 700; margin: 0 0 6px; letter-spacing: -0.2px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 24px; }
+  h2 { font-size: 16px; font-weight: 700; margin: 24px 0 12px; }
+  .compare-row { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
+  .col { flex: 1; min-width: 290px; }
+  .arrow { color: var(--muted); align-self: center; font-size: 24px; }
+  .label-pill {
+    display: inline-block; font-size: 11px; padding: 3px 9px;
+    border-radius: 999px; font-weight: 600; margin-bottom: 8px;
+  }
+  .old-label { background: var(--old-bg); color: #b3261e; }
+  .new-label { background: var(--new-bg); color: #1f7a3a; }
+  .phone {
+    width: 290px; background: #000; border-radius: 36px; padding: 10px;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.12);
+  }
+  .bar { height: 26px; display: flex; align-items: center; justify-content: space-between;
+    color: #fff; font-size: 12px; padding: 0 18px; }
+  .screen { background: #f2f3f7; border-radius: 26px; overflow: hidden; height: 700px; }
+  .nav { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 8px; }
+  .nav .cancel { color: var(--text); font-size: 14px; }
+  .nav .save { color: var(--blue); font-size: 14px; font-weight: 600; }
+  .nav .title { font-weight: 600; font-size: 15px; }
+  .body { padding: 4px 14px 14px; }
+  .card { background: var(--surface); border-radius: 12px; margin-bottom: 12px; overflow: hidden; }
+  .card-pad { padding: 14px; }
+  .micro-label { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+  .input-line { font-size: 17px; font-weight: 600; }
+  .result-row {
+    display: flex; align-items: center; padding: 8px 4px; gap: 10px;
+  }
+  .result-name { font-size: 14px; font-weight: 600; }
+  .result-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .badge {
+    display: inline-block; font-size: 10px; padding: 2px 7px; border-radius: 999px;
+    background: rgba(52, 199, 89, 0.15); color: #1f7a3a; font-weight: 600;
+  }
+  .weight-row {
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .weight-text { font-size: 22px; font-weight: 700; }
+  .weight-unit { color: var(--muted); font-size: 14px; }
+  .nutri-title {
+    display: flex; align-items: center; gap: 5px;
+    padding: 0 14px 0 14px; padding-top: 12px;
+  }
+  .nutri-title-text { font-size: 11px; color: var(--muted); }
+  .nutri-pill {
+    margin-left: auto; background: rgba(255, 149, 0, 0.1); color: #c97a00;
+    padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  }
+  .nutri-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 6px; padding: 10px 12px 12px;
+  }
+  .nutri-cell {
+    background: #f7f7fa; border-radius: 8px; padding: 10px 8px; text-align: center;
+  }
+  .nutri-cell-icon { font-size: 11px; color: var(--muted); }
+  .nutri-cell-name { font-size: 11px; color: var(--text); margin-top: 2px; }
+  .nutri-cell-value { font-size: 16px; font-weight: 600; margin-top: 4px; }
+  .nutri-cell-unit { font-size: 10px; color: var(--muted); margin-left: 1px; }
+  .caption { font-size: 12px; color: var(--muted); line-height: 1.5; padding: 6px 4px 0; }
+  .redbox { outline: 2px solid var(--warn); outline-offset: 1px; border-radius: 4px; }
+  .footer {
+    margin-top: 30px; padding: 14px 16px;
+    background: var(--surface); border-radius: 12px;
+    font-size: 13px; color: #444; line-height: 1.6;
+  }
+  .footer code {
+    background: #f0f0f3; padding: 1px 5px; border-radius: 4px; font-size: 12px;
+  }
+  .diff-list { padding-left: 18px; margin: 0; font-size: 13px; line-height: 1.7; }
+  .scenario {
+    background: #f7f7fa; border-radius: 10px; padding: 12px 14px; margin-top: 8px;
+    font-size: 12px; color: #444; line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+
+  <h1>手动添加食物 · 点击搜索结果自动填 100g</h1>
+  <p class="sub">搜索结果点击后，食用重量显式重置为 100g，营养成分自动 = 基础营养（不会再被旧值干扰）</p>
+
+  <h2>场景 A：用户首次点搜索结果（weightText 默认就是 100）</h2>
+  <div class="compare-row">
+    <div class="col">
+      <span class="label-pill old-label">旧版（默认 100，但行为"暗藏"）</span>
+      <div class="phone">
+        <div class="bar"><span>14:51</span><span>📶📡🔋</span></div>
+        <div class="screen">
+          <div class="nav">
+            <span class="cancel">取消</span>
+            <span class="title">手动添加食物</span>
+            <span class="save">保存</span>
+          </div>
+          <div class="body">
+            <div class="card card-pad">
+              <div class="micro-label">搜索食物库</div>
+              <div class="input-line">牛奶</div>
+              <div style="height: 1px; background: var(--line); margin: 10px 0;"></div>
+              <div class="result-row redbox">
+                <div style="flex: 1;">
+                  <div class="result-name">牛奶</div>
+                  <div class="result-meta">65 kcal/100g · P3 C5 F3</div>
+                </div>
+                <div class="badge">内置库</div>
+                <div style="color: var(--blue); font-size: 16px;">›</div>
+              </div>
+            </div>
+            <div class="card card-pad">
+              <div class="micro-label">食用重量</div>
+              <div class="weight-row">
+                <div class="weight-text">100</div>
+                <div class="weight-unit">克</div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="nutri-title">
+                <span style="color: var(--muted);">📊</span>
+                <span class="nutri-title-text">营养成分（按当前重量）</span>
+                <span class="nutri-pill">🔥 65 kcal</span>
+              </div>
+              <div class="nutri-grid">
+                <div class="nutri-cell"><div class="nutri-cell-icon">🐟</div><div class="nutri-cell-name">蛋白质</div><div class="nutri-cell-value">3.3<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">🍞</div><div class="nutri-cell-name">碳水</div><div class="nutri-cell-value">5.0<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">💧</div><div class="nutri-cell-name">脂肪</div><div class="nutri-cell-value">3.6<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">🌾</div><div class="nutri-cell-name">膳食纤维</div><div class="nutri-cell-value">0<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">🍬</div><div class="nutri-cell-name">糖</div><div class="nutri-cell-value">5.0<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">🧂</div><div class="nutri-cell-name">钠</div><div class="nutri-cell-value">43.0<span class="nutri-cell-unit">mg</span></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">看着"自动 = 100"，但实际是 weightText 默认 100 没变。语义不明，用户不知道"为什么是 100"。</p>
+    </div>
+
+    <div class="arrow">→</div>
+
+    <div class="col">
+      <span class="label-pill new-label">新版（显式重置，行为可预测）</span>
+      <div class="phone">
+        <div class="bar"><span>14:51</span><span>📶📡🔋</span></div>
+        <div class="screen">
+          <div class="nav">
+            <span class="cancel">取消</span>
+            <span class="title">手动添加食物</span>
+            <span class="save">保存</span>
+          </div>
+          <div class="body">
+            <div class="card card-pad">
+              <div class="micro-label">搜索食物库</div>
+              <div class="input-line">牛奶</div>
+              <div style="height: 1px; background: var(--line); margin: 10px 0;"></div>
+              <div class="result-row redbox">
+                <div style="flex: 1;">
+                  <div class="result-name">牛奶</div>
+                  <div class="result-meta">65 kcal/100g · P3 C5 F3</div>
+                </div>
+                <div class="badge">内置库</div>
+                <div style="color: var(--blue); font-size: 16px;">›</div>
+              </div>
+            </div>
+            <div class="card card-pad">
+              <div class="micro-label">食用重量</div>
+              <div class="weight-row">
+                <div class="weight-text" style="outline: 2px solid #34c759; outline-offset: 2px; border-radius: 4px; padding: 0 4px;">100</div>
+                <div class="weight-unit">克</div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="nutri-title">
+                <span style="color: var(--muted);">📊</span>
+                <span class="nutri-title-text">营养成分（按当前重量）</span>
+                <span class="nutri-pill">🔥 65 kcal</span>
+              </div>
+              <div class="nutri-grid">
+                <div class="nutri-cell"><div class="nutri-cell-icon">🐟</div><div class="nutri-cell-name">蛋白质</div><div class="nutri-cell-value">3.3<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">🍞</div><div class="nutri-cell-name">碳水</div><div class="nutri-cell-value">5.0<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">💧</div><div class="nutri-cell-name">脂肪</div><div class="nutri-cell-value">3.6<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">🌾</div><div class="nutri-cell-name">膳食纤维</div><div class="nutri-cell-value">0<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">🍬</div><div class="nutri-cell-name">糖</div><div class="nutri-cell-value">5.0<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">🧂</div><div class="nutri-cell-name">钠</div><div class="nutri-cell-value">43.0<span class="nutri-cell-unit">mg</span></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">显式 weightText="100"，绿色高亮标记"这是新动作的产物"。语义清晰，行为可预测。</p>
+    </div>
+  </div>
+
+  <h2>场景 B：用户先改了重量（如 200g），再点搜索结果（关键差异）</h2>
+  <div class="compare-row">
+    <div class="col">
+      <span class="label-pill old-label">旧版（200g 残留，130 kcal 误导）</span>
+      <div class="phone">
+        <div class="bar"><span>14:51</span><span>📶📡🔋</span></div>
+        <div class="screen">
+          <div class="nav">
+            <span class="cancel">取消</span>
+            <span class="title">手动添加食物</span>
+            <span class="save">保存</span>
+          </div>
+          <div class="body">
+            <div class="card card-pad">
+              <div class="micro-label">搜索食物库</div>
+              <div class="input-line">牛奶</div>
+              <div style="height: 1px; background: var(--line); margin: 10px 0;"></div>
+              <div class="result-row redbox">
+                <div style="flex: 1;">
+                  <div class="result-name">牛奶</div>
+                  <div class="result-meta">65 kcal/100g · P3 C5 F3</div>
+                </div>
+                <div class="badge">内置库</div>
+                <div style="color: var(--blue); font-size: 16px;">›</div>
+              </div>
+            </div>
+            <div class="card card-pad">
+              <div class="micro-label">食用重量</div>
+              <div class="weight-row">
+                <div class="weight-text">200</div>
+                <div class="weight-unit">克</div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="nutri-title">
+                <span style="color: var(--muted);">📊</span>
+                <span class="nutri-title-text">营养成分（按当前重量）</span>
+                <span class="nutri-pill" style="background: rgba(255,59,48,0.1); color: #b3261e;">🔥 130 kcal</span>
+              </div>
+              <div class="nutri-grid">
+                <div class="nutri-cell"><div class="nutri-cell-icon">🐟</div><div class="nutri-cell-name">蛋白质</div><div class="nutri-cell-value">6.6<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">🍞</div><div class="nutri-cell-name">碳水</div><div class="nutri-cell-value">10.0<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">💧</div><div class="nutri-cell-name">脂肪</div><div class="nutri-cell-value">7.2<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">🌾</div><div class="nutri-cell-name">膳食纤维</div><div class="nutri-cell-value">0<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">🍬</div><div class="nutri-cell-name">糖</div><div class="nutri-cell-value">10.0<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">🧂</div><div class="nutri-cell-name">钠</div><div class="nutri-cell-value">86.0<span class="nutri-cell-unit">mg</span></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">用户先填 200g，再点"牛奶"：基础营养 65 被填进去，但 weightText 残留 200g，营养成分 = 65×2 = 130 kcal。</p>
+    </div>
+
+    <div class="arrow">→</div>
+
+    <div class="col">
+      <span class="label-pill new-label">新版（强制重置 100g，65 kcal）</span>
+      <div class="phone">
+        <div class="bar"><span>14:51</span><span>📶📡🔋</span></div>
+        <div class="screen">
+          <div class="nav">
+            <span class="cancel">取消</span>
+            <span class="title">手动添加食物</span>
+            <span class="save">保存</span>
+          </div>
+          <div class="body">
+            <div class="card card-pad">
+              <div class="micro-label">搜索食物库</div>
+              <div class="input-line">牛奶</div>
+              <div style="height: 1px; background: var(--line); margin: 10px 0;"></div>
+              <div class="result-row redbox">
+                <div style="flex: 1;">
+                  <div class="result-name">牛奶</div>
+                  <div class="result-meta">65 kcal/100g · P3 C5 F3</div>
+                </div>
+                <div class="badge">内置库</div>
+                <div style="color: var(--blue); font-size: 16px;">›</div>
+              </div>
+            </div>
+            <div class="card card-pad">
+              <div class="micro-label">食用重量</div>
+              <div class="weight-row">
+                <div class="weight-text" style="outline: 2px solid #34c759; outline-offset: 2px; border-radius: 4px; padding: 0 4px;">100</div>
+                <div class="weight-unit">克</div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="nutri-title">
+                <span style="color: var(--muted);">📊</span>
+                <span class="nutri-title-text">营养成分（按当前重量）</span>
+                <span class="nutri-pill">🔥 65 kcal</span>
+              </div>
+              <div class="nutri-grid">
+                <div class="nutri-cell"><div class="nutri-cell-icon">🐟</div><div class="nutri-cell-name">蛋白质</div><div class="nutri-cell-value">3.3<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">🍞</div><div class="nutri-cell-name">碳水</div><div class="nutri-cell-value">5.0<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">💧</div><div class="nutri-cell-name">脂肪</div><div class="nutri-cell-value">3.6<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">🌾</div><div class="nutri-cell-name">膳食纤维</div><div class="nutri-cell-value">0<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">🍬</div><div class="nutri-cell-name">糖</div><div class="nutri-cell-value">5.0<span class="nutri-cell-unit">g</span></div></div>
+                <div class="nutri-cell"><div class="nutri-cell-icon">🧂</div><div class="nutri-cell-name">钠</div><div class="nutri-cell-value">43.0<span class="nutri-cell-unit">mg</span></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">点搜索结果 → weightText 显式重置 100g，营养成分 = 基础营养（65 kcal）。用户后续可再调重量。</p>
+    </div>
+  </div>
+
+  <h2>🔍 关键改动</h2>
+  <div class="footer">
+    <ol class="diff-list">
+      <li><b>文件</b>：<code>AddFoodManualView.swift:525-528</code></li>
+      <li><b>改动</b>：<code>applySearchResult(_:)</code> 入口加一行 <code>weightText = "100"</code>
+        <br>旧：<code>name = result.name</code> → 写基础营养 → 收尾
+        <br>新：<code>name = result.name</code> → <code>weightText = "100"</code> → 写基础营养 → 收尾
+      </li>
+      <li><b>设计依据</b>：搜索结果的基础营养都是按 100g 算的（NutritionLibrary/FoodMeta 标准化），
+        选中 = "用 100g 基础营养填充表单"，与下方"营养成分（按当前重量）= baseKcal × 100/100 = baseKcal"语义自洽。
+      </li>
+      <li><b>不破坏</b>：用户后续可再手动改 weightText（如改成 250g），营养成分会按 250g 重新计算。</li>
+    </ol>
+  </div>
+
+  <h2>📋 行为闭环</h2>
+  <div class="scenario">
+    <b>1.</b> 用户输入"牛奶" → 搜出"牛奶 65 kcal/100g"（内置库）<br>
+    <b>2.</b> 用户点搜索结果 → name="牛奶"，weightText="100"，baseKcalText="65.0"<br>
+    <b>3.</b> 营养成分自动 = 65.0 × 100/100 = <b>65 kcal</b>（用户一眼能看到 65）<br>
+    <b>4.</b> 用户想喝 250g → 改 weightText 为 250 → 营养成分自动 = 65.0 × 250/100 = <b>163 kcal</b><br>
+    <b>5.</b> 点保存 → FoodEntry 写入（baseCalories=65, weightGram=250, calories=163）
+  </div>
+
+</body>
+</html>

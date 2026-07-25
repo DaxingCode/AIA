@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>今日饮水卡 · 翻转动画</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;background:#F5F6FA;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:40px 20px}
+  .stage{display:flex;flex-direction:column;align-items:center;gap:36px;width:100%;max-width:880px}
+  .title{font-size:20px;font-weight:600;color:#111;color:#1F2937}
+  .title em{font-style:normal;color:#7C3AED;font-weight:700}
+  .title small{font-weight:400;font-size:13px;color:#6B7280;margin-left:8px}
+
+  .row{display:flex;gap:60px;flex-wrap:wrap;justify-content:center;width:100%}
+
+  /* ============ 翻转卡（核心） ============ */
+  .flip-wrap{
+    perspective:800px;
+    width:160px;height:160px;
+    cursor:pointer;
+    user-select:none;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .flip-inner{
+    position:relative;
+    width:100%;height:100%;
+    transition:transform 0.9s cubic-bezier(.4,0,.2,1);
+    transform-style:preserve-3d;
+  }
+  /* 自动循环：6s 一轮（2.5s 正面 + 0.9s 翻转 + 2.5s 背面 + 0.1s 间隙） */
+  .flip-wrap.auto .flip-inner{
+    animation:autoFlip 6.4s cubic-bezier(.4,0,.2,1) infinite;
+  }
+  @keyframes autoFlip{
+    0%   {transform:rotateY(0deg)}
+    35%  {transform:rotateY(0deg)}      /* 正面停留 2.24s */
+    50%  {transform:rotateY(180deg)}    /* 翻到背面 0.96s */
+    85%  {transform:rotateY(180deg)}    /* 背面停留 2.24s */
+    100% {transform:rotateY(360deg)}    /* 翻回正面 0.96s */
+  }
+  .flip-wrap.flipped .flip-inner{transform:rotateY(180deg)}
+
+  .face{
+    position:absolute;inset:0;
+    -webkit-backface-visibility:hidden;
+    backface-visibility:hidden;
+    border-radius:18px;
+    display:flex;flex-direction:column;
+    align-items:center;justify-content:center;
+    padding:14px 12px;
+    box-shadow:0 2px 6px rgba(124,58,237,.08), 0 0 0 0.5px rgba(124,58,237,.22);
+    overflow:hidden;
+  }
+  /* 正面：今日饮水（带 ml 数字） */
+  .face.front{
+    background:#FBF7FF;
+  }
+  /* 背面：点击 +100ml（更强的操作提示） */
+  .face.back{
+    background:linear-gradient(155deg, #F3E8FF 0%, #E9D5FF 100%);
+    transform:rotateY(180deg);
+  }
+
+  /* 正面元素 */
+  .front .num{
+    font-size:34px;font-weight:700;line-height:1;
+    color:#7C3AED;letter-spacing:-1px;
+    font-variant-numeric:tabular-nums;
+  }
+  .front .unit{font-size:13px;color:#9CA3AF;margin-left:2px;font-weight:500}
+  .front .row1{display:flex;align-items:baseline;gap:2px;margin-bottom:4px}
+  .front .lbl{font-size:12px;color:#6B7280;font-weight:500;letter-spacing:0.3px}
+
+  /* 背面元素 */
+  .back .tap-icon{
+    width:36px;height:36px;border-radius:50%;
+    background:#7C3AED;color:#fff;
+    display:flex;align-items:center;justify-content:center;
+    margin-bottom:10px;
+    box-shadow:0 4px 10px rgba(124,58,237,.3);
+  }
+  .back .tap-icon svg{width:18px;height:18px;fill:none;stroke:#fff;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+  .back .tap-text{font-size:15px;font-weight:600;color:#6D28D9;letter-spacing:0.5px}
+  .back .tap-sub{font-size:11px;color:#9333EA;margin-top:4px;opacity:0.85}
+
+  /* ============ 标签 ============ */
+  .label{font-size:12px;color:#6B7280;margin-top:14px;text-align:center;line-height:1.6}
+  .label b{color:#7C3AED}
+
+  /* ============ 控制按钮 ============ */
+  .ctrl{display:flex;gap:10px;align-items:center;margin-top:8px}
+  .btn{
+    padding:8px 18px;border-radius:10px;font-size:13px;font-weight:500;
+    border:1px solid #E5E7EB;background:#fff;color:#374151;cursor:pointer;
+    transition:all .15s ease;
+  }
+  .btn:hover{background:#F3F4F6;border-color:#D1D5DB}
+  .btn.primary{background:#7C3AED;color:#fff;border-color:#7C3AED}
+  .btn.primary:hover{background:#6D28D9;border-color:#6D28D9}
+
+  /* 提示：点击计数 */
+  .counter{
+    margin-top:18px;
+    font-size:12px;color:#6B7280;
+    background:#fff;border:1px solid #E5E7EB;
+    padding:8px 16px;border-radius:20px;
+  }
+  .counter b{color:#7C3AED;font-weight:700;font-size:14px}
+
+  /* 状态指示器 */
+  .indicator{
+    display:inline-flex;align-items:center;gap:6px;
+    font-size:12px;color:#6B7280;
+    margin-top:14px;
+  }
+  .indicator .dot{
+    width:8px;height:8px;border-radius:50%;background:#10B981;
+    animation:pulse 1.2s ease-in-out infinite;
+  }
+  .indicator.back .dot{background:#7C3AED}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.4;transform:scale(0.8)}}
+
+  /* ============ 展示对比 ============ */
+  .compare{
+    display:flex;gap:36px;justify-content:center;align-items:center;
+    margin-top:18px;flex-wrap:wrap;
+  }
+  .compare .item{display:flex;flex-direction:column;align-items:center;gap:8px}
+  .static-card{
+    width:160px;height:160px;
+    background:#FBF7FF;
+    border-radius:18px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    box-shadow:0 2px 6px rgba(124,58,237,.08), 0 0 0 0.5px rgba(124,58,237,.22);
+  }
+  .static-card .num{font-size:34px;font-weight:700;color:#7C3AED;line-height:1}
+  .static-card .unit{font-size:13px;color:#9CA3AF;margin-left:2px}
+  .static-card .lbl{font-size:12px;color:#6B7280;margin-top:6px}
+  .static-card .hint{font-size:11px;color:#7C3AED;margin-top:2px;font-weight:500}
+  .vs{font-size:18px;font-weight:600;color:#9CA3AF;align-self:center;margin-top:-22px}
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <div class="title">
+    <em>今日饮水</em> 卡 · 翻转动画
+    <small>正面 / 背面 / 自动循环 / 点击 +100ml</small>
+  </div>
+
+  <!-- 主展示：可点击测试的翻转卡 -->
+  <div style="display:flex;flex-direction:column;align-items:center">
+    <div class="flip-wrap auto" id="card">
+      <div class="flip-inner">
+        <!-- 正面：今日饮水 + ml 数字 -->
+        <div class="face front">
+          <div class="row1">
+            <span class="num" id="waterNum">0</span>
+            <span class="unit">ml</span>
+          </div>
+          <div class="lbl">今日饮水</div>
+        </div>
+        <!-- 背面：点击 +100ml -->
+        <div class="face back">
+          <div class="tap-icon">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          </div>
+          <div class="tap-text">点击 +100ml</div>
+          <div class="tap-sub">每点一次，+100ml</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="indicator" id="indicator">
+      <span class="dot"></span>
+      <span id="faceLabel">正面 · 自动循环中</span>
+    </div>
+
+    <div class="ctrl">
+      <button class="btn" onclick="manualFlip()">手动翻转</button>
+      <button class="btn" onclick="toggleAuto()" id="autoBtn">暂停自动</button>
+    </div>
+
+    <div class="counter">
+      今日累计：<b id="total">0</b> ml · 共点击 <b id="taps">0</b> 次
+    </div>
+  </div>
+
+  <!-- 静默对比：左旧/右新 -->
+  <div class="compare">
+    <div class="item">
+      <div class="static-card">
+        <div style="display:flex;align-items:baseline;gap:2px"><span class="num">0</span><span class="unit">ml</span></div>
+        <div class="lbl">今日饮水</div>
+        <div class="hint">点 +100ml</div>
+      </div>
+      <div class="label">现状 · <b>单面静态</b></div>
+    </div>
+    <div class="vs">→</div>
+    <div class="item">
+      <div class="static-card" style="background:linear-gradient(155deg, #F3E8FF 0%, #E9D5FF 100%)">
+        <div style="width:36px;height:36px;border-radius:50%;background:#7C3AED;display:flex;align-items:center;justify-content:center;margin-bottom:8px">
+          <svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:none;stroke:#fff;stroke-width:2.2;stroke-linecap:round"><path d="M12 5v14M5 12h14"/></svg>
+        </div>
+        <div style="font-size:15px;font-weight:600;color:#6D28D9">点击 +100ml</div>
+        <div style="font-size:11px;color:#9333EA;margin-top:4px">每点一次，+100ml</div>
+      </div>
+      <div class="label">新版 · <b>正反翻转 + 自动循环</b></div>
+    </div>
+  </div>
+
+  <div class="label" style="margin-top:8px">
+    ⏱ 自动循环：6.4s/轮 · 2.2s 正面 + 0.9s 翻转 + 2.2s 背面 + 0.9s 翻回<br>
+    🎯 点击功能：保持不变（每点 +100ml + 震动反馈）
+  </div>
+
+</div>
+
+<script>
+  const card = document.getElementById('card');
+  const indicator = document.getElementById('indicator');
+  const faceLabel = document.getElementById('faceLabel');
+  const waterNum = document.getElementById('waterNum');
+  const totalEl = document.getElementById('total');
+  const tapsEl = document.getElementById('taps');
+  const autoBtn = document.getElementById('autoBtn');
+
+  let total = 0, taps = 0;
+  let isFlipped = false, autoOn = true;
+
+  // 点击卡 → +100ml（仅在正面响应，背面只显示不响应，模拟 SwiftUI 同语义）
+  card.addEventListener('click', (e) => {
+    // 始终累加，不区分面（SwiftUI 端 Button 行为统一）
+    total += 100;
+    taps += 1;
+    waterNum.textContent = total;
+    totalEl.textContent = total;
+    tapsEl.textContent = taps;
+    // 模拟震动
+    if (navigator.vibrate) navigator.vibrate(15);
+  });
+
+  // 翻转状态同步（用于指示器）
+  function updateFace() {
+    const transform = getComputedStyle(card.querySelector('.flip-inner')).transform;
+    if (transform !== 'none') {
+      const m = transform.match(/matrix3d\(([^)]+)\)/);
+      if (m) {
+        const v = parseFloat(m[1].split(',')[5]);
+        // v≈1 → 正面，v≈-1 → 背面
+        if (v < -0.5) {
+          isFlipped = true;
+          indicator.classList.add('back');
+          faceLabel.textContent = '背面 · 自动循环中';
+        } else {
+          isFlipped = false;
+          indicator.classList.remove('back');
+          faceLabel.textContent = '正面 · 自动循环中';
+        }
+      }
+    }
+  }
+  setInterval(updateFace, 200);
+
+  // 手动翻转
+  function manualFlip() {
+    card.classList.toggle('flipped');
+    card.classList.remove('auto');
+  }
+  // 切换自动
+  function toggleAuto() {
+    autoOn = !autoOn;
+    if (autoOn) {
+      card.classList.add('auto');
+      card.classList.remove('flipped');
+      autoBtn.textContent = '暂停自动';
+      faceLabel.textContent = '正面 · 自动循环中';
+      indicator.classList.remove('back');
+    } else {
+      card.classList.remove('auto');
+      autoBtn.textContent = '开始自动';
+      faceLabel.textContent = '已暂停';
+      indicator.classList.remove('back');
+    }
+  }
+</script>
+</body>
+</html>

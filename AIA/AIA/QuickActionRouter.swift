@@ -30,12 +30,19 @@ final class NavigationRouter: ObservableObject {
     @Published var path: [HomeRoute] = []
     /// 跳转到对话页时携带的预填充文本；ChatView 进入后消费并自动发送。
     @Published var chatPrefill: String?
+    /// 进入聊天页的来源描述（home / voice / todoReminder），传给 ChatView.entrySource
+    @Published var chatEntrySource: String = "home"
 
     private init() {}
 
     /// 跳转文字对话页；`prefill` 会填入输入框并自动发送（用于各模块空态 CTA）。
     func navigateToChat(prefill: String? = nil) {
         self.chatPrefill = prefill
+        if prefill?.contains("提醒") == true || prefill?.contains("提醒") == true {
+            self.chatEntrySource = "todoReminder"
+        } else {
+            self.chatEntrySource = "home"
+        }
         self.path.append(.chat)
     }
 }

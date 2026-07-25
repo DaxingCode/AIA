@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>添加账单 · 金额占位 + 分类默认 😋 餐饮</title>
+<style>
+  :root {
+    --bg: #f2f3f7;
+    --surface: #ffffff;
+    --line: #e6e6ec;
+    --muted: #8a8a93;
+    --text: #1c1c1e;
+    --blue: #007aff;
+    --green: #34c759;
+    --warn: #ff3b30;
+    --old-bg: #ffeaea;
+    --new-bg: #e7f6ec;
+  }
+  * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+  body {
+    margin: 0;
+    padding: 28px 16px 60px;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+  }
+  h1 {
+    font-size: 22px; font-weight: 700; margin: 0 0 6px;
+    letter-spacing: -0.2px;
+  }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 24px; }
+  .row {
+    display: flex; gap: 14px; align-items: flex-start;
+    margin-bottom: 28px; flex-wrap: wrap;
+  }
+  .phone {
+    width: 290px;
+    background: #000;
+    border-radius: 36px;
+    padding: 10px;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.12);
+  }
+  .phone .bar {
+    height: 26px; display: flex; align-items: center; justify-content: space-between;
+    color: #fff; font-size: 12px; padding: 0 18px;
+  }
+  .phone .bar .right { display: flex; gap: 5px; align-items: center; }
+  .screen {
+    background: #f2f3f7; border-radius: 26px; overflow: hidden;
+    height: 600px; position: relative;
+  }
+  .nav {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px 8px; background: #f2f3f7;
+  }
+  .nav .btn {
+    font-size: 14px;
+  }
+  .nav .btn.cancel { color: var(--text); }
+  .nav .btn.save { color: var(--blue); font-weight: 600; }
+  .nav .title { font-weight: 600; font-size: 15px; }
+  .body {
+    padding: 4px 14px 14px;
+  }
+  .card {
+    background: var(--surface);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .row-item {
+    display: flex; align-items: center;
+    padding: 12px 14px;
+    gap: 12px;
+    min-height: 44px;
+  }
+  .row-item .icon {
+    width: 20px; color: var(--muted); font-size: 16px; text-align: center;
+  }
+  .row-item .label {
+    font-size: 15px;
+  }
+  .row-item .trailing {
+    margin-left: auto; display: flex; align-items: center; gap: 6px;
+    color: var(--text);
+  }
+  .placeholder {
+    color: #c7c7cc;
+    font-weight: 500;
+  }
+  .divider {
+    height: 0.5px; background: var(--line); margin: 0 14px 0 46px;
+  }
+  .category-emoji { font-size: 15px; }
+  .category-text { font-size: 15px; font-weight: 600; }
+  .chev { color: #c7c7cc; font-size: 12px; }
+  .toggle {
+    width: 38px; height: 22px; border-radius: 11px;
+    background: #e5e5ea; position: relative;
+  }
+  .toggle::after {
+    content: ''; position: absolute; left: 2px; top: 2px;
+    width: 18px; height: 18px; border-radius: 50%; background: #fff;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+  }
+  .label-pill {
+    display: inline-block;
+    font-size: 11px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .old-label { background: var(--old-bg); color: #b3261e; }
+  .new-label { background: var(--new-bg); color: #1f7a3a; }
+  .caption {
+    font-size: 12px; color: var(--muted); line-height: 1.5;
+    padding: 6px 4px 0;
+  }
+  .redbox {
+    outline: 2px solid var(--warn);
+    outline-offset: 1px;
+    border-radius: 4px;
+  }
+  .old-pill-bg {
+    background: var(--old-bg);
+    padding: 6px 10px; border-radius: 8px;
+  }
+  .new-pill-bg {
+    background: var(--new-bg);
+    padding: 6px 10px; border-radius: 8px;
+  }
+  .time-pill {
+    border: 0.5px solid #c7c7cc; border-radius: 6px;
+    padding: 2px 8px; font-size: 12px; color: var(--text);
+  }
+  h2 {
+    font-size: 16px; font-weight: 700; margin: 0 0 12px;
+  }
+  .compare-row {
+    display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start;
+  }
+  .col { flex: 1; min-width: 280px; }
+  .arrow { color: var(--muted); align-self: center; font-size: 24px; }
+  .footer {
+    margin-top: 30px; padding: 14px 16px;
+    background: var(--surface); border-radius: 12px;
+    font-size: 13px; color: #444; line-height: 1.6;
+  }
+  .footer code {
+    background: #f0f0f3; padding: 1px 5px; border-radius: 4px;
+    font-size: 12px;
+  }
+  .diff-list { padding-left: 18px; margin: 0; font-size: 13px; line-height: 1.7; }
+</style>
+</head>
+<body>
+  <h1>添加账单 · 金额占位 + 分类默认 😋 餐饮</h1>
+  <p class="sub">两处微调，让"添加账单" sheet 打开即用，对齐"如 星巴克"占位行为</p>
+
+  <h2>📱 旧版 vs 新版（添加账单 sheet 顶部）</h2>
+  <div class="compare-row">
+    <!-- 旧版 -->
+    <div class="col">
+      <span class="label-pill old-label">旧版（实际值，点了还在）</span>
+      <div class="phone">
+        <div class="bar">
+          <span>14:50</span>
+          <span class="right">
+            <span>📶</span><span>📡</span><span>🔋</span>
+          </span>
+        </div>
+        <div class="screen">
+          <div class="nav">
+            <span class="btn cancel">取消</span>
+            <span class="title">添加账单</span>
+            <span class="btn save">保存</span>
+          </div>
+          <div class="body">
+            <div class="card">
+              <div class="row-item">
+                <span class="icon">🏢</span>
+                <span class="label">商户 / 对象</span>
+                <span class="trailing placeholder">如 星巴克</span>
+              </div>
+              <div class="divider"></div>
+              <div class="row-item redbox">
+                <span class="icon">$</span>
+                <span class="label">金额</span>
+                <span class="trailing">
+                  <span style="color:var(--muted)">¥</span>
+                  <span style="font-weight:600">0.00</span>
+                </span>
+              </div>
+              <div class="divider"></div>
+              <div class="row-item redbox">
+                <span class="icon">🏷</span>
+                <span class="label">分类</span>
+                <span class="trailing">
+                  <span class="category-emoji">📦</span>
+                  <span class="category-text">其他</span>
+                  <span class="chev">›</span>
+                </span>
+              </div>
+              <div class="divider"></div>
+              <div class="row-item">
+                <span class="icon">🕒</span>
+                <span class="label">时间</span>
+                <span class="trailing time-pill">2026年7月24日 14:49</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">金额显示实际值 "0.00"（被 init 初始化成 "0.00" 字符串），点中后是 0.00，要先全选删除；分类显示"📦 其他"，跟"星巴克"对比不一致。</p>
+    </div>
+
+    <div class="arrow">→</div>
+
+    <!-- 新版 -->
+    <div class="col">
+      <span class="label-pill new-label">新版（占位，点击消失）</span>
+      <div class="phone">
+        <div class="bar">
+          <span>14:50</span>
+          <span class="right">
+            <span>📶</span><span>📡</span><span>🔋</span>
+          </span>
+        </div>
+        <div class="screen">
+          <div class="nav">
+            <span class="btn cancel">取消</span>
+            <span class="title">添加账单</span>
+            <span class="btn save">保存</span>
+          </div>
+          <div class="body">
+            <div class="card">
+              <div class="row-item">
+                <span class="icon">🏢</span>
+                <span class="label">商户 / 对象</span>
+                <span class="trailing placeholder">如 星巴克</span>
+              </div>
+              <div class="divider"></div>
+              <div class="row-item">
+                <span class="icon">$</span>
+                <span class="label">金额</span>
+                <span class="trailing">
+                  <span style="color:var(--muted)">¥</span>
+                  <span class="placeholder">0.00</span>
+                </span>
+              </div>
+              <div class="divider"></div>
+              <div class="row-item">
+                <span class="icon">🏷</span>
+                <span class="label">分类</span>
+                <span class="trailing">
+                  <span class="category-emoji">😋</span>
+                  <span class="category-text">餐饮</span>
+                  <span class="chev">›</span>
+                </span>
+              </div>
+              <div class="divider"></div>
+              <div class="row-item">
+                <span class="icon">🕒</span>
+                <span class="label">时间</span>
+                <span class="trailing time-pill">2026年7月24日 14:49</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">金额空字符串 → placeholder "0.00" 跟"如 星巴克"一样显示灰字、点中即消失；分类默认"😋 餐饮"（最常见，icon 已自带 emoji），与商户并列自然。</p>
+    </div>
+  </div>
+
+  <h2>🔍 关键差异对照</h2>
+  <div class="footer">
+    <ol class="diff-list">
+      <li><b>金额占位</b>：<code>EditSheets.swift:609</code>
+        <br>旧：<code>_amountText = State(initialValue: String(format: "%.2f", bill.amount))</code>（草稿 amount=0 → 文本 = "0.00" → 占位不显示）
+        <br>新：<code>_amountText = State(initialValue: isAdding ? "" : String(format: "%.2f", bill.amount))</code>（添加模式空 → TextField("0.00", ...) 显示占位灰字）
+      </li>
+      <li><b>分类默认</b>：<code>RecordsViews.swift:1351</code>
+        <br>旧：<code>category: "其他"</code>（显示 📦 其他，icon 偏冷门）
+        <br>新：<code>category: "餐饮"</code>（BillCategoryHelpers.icon("餐饮") = 😋，最常见且带 emoji）
+      </li>
+      <li><b>保存兼容</b>：<code>EditSheets.swift:907</code>
+        <br><code>bill.amount = Double(amountText) ?? bill.amount</code> 兼容空字符串（用户没填金额时回退到 0.00，不崩）；<code>bill.category = category</code> 直接写回"餐饮"。
+      </li>
+    </ol>
+  </div>
+
+</body>
+</html>

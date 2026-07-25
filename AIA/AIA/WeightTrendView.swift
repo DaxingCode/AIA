@@ -107,7 +107,7 @@ struct WeightTrendView: View {
             }
             .padding()
         }
-        AIBottomBar()
+        AIBottomBar(entrySource: "health")
     }
     .background(Color(.secondarySystemBackground))
     .navigationTitle("体重趋势")

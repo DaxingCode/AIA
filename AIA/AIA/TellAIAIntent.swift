@@ -14,11 +14,11 @@ import UIKit
 
 @available(iOS 17, *)
 struct TellAIAIntent: AppIntent {
-    static var title: LocalizedStringResource = "跟阿宝说"
+    static var title: LocalizedStringResource = "用阿宝记"
     static var description = IntentDescription("一句话记账或设提醒：如「午饭35」「25日提醒我交报表」。")
     static var openAppWhenRun: Bool = false   // 后台静默运行，直接记一笔、不弹 UI
     static var parameterSummary: some ParameterSummary {
-        Summary("跟阿宝说 \(\.$phrase)")
+        Summary("用阿宝记 \(\.$phrase)")
     }
 
     @Parameter(title: "内容", description: "想记录的内容，如 午饭35 / 25日提醒我交报表")
@@ -26,7 +26,11 @@ struct TellAIAIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let container = AppPersistence.makeContainer()
+        // 复用 App 主容器而非自建新容器：避免「两个 ModelContainer 同时操作同一 SQLite」
+        // 导致 WAL 锁死（App 打开时卡住不动）。
+        guard let container = AppDelegate.sharedContainer else {
+            return .result(dialog: "App 还没准备好，稍后再试。")
+        }
         let context = container.mainContext
 
         // 1. 云端解析一句话 → 结构化结果（bill / food / todo / health）
@@ -56,6 +60,8 @@ struct TellAIAIntent: AppIntent {
         }
 
         let summary = RecognitionSaver.summary(of: result)
+        // 显式保存，确保数据在 Intent 返回前已刷入磁盘，避免 autosave 竞态
+        try? context.save()
         return .result(dialog: "已记录：\(summary)")
     }
 

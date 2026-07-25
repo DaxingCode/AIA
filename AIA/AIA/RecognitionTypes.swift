@@ -33,6 +33,9 @@ struct FoodPayload: Codable, Sendable {
     let protein: Double?
     let carbs: Double?
     let fat: Double?
+    var fiber: Double? = nil
+    var sugar: Double? = nil
+    var sodium: Double? = nil
     let portion: String?
     let meal: String?           // 餐次：早餐/午餐/晚餐/加餐；文字输入时从用户消息推断
     let action: String?         // create（默认）/ update / delete
@@ -73,7 +76,8 @@ extension RecognitionResult {
         guard let raw = raw, !raw.isEmpty else { return nil }
 
         // 1) 标准 ISO8601 → 直接解析
-        if let d = ISO8601DateFormatter().date(from: raw) { return d }
+        let isoFmt = ISO8601DateFormatter(); isoFmt.timeZone = .current
+        if let d = isoFmt.date(from: raw) { return d }
 
         // 2) 中文相对日期 / 星期几 / 纯时间 → 倒推为绝对日期
         return parseRelativeDateTime(raw)

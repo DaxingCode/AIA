@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>确认识别结果页 · 重量/热量单行化 · 前后对比</title>
+<style>
+  :root {
+    --bg: #F5F6FA;
+    --card: #FFFFFF;
+    --gray: #F3F4F6;
+    --ink: #111827;
+    --sub: #6B7280;
+    --muted: #9CA3AF;
+    --line: #E5E7EB;
+    --amber: #F59E0B;
+    --food: #D97706;
+    --blue: #3B82F6;
+    --green: #10B981;
+    --purple: #8B5CF6;
+    --warn: #EF4444;
+    --warning: #B45309;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro SC", "PingFang SC", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    padding: 32px 20px 64px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .header { max-width: 920px; margin: 0 auto 28px; }
+  .header h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+  .header p { font-size: 13px; color: var(--sub); }
+  .compare { max-width: 920px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 720px) { .compare { grid-template-columns: 1fr; } }
+  .col { background: var(--card); border-radius: 18px; padding: 24px 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+  .col-title { font-size: 12px; font-weight: 600; color: var(--sub); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 16px; display: flex; align-items: center; gap: 6px; }
+  .col-title .tag { padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: 700; }
+  .tag.before { background: #FEE2E2; color: #B91C1C; }
+  .tag.after { background: #DCFCE7; color: #166534; }
+  .device-frame { background: var(--bg); border-radius: 12px; padding: 14px; border: 1px solid var(--line); }
+
+  /* ===== 通用 ===== */
+  .card {
+    background: #FFF7ED;
+    border-radius: 14px;
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+  .meal-pills { display: flex; gap: 0; background: var(--gray); border-radius: 8px; padding: 2px; margin-bottom: 10px; }
+  .meal-pill { flex: 1; text-align: center; padding: 6px 0; font-size: 13px; color: var(--sub); border-radius: 6px; }
+  .meal-pill.active { background: var(--card); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+  .name-row { background: var(--card); border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+  .name-row .label { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+  .name-row .value { font-size: 15px; font-weight: 500; }
+
+  /* ===== 原版 双行 cell ===== */
+  .pair-2row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+  .cell-2row { background: var(--card); border-radius: 10px; padding: 12px; }
+  .cell-2row .label { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+  .cell-2row .input { display: flex; align-items: baseline; justify-content: flex-end; gap: 4px; }
+  .cell-2row .input .num { font-size: 17px; font-weight: 600; min-width: 40px; text-align: right; }
+  .cell-2row .input .unit { font-size: 13px; color: var(--muted); }
+
+  /* ===== 新版 单行 cell ===== */
+  .pair-1row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+  .cell-1row { background: var(--card); border-radius: 10px; padding: 12px; display: flex; align-items: center; gap: 8px; }
+  .cell-1row .label-group { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  .cell-1row .label-group .label { font-size: 11px; color: var(--muted); }
+  .cell-1row .input-group { display: flex; align-items: baseline; gap: 3px; margin-left: auto; }
+  .cell-1row .input-group .num { font-size: 17px; font-weight: 600; min-width: 32px; text-align: right; }
+  .cell-1row .input-group .num.food-color { color: var(--food); }
+  .cell-1row .input-group .unit { font-size: 12px; color: var(--muted); }
+
+  /* ===== 6 大营养素行（两版共用）===== */
+  .macros { display: flex; flex-direction: column; gap: 8px; }
+  .macro-row { background: var(--card); border-radius: 8px; padding: 8px 12px; display: flex; align-items: center; gap: 8px; }
+  .macro-row .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .macro-row .name { font-size: 13px; color: var(--sub); }
+  .macro-row .total { font-size: 13px; font-weight: 500; margin-left: auto; }
+  .macro-row .per { font-size: 10px; color: var(--muted); }
+
+  /* ===== 高度差指示 ===== */
+  .meta { font-size: 11px; color: var(--muted); margin-top: 8px; text-align: center; }
+  .meta .arrow { color: var(--green); font-weight: 600; }
+
+  /* 红框模拟（标记用户原图红框位置） */
+  .marker { position: relative; }
+  .marker::before {
+    content: ''; position: absolute; inset: -2px -4px;
+    border: 2px solid #EF4444; border-radius: 10px;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>确认识别结果页 · 重量/热量单行化</h1>
+  <p>把每个 cell 内部的「icon+标题」行 和 「输入框+单位」行 合并为同一行</p>
+</div>
+
+<div class="compare">
+  <!-- 原版 -->
+  <div class="col">
+    <div class="col-title"><span class="tag before">改前</span>每个 cell 占 2 行</div>
+    <div class="device-frame">
+      <div class="card">
+        <div class="meal-pills">
+          <div class="meal-pill">早餐</div>
+          <div class="meal-pill active">午餐</div>
+          <div class="meal-pill">晚餐</div>
+          <div class="meal-pill">加餐</div>
+        </div>
+        <div class="name-row">
+          <div class="label">🍴 名称</div>
+          <div class="value">洋葱炒肉丝</div>
+        </div>
+        <div class="pair-2row marker">
+          <div class="cell-2row">
+            <div class="label">⚖ 重量</div>
+            <div class="input"><span class="num">1</span><span class="unit">g</span></div>
+          </div>
+          <div class="cell-2row">
+            <div class="label">🔥 热量</div>
+            <div class="input"><span class="num" style="color:var(--food)">0.4</span><span class="unit">kcal</span></div>
+          </div>
+        </div>
+        <div class="macros">
+          <div class="macro-row"><span class="dot" style="background:var(--blue)"></span><span class="name">蛋白质</span><span class="total">0.0 g</span><span class="per">(1.1 / 100g)</span></div>
+          <div class="macro-row"><span class="dot" style="background:var(--amber)"></span><span class="name">碳水</span><span class="total">0.1 g</span><span class="per">(9.0 / 100g)</span></div>
+          <div class="macro-row"><span class="dot" style="background:var(--green)"></span><span class="name">脂肪</span><span class="total">0.0 g</span><span class="per">(0.1 / 100g)</span></div>
+          <div class="macro-row"><span class="dot" style="background:var(--purple)"></span><span class="name">膳食纤维</span><span class="total">0.0 g</span><span class="per">(1.7 / 100g)</span></div>
+          <div class="macro-row"><span class="dot" style="background:var(--warn)"></span><span class="name">糖</span><span class="total">0.0 g</span><span class="per">(4.2 / 100g)</span></div>
+          <div class="macro-row"><span class="dot" style="background:var(--warning)"></span><span class="name">钠</span><span class="total">0.0 mg</span><span class="per">(4.0 / 100g)</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="meta">两个 cell 内部各占 2 行，整组占 4 行高度</div>
+  </div>
+
+  <!-- 新版 -->
+  <div class="col">
+    <div class="col-title"><span class="tag after">改后</span>每个 cell 占 1 行</div>
+    <div class="device-frame">
+      <div class="card">
+        <div class="meal-pills">
+          <div class="meal-pill">早餐</div>
+          <div class="meal-pill active">午餐</div>
+          <div class="meal-pill">晚餐</div>
+          <div class="meal-pill">加餐</div>
+        </div>
+        <div class="name-row">
+          <div class="label">🍴 名称</div>
+          <div class="value">洋葱炒肉丝</div>
+        </div>
+        <div class="pair-1row">
+          <div class="cell-1row">
+            <div class="label-group">
+              <span class="label">⚖ 重量</span>
+            </div>
+            <div class="input-group">
+              <span class="num">1</span>
+              <span class="unit">g</span>
+            </div>
+          </div>
+          <div class="cell-1row">
+            <div class="label-group">
+              <span class="label">🔥 热量</span>
+            </div>
+            <div class="input-group">
+              <span class="num food-color">0.4</span>
+              <span class="unit">kcal</span>
+            </div>
+          </div>
+        </div>
+        <div class="macros">
+          <div class="macro-row"><span class="dot" style="background:var(--blue)"></span><span class="name">蛋白质</span><span class="total">0.0 g</span><span class="per">(1.1 / 100g)</span></div>
+          <div class="macro-row"><span class="dot" style="background:var(--amber)"></span><span class="name">碳水</span><span class="total">0.1 g</span><span class="per">(9.0 / 100g)</span></div>
+          <div class="macro-row"><span class="dot" style="background:var(--green)"></span><span class="name">脂肪</span><span class="total">0.0 g</span><span class="per">(0.1 / 100g)</span></div>
+          <div class="macro-row"><span class="dot" style="background:var(--purple)"></span><span class="name">膳食纤维</span><span class="total">0.0 g</span><span class="per">(1.7 / 100g)</span></div>
+          <div class="macro-row"><span class="dot" style="background:var(--warn)"></span><span class="name">糖</span><span class="total">0.0 g</span><span class="per">(4.2 / 100g)</span></div>
+          <div class="macro-row"><span class="dot" style="background:var(--warning)"></span><span class="name">钠</span><span class="total">0.0 mg</span><span class="per">(4.0 / 100g)</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="meta">两个 cell 内部各占 1 行，整组省 <span class="arrow">2 行</span>高度（↓40%）</div>
+  </div>
+</div>
+
+<!-- 设计说明 -->
+<div style="max-width:920px;margin:32px auto 0;background:#fff;border-radius:18px;padding:24px 28px;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+  <div style="font-size:14px;font-weight:700;margin-bottom:12px;">🔧 改动要点</div>
+  <table style="width:100%;font-size:13px;border-collapse:collapse;">
+    <tr style="border-bottom:1px solid var(--line);"><td style="padding:8px 0;color:var(--sub);width:120px;">新增方法</td><td><code style="background:var(--gray);padding:2px 6px;border-radius:4px;">inlineFieldRow(icon:label:content:)</code> — 与 <code style="background:var(--gray);padding:2px 6px;border-radius:4px;">fieldRow</code> 同款灰底/12pt padding/rSM 圆角容器，但内部是 HStack（icon+标题 在左、Spacer 推开、content 在右）</td></tr>
+    <tr style="border-bottom:1px solid var(--line);"><td style="padding:8px 0;color:var(--sub);">切换调用</td><td>原 545-570 行的「重量 + 热量」HStack 内，两个 <code style="background:var(--gray);padding:2px 6px;border-radius:4px;">fieldRow</code> → 改为 <code style="background:var(--gray);padding:2px 6px;border-radius:4px;">inlineFieldRow</code>；两个 cell 的 content 内部去掉外层 Spacer 改为紧凑 HStack</td></tr>
+    <tr style="border-bottom:1px solid var(--line);"><td style="padding:8px 0;color:var(--sub);">不动调用</td><td>其他 8 处 <code style="background:var(--gray);padding:2px 6px;border-radius:4px;">fieldRow</code>（餐次/名称/商户/金额/分类/事项/指标/数值）保持原样不动 — 避免误伤</td></tr>
+    <tr><td style="padding:8px 0;color:var(--sub);">设计决策</td><td><b>不改通用 fieldRow</b>，而新增 inlineFieldRow 并行实现。这样可小范围替换，且未来若其他字段也要单行化可直接复用</td></tr>
+  </table>
+</div>
+
+</body>
+</html>

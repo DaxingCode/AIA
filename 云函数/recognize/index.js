@@ -66,10 +66,11 @@ const PROVIDERS = {
     model: 'glm-4v',
     apiKeyEnv: 'GLM_API_KEY',
   },
-  // 智谱 GLM 纯文字（GLM-4-Flash，轻量便宜）
+  // 智谱 GLM 纯文字（GLM-4.7-Flash，2025 新模型，永久免费，200K 上下文，增强 function calling）
+  // 旧版 glm-4-flash 已停更好，2026-07-25 升级至 glm-4.7-flash。
   glmText: {
     endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
-    model: 'glm-4-flash',
+    model: 'glm-4.7-flash',
     apiKeyEnv: 'GLM_API_KEY',
   },
   // 百度千帆 ERNIE（OpenAI 兼容，base_url: https://qianfan.baidubce.com/v2）
@@ -85,11 +86,27 @@ const PROVIDERS = {
     model: 'ernie-speed-8k',
     apiKeyEnv: 'QIANFAN_API_KEY',
   },
+  // DeepSeek（深度求索）—— 文字处理 + function-calling 最强，性价比极高
+  // 注册：https://platform.deepseek.com/ → API Keys → 创建 Key
+  // 定价：deepseek-chat 输入 ¥2/百万 tokens，输出 ¥8/百万 tokens
+  // 说明：完全兼容 OpenAI 格式，支持工具调用（function calling）、多轮对话。
+  //       注意：DeepSeek 暂时不支持图片视觉识别（无多模态模型），仅文字场景。
+  //       强烈推荐将 Agent 模式的 provider 改成 deepseek——function-calling 准确度远超 sensenovaText。
+  deepseek: {
+    endpoint: 'https://api.deepseek.com/v1/chat/completions',
+    model: 'deepseek-chat',  // V3 模型，文字+工具调用首选
+    apiKeyEnv: 'DEEPSEEK_API_KEY',
+  },
+  deepseekText: {
+    endpoint: 'https://api.deepseek.com/v1/chat/completions',
+    model: 'deepseek-chat',  // 文字专用，与 deepseek 同模型可共用
+    apiKeyEnv: 'DEEPSEEK_API_KEY',
+  },
 };
 
 // 版本标记：发布后 curl 可通过返回值里的 ver 字段确认是否部署了最新代码
 // 注意：保持全小写+连字符，package-recognize.sh 的正则 [a-z]+ 兼容（小写 + 数字后缀 + 可选 -xxx 后缀，不支持大写）
-const FN_VERSION = '20260724a-queryfood';
+const FN_VERSION = '20260725b-deletion-honest';
 
 // 服务端兜底：纯通用回应（不论上下文）强制 types:["none"]，不依赖模型是否听话。
 // 与云端提示词规则 10 双保险，杜绝「好的/可以」被当成记录指令重复建待办。
@@ -343,6 +360,43 @@ async function handleChat(provider, body, apiKey) {
   return { ok: true, reply };
 }
 
+// 阿宝进入聊天页时的招呼语：基于用户近期数据动态生成。
+// - 单轮、不调工具（招呼只读，不写），所以 SenseChat-Turbo 也能稳定输出。
+// - context 由 App 端 buildGreetingContext() 注入（今日饮食、今日待办、近 14 天早餐模式、步数等）。
+// - 超时或模型返回空 → App 端走本地 buildGreeting() 兜底。
+const GREETING_SYSTEM_PROMPT = `你是阿宝，用户刚进入聊天页，请你根据「本地数据摘要」生成 1-2 句口语化、像朋友打招呼的开场白。
+
+要求：
+1. 简体中文，口语化、像微信聊天，可以适当用"呀、哦、呢、～"等语气词；不要书面腔、不要"根据您的数据"。
+2. 严格基于摘要里的真实数据，不要编造。摘要里可能包含以下字段（按优先级）：
+   - entrySource：用户进入聊天页的方式（"home"=点击打字区 / "voice"=按语音键 / "todoReminder"=从待办空态提醒进来）
+     - voice 场景：开头可以呼应"你按了语音键，我听着呢～想说什么直接说吧"
+     - todoReminder 场景：开头可以回应"你刚叫我提醒你，要设置什么提醒呀？"
+   - currentHour / currentTime：当前时间
+   - todayFoods：今日已记饮食
+   - commonBreakfastHour：近 14 天早餐时段习惯
+   - todayBillSummary：今日账单概况（count/totalExpense/totalIncome/topExpenses）
+   - upcomingToday / upcomingTodayCount：今日待办
+   - latestHealthMetric：最近一次健康指标
+   - stepsToday：今日步数
+   - totalFoods / totalReminders：总记录数
+3. 摘要里没数据时，就简单打个招呼（如「晚上好，我是阿宝～今天想记点什么？」），不要硬凑。
+4. 输出必须是 1-2 句（30-80 字），不要再加任何寒暄前缀如"以下是招呼："。
+5. 不要在招呼里调用任何工具、不要假装给用户记了什么、不要重复发"我是阿宝"。
+6. **注意多样性**：避免每天说一模一样的话。即使数据相同，也尽量换不同的切入角度和表达方式。`;
+
+async function handleGreeting(provider, body, apiKey) {
+  const context = body.context || {};
+  const messages = [
+    { role: 'system', content: GREETING_SYSTEM_PROMPT },
+    { role: 'user', content: '本地数据摘要：' + JSON.stringify(context, null, 2) },
+  ];
+  const reply = await callChatRaw(provider, messages, apiKey);
+  const trimmed = (reply || '').trim();
+  if (!trimmed) return { ok: false, error: '模型返回为空' };
+  return { ok: true, reply: trimmed };
+}
+
 // queryFood 模式处理：手动添加食物页搜不到时，问云端该食物每 100g 的营养。
 // - 入参 body.foodName（必填，trim 后非空）
 // - 客户端 FoodPayload 期望：{name, calories, protein, carbs, fat, fiber?, sugar?, sodium?}
@@ -433,6 +487,12 @@ function extractJSON(text) {
 // 云函数入口
 exports.main = async (event, context) => {
   try {
+    // 定时保活触发器：快速返回，不进入业务逻辑，避免消耗 token / 资源点。
+    // 控制台加定时触发器 cron = "0 */5 * * * * *"（每 5 分钟）后，每次触发仅走这段就 return。
+    if (event.Type === 'timer' || (event.trigger && event.trigger.Name)) {
+      return { ok: true, ping: true, ts: Date.now(), ver: FN_VERSION };
+    }
+
     // CloudBase HTTP 触发会把请求体放在 event.body；微信小程序端调用则直接是 event 对象。
     // 这里做兼容：先尝试 event.body，再回退到 event 本身。
     const body = parseEventBody(event);
@@ -449,12 +509,21 @@ exports.main = async (event, context) => {
     }
 
     // Agent 模式：可单独开关的云端智能问答（只读）。未开启或异常均回落 handleChat。
+    // Agent 文字对话默认走 DeepSeek（function-calling 彻底最好）；但当用户在 App 明确
+    // 选了非默认模型（如智谱 GLM）时，尊重用户选择，不走 DeepSeek 兜底。
     if (body.mode === 'agent') {
       if (process.env.AGENT_ENABLED !== 'true') {
         const chatRes = await handleChat(provider, body, apiKey);
         return { ...chatRes, ver: FN_VERSION };
       }
-      const agentRes = await handleAgent(provider, body, apiKey, handleChat);
+      // 仅当用户仍在使用默认模型（sensenova/sensenovaText）且 DEEPSEEK_API_KEY 存在时，
+      // 自动升级到 DeepSeek。用户如在 App 设置里切换了（glmText/qianfanText/deepseek 等）
+      // 或之前已处理过的 fallback（qwenText 等），一律尊重用户选择。
+      const isDefault = providerName === 'sensenova' || providerName === 'sensenovaText';
+      const useDeepSeek = process.env.DEEPSEEK_API_KEY && isDefault;
+      const agentProvider = useDeepSeek ? PROVIDERS.deepseek : provider;
+      const agentKey = useDeepSeek ? process.env.DEEPSEEK_API_KEY : apiKey;
+      const agentRes = await handleAgent(agentProvider, body, agentKey, handleChat);
       return { ...agentRes, ver: FN_VERSION };
     }
 
@@ -470,6 +539,12 @@ exports.main = async (event, context) => {
     if (body.mode === 'chat') {
       const chatRes = await handleChat(provider, body, apiKey);
       return { ...chatRes, ver: FN_VERSION };
+    }
+
+    // 招呼模式：进入聊天页时的开场白，单轮、不调工具；返回空时 App 端走本地兜底。
+    if (body.mode === 'greeting') {
+      const gRes = await handleGreeting(provider, body, apiKey);
+      return { ...gRes, ver: FN_VERSION };
     }
 
     const result = await callWithFallback(body, apiKey);
@@ -491,13 +566,15 @@ async function callWithFallback(body, apiKey) {
 
   // 定义 fallback 映射：所有非 qwen 的厂商 → 回到 qwen/qwenText 兜底
   const fallbackMap = {
-    glm4vFlash: 'sensenova',      // 免费视觉→免费视觉（次选）
+    glm4vFlash: 'qwen',           // 免费视觉→qwen（通义人人有 Key，比 sensenova 更稳定）
     sensenova: 'qwen',            // 免费视觉→付费视觉（兜底）
     sensenovaText: 'qwenText',
     glm: 'qwen',
     glmText: 'qwenText',
     qianfan: 'qwen',
     qianfanText: 'qwenText',
+    deepseek: 'qwenText',
+    deepseekText: 'qwenText',
   };
   const fallbackName = fallbackMap[providerName];
   const fallback = fallbackName ? (PROVIDERS[fallbackName] || null) : null;

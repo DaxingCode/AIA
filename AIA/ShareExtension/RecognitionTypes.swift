@@ -52,6 +52,6 @@ struct HealthPayload: Codable, Sendable {
 extension RecognitionResult {
     static func date(from iso: String?) -> Date? {
         guard let iso else { return nil }
-        return ISO8601DateFormatter().date(from: iso) ?? Date()
+        let f = ISO8601DateFormatter(); f.timeZone = .current; return f.date(from: iso) ?? Date()
     }
 }

@@ -514,7 +514,7 @@ enum CameraError: Error, Identifiable {
 }
 
 extension CameraManager: AVCapturePhotoCaptureDelegate {
-    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+    nonisolated func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         guard let data = photo.fileDataRepresentation(), let image = UIImage(data: data) else { return }
         DispatchQueue.main.async { [weak self] in
             self?.capturedImage = image

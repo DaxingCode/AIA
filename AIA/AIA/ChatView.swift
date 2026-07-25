@@ -32,14 +32,27 @@ struct ChatView: View {
     @Query private var bills: [Bill]
     @Query(filter: #Predicate<Reminder> { !$0.syncDeleted }) private var reminders: [Reminder]
     @Query(sort: \HealthMetric.date, order: .reverse) private var healths: [HealthMetric]
-    @Query(sort: \ChatMessage.createdAt, order: .forward) private var messages: [ChatMessage]
+    @Query private var merchantMetas: [MerchantMeta]
+    @Query(sort: \RecognitionRecord.recognizedAt, order: .reverse) private var recognitions: [RecognitionRecord]
+    @Query(filter: #Predicate<WaterLog> { !$0.syncDeleted }, sort: \WaterLog.date, order: .reverse) private var waters: [WaterLog]
+    @Query(filter: #Predicate<RecurringRule> { !$0.syncDeleted }) private var recurringRules: [RecurringRule]
+    @Query(filter: #Predicate<ChatMessage> { !$0.syncDeleted }, sort: \ChatMessage.createdAt, order: .forward) private var messages: [ChatMessage]
     @StateObject private var health = HealthManager.shared
+    // 消息多选（contextMenu 「选择」进入；底部条改为「取消 / 删除」）
+    @State private var messageMultiSelectMode = false
+    @State private var selectedMessageIDs = Set<PersistentIdentifier>()
+    @State private var showMessageDeleteConfirm = false
     @Environment(\.modelContext) private var context
 
     @State private var input = ""
 
     // 智能问答 Agent 总开关（与「云同步」同组，在设置页控制）。默认关，零污染。
     @AppStorage("aia.agentEnabled") private var agentEnabled: Bool = false
+    @AppStorage("aia.greetingLLM") private var greetingLLM: Bool = true
+    /// 招呼变体轮换索引（周一至周日自然循环，避免同一天相同变体）
+    @AppStorage("aia.greetingVariant") private var greetingVariant = 0
+    /// 早餐提醒每日限次：记录当天日期字符串，每天只提醒一次
+    @AppStorage("aia.lastBreakfastReminderDate") private var lastBreakfastReminderDate = ""
     @FocusState private var isInputFocused: Bool
     @State private var isParsing = false
     @State private var hasAutoFocused = false
@@ -51,6 +64,8 @@ struct ChatView: View {
     var autostartVoice = false
     /// 从空态 CTA 进入时，自动填入输入框并延迟发送的文本。
     var prefill: String?
+    /// 进入聊天页的来源：home / voice / todoReminder
+    var entrySource: String = "home"
 
     // 输入栏扩展功能（拍照/相册/文件）
     @State private var showInputActions = false
@@ -60,17 +75,20 @@ struct ChatView: View {
     @State private var fileImportCoverItem: CameraCoverItem?
     @State private var fileImportErrorMessage: String?
 
-    init(prefill: String? = nil, autostartVoice: Bool = false) {
+    init(prefill: String? = nil, autostartVoice: Bool = false, entrySource: String = "home") {
         self.prefill = prefill
         self.autostartVoice = autostartVoice
+        self.entrySource = entrySource
         #if DEBUG
-        print("[ChatView] init prefill=\(prefill ?? "nil") autostartVoice=\(autostartVoice)")
+        print("[ChatView] init prefill=\(prefill ?? "nil") autostartVoice=\(autostartVoice) entrySource=\(entrySource)")
         #endif
     }
 
     // 当前页面动态生成的阿宝招呼（不持久化），时间戳固定为进入页面时最后一条历史+1秒，
     // 这样新消息时间更晚，会自然把招呼顶上去，而不是永远钉在底部。
     @State private var greetingMessage: ChatMessage?
+    /// 进入页面时启动的 LLM 招呼生成任务，离开页面 / 重新进入时取消旧任务避免回灌。
+    @State private var greetingTask: Task<Void, Never>?
 
     /// 用户说了食物但没给重量时，暂存食物名与餐次，等用户回复重量。
     /// 非 nil 时 app 先问「你大概吃了多少重量呀？」，收到重量回复后再结合入库。
@@ -124,10 +142,14 @@ struct ChatView: View {
                         withAnimation(scrollAnimation) {
                             if greetingMessage == nil {
                                 // 进入页面（每次进入都弹）生成阿宝招呼，作为对话的第一条。
+                                // 1) 立即用本地模板出招呼（避免空白闪屏）；2) 后台异步用 LLM 重写更自然的版本，
+                                //    若成功且非空则替换气泡文案（首次渲染的入场动画保留）。
                                 // 时间戳固定在「当前历史最后一条 + 1 秒」，让它停在对话流里；
                                 // 之后不再被推后，用户回复时新消息排在它下方，它自然被顶到上方。
                                 let date = messages.last?.createdAt.addingTimeInterval(1) ?? Date()
-                                greetingMessage = ChatMessage(role: .ai, text: buildGreeting(), createdAt: date)
+                                let initial = buildGreeting()
+                                greetingMessage = ChatMessage(role: .ai, text: initial, createdAt: date)
+                                startGreetingLLMTask(initial: initial)
                             }
                         }
                         scrollToBottom(proxy: proxy, delay: 0.08)
@@ -164,7 +186,7 @@ struct ChatView: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("我是阿宝")
                             .font(AIATheme.Font.footnote.weight(.semibold))
-                            .foregroundStyle(AIATheme.ink)
+                            .foregroundStyle(.primary)
                         Text("你的私人专属AI助理")
                             .font(AIATheme.Font.micro)
                             .foregroundStyle(AIATheme.muted)
@@ -347,7 +369,11 @@ struct ChatView: View {
                 }
             }
         }
-        .onDisappear { recognizer.stop() }
+        .onDisappear {
+            recognizer.stop()
+            // 离开页面时取消正在飞的招呼 LLM 任务，避免重新进入页面时旧任务回灌到新气泡。
+            greetingTask?.cancel()
+        }
         .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker)
         .fileImporter(isPresented: $showFileImporter,
                       allowedContentTypes: [.image],
@@ -371,6 +397,42 @@ struct ChatView: View {
         } message: {
             Text(fileImportErrorMessage ?? "")
         }
+        // 消息多选模式：底部出现「取消 / 全选 / 删除(N)」操作条
+        .overlay(alignment: .bottom) {
+            if messageMultiSelectMode {
+                MultiSelectBottomBar(
+                    count: selectedMessageIDs.count,
+                    totalCount: messages.count,
+                    onCancel: {
+                        messageMultiSelectMode = false
+                        selectedMessageIDs.removeAll()
+                    },
+                    onSelectAll: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        let allIDs = Set(messages.map(\.persistentModelID))
+                        if selectedMessageIDs.isSuperset(of: allIDs) {
+                            selectedMessageIDs.subtract(allIDs)
+                        } else {
+                            selectedMessageIDs.formUnion(allIDs)
+                        }
+                    },
+                    onDelete: {
+                        guard !selectedMessageIDs.isEmpty else { return }
+                        showMessageDeleteConfirm = true
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.22), value: messageMultiSelectMode)
+        .alert(NSLocalizedString("common.confirmDelete", comment: ""), isPresented: $showMessageDeleteConfirm) {
+            Button(NSLocalizedString("common.cancel", comment: ""), role: .cancel) { }
+            Button(NSLocalizedString("common.delete", comment: ""), role: .destructive) {
+                deleteSelectedMessages()
+            }
+        } message: {
+            Text(String(format: NSLocalizedString("common.deleteCount", comment: ""), selectedMessageIDs.count))
+        }
     }
 
     /// 阿宝招呼：每次进入页面时根据本地数据与用户习惯实时生成（不持久化，避免重复堆积）。
@@ -381,7 +443,7 @@ struct ChatView: View {
         if let pending = parseFoodConfirm(m.text) {
             foodConfirmBubble(pending, message: m)
         } else {
-            messageBubble(text: m.text, isUser: m.role == .user)
+            messageBubble(message: m)
         }
     }
 
@@ -439,10 +501,23 @@ struct ChatView: View {
         .background(AIATheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
         .contextMenu {
-            Button {
-                UIPasteboard.general.string = "\(pending.meal) · \(pending.name) · \(pending.portion) · \(Int(pending.cal)) kcal"
-            } label: {
-                Label("复制", systemImage: "doc.on.doc")
+            // 多选模式时不再弹菜单
+            if !messageMultiSelectMode {
+                Button {
+                    UIPasteboard.general.string = "\(pending.meal) · \(pending.name) · \(pending.portion) · \(Int(pending.cal)) kcal"
+                } label: {
+                    Label("复制", systemImage: "doc.on.doc")
+                }
+                Button(role: .destructive) {
+                    SafeDelete.chatMessage(message, in: context)
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
+                Button {
+                    enterMessageMultiSelect(message.persistentModelID)
+                } label: {
+                    Label("选择", systemImage: "checkmark.circle")
+                }
             }
         }
     }
@@ -461,7 +536,7 @@ struct ChatView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(pending.name)
                             .font(AIATheme.Font.subhead.weight(.semibold))
-                            .foregroundStyle(AIATheme.ink)
+                            .foregroundStyle(.primary)
                         Text("\(pending.meal) · \(pending.portion)")
                             .font(AIATheme.Font.micro)
                             .foregroundStyle(AIATheme.muted)
@@ -501,7 +576,7 @@ struct ChatView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 1) {
                     Text(formatValue(value))
                         .font(AIATheme.Font.callout.weight(.semibold))
-                        .foregroundStyle(AIATheme.ink)
+                        .foregroundStyle(.primary)
                     Text(unit)
                         .font(AIATheme.Font.caption)
                         .foregroundStyle(AIATheme.sub)
@@ -580,44 +655,109 @@ struct ChatView: View {
                 .frame(width: 32, height: 32)
                 .clipShape(Circle())
                 .overlay(Circle().stroke(AIATheme.hairline, lineWidth: 0.5))
-            messageBubble(text: text, isUser: false)
+            messageBubble(message: nil, text: text, isUser: false)
             Spacer(minLength: 28)
         }
         .transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .bottom)),
                                  removal: .opacity))
     }
 
-    private func messageBubble(text: String, isUser: Bool) -> some View {
+    /// 普通消息气泡。`message == nil` 时用于顶部招呼（无长按菜单/不进多选）。
+    @ViewBuilder
+    private func messageBubble(message: ChatMessage? = nil, text: String = "", isUser: Bool = false) -> some View {
+        let displayText = message?.text ?? text
+        let userSide = message.map { $0.role == .user } ?? isUser
+        let isSelected = message.map { selectedMessageIDs.contains($0.persistentModelID) } ?? false
+        let showSelection = messageMultiSelectMode && message != nil
+
         HStack {
-            if isUser { Spacer(minLength: 28) }
-            Text(text)
-                .font(.system(size: 13.3))
-                .foregroundStyle(isUser ? .white : .primary)
-                .textSelection(.enabled)
-                .padding(10)
-                .background(isUser ? AIATheme.blue : AIATheme.billBG)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .contextMenu {
+            if userSide { Spacer(minLength: 28) }
+
+            ZStack(alignment: .topTrailing) {
+                Text(displayText)
+                    .font(.system(size: 13.3))
+                    .foregroundStyle(userSide ? .white : .primary)
+                    .textSelection(.enabled)
+                    .padding(10)
+                    .background(userSide ? AIATheme.blue : AIATheme.billBG)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .opacity(showSelection && !isSelected ? 0.4 : 1.0)
+
+                if showSelection {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle.fill")
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(isSelected ? Color.green : Color.black.opacity(0.5), Color.white)
+                        .font(.system(size: 18))
+                        .offset(x: 8, y: -8)
+                }
+            }
+            .contentShape(Rectangle())
+            .contextMenu {
+                // 多选模式不再弹出菜单；非多选且有 message 时才显示 复制/删除/选择
+                if let m = message, !messageMultiSelectMode {
                     Button {
-                        UIPasteboard.general.string = text
+                        UIPasteboard.general.string = displayText
                     } label: {
                         Label("复制", systemImage: "doc.on.doc")
                     }
+                    Button(role: .destructive) {
+                        SafeDelete.chatMessage(m, in: context)
+                    } label: {
+                        Label("删除", systemImage: "trash")
+                    }
+                    Button {
+                        enterMessageMultiSelect(m.persistentModelID)
+                    } label: {
+                        Label("选择", systemImage: "checkmark.circle")
+                    }
                 }
-            if !isUser { Spacer(minLength: 28) }
+            }
+            .onTapGesture {
+                if showSelection {
+                    toggleMessageSelection(message!.persistentModelID)
+                }
+            }
+
+            if !userSide { Spacer(minLength: 28) }
         }
         .transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .bottom)),
                                  removal: .opacity))
     }
 
-    /// 基于用户的习惯/本地数据生成招呼文案。
-    /// 习惯来源：近 14 天饮食记录推算的常用早餐时段、今日待办、健康数据等。
-    /// 文案力求像朋友关心而非机器播报。
+    // MARK: - 消息多选三连
+    private func enterMessageMultiSelect(_ id: PersistentIdentifier) {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        messageMultiSelectMode = true
+        selectedMessageIDs.insert(id)
+    }
+
+    private func toggleMessageSelection(_ id: PersistentIdentifier) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        if selectedMessageIDs.contains(id) {
+            selectedMessageIDs.remove(id)
+            if selectedMessageIDs.isEmpty { messageMultiSelectMode = false }
+        } else {
+            selectedMessageIDs.insert(id)
+        }
+    }
+
+    private func deleteSelectedMessages() {
+        for id in selectedMessageIDs {
+            SafeDelete.chatMessageByID(id, in: context)
+        }
+        messageMultiSelectMode = false
+        selectedMessageIDs.removeAll()
+    }
+
+    /// 生成阿宝打招呼文案。
+    /// 格式：时段开头 + 固定自我介绍 + 入口感知专属内容。
+    /// 入口感知内容根据 entrySource 决定（food/health/bill/todo/home/兜底）。
     private func buildGreeting() -> String {
         let cal = Calendar.current
         let now = Date()
         let hour = cal.component(.hour, from: now)
 
+        // 1. 时段开头
         let opening: String
         switch hour {
         case 5..<11:  opening = "早上好呀"
@@ -627,43 +767,197 @@ struct ChatView: View {
         default:      opening = "这么晚还没休息呀"
         }
 
-        var sentences: [String] = []
-        sentences.append("\(opening)，我是阿宝～")
+        // 2. 固定自我介绍
+        let intro = "我是阿宝～你的私人AI助理。"
+        let ending = "文字、语音跟我说都行。"
 
-        // 习惯 1：近 14 天推算的常用早餐时段
-        let since = cal.date(byAdding: .day, value: -14, to: now) ?? now
-        let recentFoods = foods.filter { $0.date >= since }
-        let bfHours = recentFoods.filter { $0.meal == "早餐" }.map { cal.component(.hour, from: $0.date) }
-        let commonBF = bfHours.isEmpty ? nil : Int(round(Double(bfHours.reduce(0, +)) / Double(bfHours.count)))
-
-        let todayFoods = foods.filter { cal.isDateInToday($0.date) }
-        let todayBF = todayFoods.first { $0.meal == "早餐" }
-
-        if let commonBF, hour >= commonBF, todayBF == nil {
-            sentences.append("平时你差不多 \(commonBF) 点就吃过早餐了，今天还没见你记呢，记得吃点好的哦。")
-        } else if let todayBF {
-            sentences.append("早餐的「\(todayBF.name)」我已经帮你记好啦，开启元气满满的一天。")
+        // 3. 入口感知专属内容
+        let personalContent: String
+        switch entrySource {
+        case "food":
+            personalContent = entryGreeting_food(hour: hour) + ending
+        case "health":
+            personalContent = entryGreeting_health() + ending
+        case "bill":
+            personalContent = entryGreeting_bill() + ending
+        case "todo":
+            personalContent = entryGreeting_todo() + ending
+        case "home":
+            let idx = Int.random(in: 0..<4)
+            switch idx {
+            case 0: personalContent = entryGreeting_food(hour: hour) + ending
+            case 1: personalContent = entryGreeting_health() + ending
+            case 2: personalContent = entryGreeting_bill() + ending
+            default: personalContent = entryGreeting_todo() + ending
+            }
+        default:
+            // voice / todoReminder / 其他 → 兜底
+            personalContent = "\n我目前最擅长帮你记饮食、账单、待办和看健康数据，比如：\n· 「早餐吃了50克鸡蛋」\n· 「记一笔星巴克35」\n· 「晚上8点提醒我开会」\n语音、文字跟我说都行，剩下的我帮你做。"
         }
 
-        // 习惯 2：今日待办（只引用「今天到期且未完成且还没过期」的待办，避免拿过期待办当示例）
+        return "\(opening)。\(intro)\(personalContent)"
+    }
+
+    // MARK: - 入口感知模板
+
+    /// 饮食入口模板（根据时间推荐餐次）
+    private func entryGreeting_food(hour: Int) -> String {
+        let mealHint: String
+        switch hour {
+        case 5..<10:  mealHint = "早餐"
+        case 10..<14: mealHint = "午餐"
+        case 14..<17: mealHint = "下午"
+        default:      mealHint = "晚餐"
+        }
+        let pool = [
+            "最近吃了什么好吃的？跟我说说，我帮你记录。比如：「\(mealHint)吃了2个鸡蛋」。",
+            "今天有吃东西吗？告诉我，我来帮你记。比如：「\(mealHint)吃了一份鸡胸肉沙拉」。",
+            "来记一下今天的美食吧？直接跟我说就行。比如：「\(mealHint)吃了一条清蒸鲈鱼」。",
+            "有吃什么好东西吗？告诉我，我帮你记下来。比如：「\(mealHint)喝了一杯拿铁咖啡」。",
+            "要不要记一记今天的饮食？跟我说说。比如：「\(mealHint)吃了一碗牛肉面」。",
+            "今天吃了啥？直接说给我，我帮你记录营养。比如：「\(mealHint)吃了一个苹果」。",
+        ]
+        return pool.randomElement() ?? pool[0]
+    }
+
+    /// 健康入口模板
+    private func entryGreeting_health() -> String {
+        let pool = [
+            "想知道今天的运动量吗？可以直接问我「今天走了多少步」。查历史数据也行，比如「这周消耗了多少卡路里」。",
+            "想看看你的健康趋势吗？试试跟我说「查一下最近7天的步数」。",
+            "运动数据我来帮你查，你可以跟我说「今天消耗了多少能量」，或者「看看我的身体指标」。",
+            "健康数据随时可查，问问我就行。比如：「我最近的心率怎么样」「这周的活动量如何」。",
+            "想要了解你的身体指标吗？直接跟我说，比如「今天走了多少步」「本周的运动数据」。",
+            "健康信息一键查，跟我说「我的步数」「今天消耗多少」就行。",
+        ]
+        return pool.randomElement() ?? pool[0]
+    }
+
+    /// 账单入口模板
+    private func entryGreeting_bill() -> String {
+        let pool = [
+            "今天有记账吗？告诉我，我帮你记。比如：「记一笔星巴克35」。",
+            "有花钱吗？说给我听，我帮你归类记录。比如：「晚饭吃了85元」。",
+            "要记账的话直接告诉我，我按类别自动归类。比如：「买一本书花了50」。",
+            "最近有消费吗？说给我就行。比如：「工资发了5000元」。",
+            "记账很简单，直接说。比如：「买了件衣服花了299」「中午吃饭花了35」。",
+            "今天花了多少钱？跟我说说，我帮你记下来。比如：「打车花了25块」。",
+        ]
+        return pool.randomElement() ?? pool[0]
+    }
+
+    /// 待办入口模板
+    private func entryGreeting_todo() -> String {
+        let pool = [
+            "有什么需要提醒的吗？直接说，我帮你记并到点提醒。比如：「晚上8点提醒我开会」。",
+            "有新的待办吗？跟我说说，我设置好截止时间。比如：「明天早上10点提醒我交报告」。",
+            "想新增提醒吗？直接告诉我任务和时间。比如：「1小时后提醒我吃药」。",
+            "要设个待办提醒吗？告诉我时间和内容就行。比如：「后天下午3点提醒我去健身房」。",
+            "有什么事情怕忘记的吗？交给我记住。比如：「下午2点提醒我打电话给客户」。",
+            "新建待办很方便，跟我说就行。比如：「周五提醒我提交周报」。",
+        ]
+        return pool.randomElement() ?? pool[0]
+    }
+
+    /// 招呼专用上下文：比 buildContext() 精简得多（只喂给 LLM 与招呼相关的字段，省 token 也避免模型分心）。
+    /// 字段命名兼容中文（便于模型直接读懂）：时间 / 今日饮食 / 今日账单 / 今日待办 / 步数 / 最新健康指标等。
+    private func buildGreetingContext() -> [String: Any] {
+        let cal = Calendar.current
+        let now = Date()
+        let hour = cal.component(.hour, from: now)
+
+        // 今日已记饮食（精简字段）
+        let todayFoods = foods.filter { cal.isDateInToday($0.date) }
+        let todayFoodsCompact: [[String: Any]] = todayFoods.map { f in
+            [
+                "meal": f.meal,
+                "name": f.name,
+                "calories": f.calories,
+                "portion": f.portion,
+            ]
+        }
+
+        // 近 14 天早餐时段众数（用于「你平时差不多 X 点就吃早餐」式开场）
+        let since = cal.date(byAdding: .day, value: -14, to: now) ?? now
+        let bfHours = foods.filter { $0.date >= since && $0.meal == "早餐" }.map { cal.component(.hour, from: $0.date) }
+        let commonBF: Int? = bfHours.isEmpty ? nil : Int(round(Double(bfHours.reduce(0, +)) / Double(bfHours.count)))
+
+        // 今日待办（仅 today + 未完成 + 未过期）
         let upcomingToday = reminders.filter { r in
             guard let due = r.due else { return false }
             return cal.isDateInToday(due) && !r.done && due >= now
         }
-        if let next = upcomingToday.min(by: { $0.due! < $1.due! }) {
-            sentences.append("对了，你今天还有 \(upcomingToday.count) 件事没做，像「\(next.title)」这种，需要我到点提醒你吗？")
+        // 重要：所有传给云端 LLM 的时间戳必须用本地时区（带 +HH:MM 偏移），
+        // 否则默认 ISO8601DateFormatter() 是 UTC（Z），本地 11:45 会变成 03:45Z 被 LLM 误读为「凌晨 3 点」。
+        let fmt = ISO8601DateFormatter()
+        fmt.timeZone = .current
+        let upcomingCompact: [[String: Any]] = upcomingToday.prefix(3).map { r in
+            [
+                "title": r.title,
+                "priority": r.priority,
+                "due": fmt.string(from: r.due ?? now),
+            ]
         }
 
-        // 习惯 3：健康步数（仅在已授权读到时展示）
+        // 【D】今日账单概况
+        let todayBills = bills.filter { cal.isDateInToday($0.time) && !$0.syncDeleted }
+        var todayBillSummary: [String: Any]?
+        if todayBills.count > 0 {
+            let expense = todayBills.filter { !$0.isIncome }.reduce(0) { $0 + $1.amount }
+            let income = todayBills.filter { $0.isIncome }.reduce(0) { $0 + $1.amount }
+            let top = todayBills.filter { !$0.isIncome }.sorted { $0.amount > $1.amount }.prefix(3)
+            todayBillSummary = [
+                "count": todayBills.count,
+                "totalExpense": expense,
+                "totalIncome": income,
+                "topExpenses": top.map { ["merchant": $0.merchant, "amount": $0.amount, "category": $0.category] },
+            ]
+        }
+
+        // 【D】最新健康指标
+        var latestMetric: [String: Any]?
+        if let lh = healths.first {
+            latestMetric = ["metric": lh.metric, "value": lh.value, "unit": lh.unit ?? ""]
+        }
+
+        var ctx: [String: Any] = [
+            "currentHour": hour,
+            "currentTime": DateFormatter.localizedString(from: now, dateStyle: .none, timeStyle: .short),
+            "todayFoods": todayFoodsCompact,
+            "commonBreakfastHour": commonBF as Any,
+            "upcomingTodayCount": upcomingToday.count,
+            "upcomingToday": upcomingCompact,
+            "totalFoods": foods.count,
+            "totalReminders": reminders.count,
+            "entrySource": entrySource,                  // 🆕 入口来源
+        ]
+        if let bs = todayBillSummary { ctx["todayBillSummary"] = bs }  // 🆕
+        if let lm = latestMetric { ctx["latestHealthMetric"] = lm }    // 🆕
         if health.stepsToday > 0 {
-            sentences.append("今天已经走了 \(health.stepsToday) 步，动得不错，继续保持呀～")
+            ctx["stepsToday"] = health.stepsToday
         }
+        return ctx
+    }
 
-        if sentences.count == 1 {
-            sentences.append("今天想记录点什么，或者随便聊两句，都可以随时叫我。")
+    /// 后台调云端 LLM 重写招呼：成功且非空 → 替换气泡；失败/空/超时 → 保留本地版本。
+    /// - 用 Task 而非 fire-and-forget Task.detached，便于 .onDisappear 时取消。
+    /// - 用户已开启 greetingLLM + 已登录（让云端能用真实 userId）。
+    private func startGreetingLLMTask(initial: String) {
+        greetingTask?.cancel()
+        guard greetingLLM, UserDefaults.standard.bool(forKey: "aia.isLoggedIn") else { return }
+        let userId = UserDefaults.standard.string(forKey: "aia.userId") ?? ""
+        let ctx = buildGreetingContext()
+        greetingTask = Task { @MainActor in
+            let result = try? await RecognizeService.agentChatGreeting(context: ctx, userId: userId)
+            // 任务被取消或返回空 → 保留本地招呼（initial）
+            if Task.isCancelled { return }
+            guard let r = result, !r.isEmpty, r != initial else { return }
+            // 长度防御：LLM 可能输出过长，截断避免气泡过高
+            let trimmed = r.count > 120 ? String(r.prefix(120)) + "…" : r
+            if let g = greetingMessage {
+                greetingMessage = ChatMessage(role: g.role, text: trimmed, createdAt: g.createdAt)
+            }
         }
-
-        return sentences.joined(separator: " ")
     }
 
     private func chip(_ title: String, @ViewBuilder destination: () -> some View) -> some View {
@@ -879,9 +1173,18 @@ struct ChatView: View {
             if upcoming.isEmpty {
                 return "目前没有还没做的待办，可以放松一下～有新的事随时跟我说，我帮你记着并到点提醒。"
             }
-            let list = upcoming.prefix(3).map { "· \($0.title)" }.joined(separator: "\n")
+            // 每条前加「M月d日 HH:mm」+ 标题；今天不重复日期，明日/未来显示「明天 M月d日 HH:mm」「M月d日 HH:mm」。
+            let list = upcoming.prefix(3).map { r -> String in
+                let title = r.title
+                guard let due = r.due else { return "· \(title)" }
+                let prefix: String
+                if cal.isDateInToday(due) { prefix = "今天 \(AppFormat.time.string(from: due))" }
+                else if cal.isDateInTomorrow(due) { prefix = "明天 \(AppFormat.dateTime.string(from: due))" }
+                else { prefix = AppFormat.dateTime.string(from: due) }
+                return "· \(prefix) · \(title)"
+            }.joined(separator: "\n")
             let more = upcoming.count > 3 ? "\n…还有 \(upcoming.count - 3) 件" : ""
-            return "你还有 \(upcoming.count) 件事没做：\n\(list)\(more)\n需要我到点提醒你吗？"
+            return "你还有 \(upcoming.count) 件事没做：\n\(list)\(more)\n到点了会自动提醒你，放心～"
         }
 
         // 健康 / 步数
@@ -973,8 +1276,11 @@ struct ChatView: View {
     // MARK: - 聊天记账防重复
     /// 短时间内重复发送同一句话，不重复入库（防止反复测试 / 误点产生重复记录）。
     /// 仅覆盖本次运行会话内的本地记账路径（账单 / 饮食 / 待办）；图片路径另有 aHash 指纹去重。
+    /// 窗口由 24h 改为 30s：原 24h 太激进，正常用户删后重建会一直被误判为重复；
+    /// 30s 已足够防误连点/网络重试，又不会拦"删了再记"的正常操作。
+    /// 删除记录时务必同步调 `clearDedupKey`，否则上一笔被删后立刻重建仍会被去重。
     private static var recentCreations: [(key: String, at: Date)] = []
-    private static let dedupWindow: TimeInterval = 86400 // 24 小时（原 3 分钟，但用户测试间隔可能更长）
+    private static let dedupWindow: TimeInterval = 30
 
     /// 计算去重键：去掉金额与记账 / 提醒动词、语气助词后，保留餐次 / 内容词。
     /// 不同餐次（如「晚餐」vs「午餐」）键不同，不会互相误判；同一句话重复发送则键相同。
@@ -1000,6 +1306,15 @@ struct ChatView: View {
         return false
     }
 
+    /// 删除/撤销某条记录时清理对应的 dedup key，避免「删了再记同一笔」被误判为重复。
+    /// 同时清理所有 type 的同内容键（防食物/账单互吞）。
+    static func clearDedupKey(_ text: String, type: String? = nil) {
+        let key = chatDedupKey(text, type: type ?? "")
+        recentCreations.removeAll { entry in
+            entry.key == key || (type != nil && entry.key == chatDedupKey(text, type: ""))
+        }
+    }
+
     /// 本地记账（DB 优先、AI 兜底）：解析「记一笔星巴克35」「付了美团28」这类明确账单意图，
     /// 商户分类优先查本地 MerchantMeta 经验库，命中即复用、不调 AI；未命中给"其他"。
     /// 触发条件：① 含明确记账动词（记一笔/花了/付了…）且含金额；② 含食物词且含「金额+货币单位」（如「午饭吃了碗牛肉面32块」）。
@@ -1008,6 +1323,16 @@ struct ChatView: View {
         let lower = text.lowercased()
         // 必须先有金额，否则不是本地可解析的账单（纯饮食/问句等交给其它分支）
         guard let amount = extractAmount(text) else { return nil }
+
+        // 先判 update 意图（如「把星巴克的账单改成40元」），命中走 update 路径，
+        // 避免错误地再建一笔而不是修改原账单。
+        if ChatView.hasExplicitUpdateIntent(lower) {
+            if let upd = updateBillLocally(from: text, newAmount: amount) {
+                return upd
+            }
+            // 找不到目标（没有同名账单） → 回退为新建，但先清洗掉「把字句 + 改成」噪声，
+            // 防止 merchant 被污染成"把星巴克改成"等。
+        }
 
         let incomeKeywords = ["工资","薪资","薪水","收入","报销","退款","返现","奖金","分红","利息","红包","补贴","收款","进账","提成","劳务费","兼职"]
         // 本地建账单的触发条件：
@@ -1038,20 +1363,27 @@ struct ChatView: View {
         // 去掉金额（支持千分位逗号/中文逗号）及可选货币单位
         merchant = merchant.replacingOccurrences(of: #"\d{1,3}(?:[,\，]\d{3})+(?:\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?|\d+(?:\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?"#,
                                                  with: "", options: .regularExpression)
+        // 清掉残留的货币符号（¥40 这类符号在金额前，上面的正则清不掉，必须单独删）
+        merchant = merchant.replacingOccurrences(of: #"[¥￥\$]"#, with: "", options: .regularExpression)
         for kw in billKw { merchant = merchant.replacingOccurrences(of: kw, with: "") }
-        // 多字词（时间/餐次/饮食动词/食物量词）用分组 Alternation；务必放在单字语气助词之前或与之并列
-        merchant = merchant.replacingOccurrences(of: #"(今晚|今天|明天|早上|上午|中午|下午|晚上|刚才|早饭|午饭|晚饭|早餐|午餐|晚餐|夜宵|加餐|零食|宵夜|吃了|喝了|喝|吃|买|碗|杯|个|盘|份|根|片|串|块|勺)"#,
+        // 把字句噪声（用户说「把 X 改成/改为/变成/调成/调为 Y」时，「把」「改成」等不应进商户名）。
+        let baWords = ["改成", "改为", "变成", "调成", "调为", "调整为", "改成", "设为", "设置为"]
+        for kw in baWords { merchant = merchant.replacingOccurrences(of: kw, with: "") }
+        // 多字词（时间/饮食动词/食物量词）用分组 Alternation；务必放在单字语气助词之前或与之并列
+        // 注意：**餐次词（早餐/午餐/...）不再 strip**，因为「记一笔早餐 10 元」用户可能就是只给了餐次，
+        // 把餐次 strip 掉会落空→ fallback 到「其他消费」是错 UX；餐次本身可作商户+归餐饮。
+        merchant = merchant.replacingOccurrences(of: #"(今晚|今天|明天|早上|上午|中午|下午|晚上|刚才|吃了|喝了|喝|吃|买|碗|杯|个|盘|份|根|片|串|块|勺)"#,
                                                  with: "", options: .regularExpression)
-        // 单字语气助词
-        merchant = merchant.replacingOccurrences(of: #"[的了在给和去个吧啊呢哦嘛]"#,
+        // 单字语气助词 + 把字句的「把」字
+        merchant = merchant.replacingOccurrences(of: #"[的了在给和去个吧啊呢哦嘛把]"#,
                                                  with: "", options: .regularExpression)
         // 去掉残留的数字与标点，得到干净商户名
         merchant = merchant.replacingOccurrences(of: #"[\d,\.，。、\s]+"#,
                                                  with: "", options: .regularExpression)
         merchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
-        // 清洗后若仍为纯餐次/时间词（非真实商户），回退到"其他消费"
-        let nonMerchantWords: Set<String> = ["晚餐", "早餐", "午饭", "午餐", "夜宵", "加餐", "零食", "宵夜", "饭", "餐"]
-        if merchant.isEmpty || nonMerchantWords.contains(merchant) { merchant = "其他消费" }
+        // 清洗后若为空，回退到"其他消费"；**餐次词（早餐/午餐/夜宵/...）保留作为商户**，
+        // 下方 category 流程会用 mealCategoryHint 把它归到「餐饮」。
+        if merchant.isEmpty { merchant = "其他消费" }
 
         // 收入关键词识别（工资/报销/退款等），本地记账场景云端常漏判为支出；
         // incomeKeywords 已在函数开头定义并用于触发条件。
@@ -1085,13 +1417,61 @@ struct ChatView: View {
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
         let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
         let icon = isIncome ? "💰" : "🧾"
-        return "\(opener)：\(icon) 已添加\(isIncome ? "收入" : "支出")「\(merchant)」¥\(String(format: "%.2f", amount))"
+        return "\(opener)：\(icon) 已添加\(isIncome ? "收入" : "支出")「\(merchant)」\(String(format: "%.2f", amount))"
+    }
+
+    /// 本地修改账单金额（处理「把星巴克的账单改成40元」「改一下：星巴克→40」）。
+    /// 命中已有账单：直接改 amount；找不到目标返回 nil（外层会回退为新建）。
+    private func updateBillLocally(from text: String, newAmount: Double) -> String? {
+        // 从文本中抽出「目标商户名」（去掉把字句、改成动词、金额、记账词等噪声）
+        var target = text
+        let noise = ["改成", "改为", "变成", "调成", "调为", "调整为", "设为", "设置为",
+                     "记一笔", "记账", "花了", "花掉", "付了", "付给", "买了", "消费", "支出", "账单", "花销", "开销", "扫码付",
+                     "帮我", "给我", "把", "一下", "改"]
+        for kw in noise { target = target.replacingOccurrences(of: kw, with: "") }
+        // 去金额
+        target = target.replacingOccurrences(of: #"\d{1,3}(?:[,\，]\d{3})+(?:\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?|\d+(?:\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?"#,
+                                             with: "", options: .regularExpression)
+        // 清掉残留的货币符号（¥40 这类符号在金额前，上面的正则清不掉）
+        target = target.replacingOccurrences(of: #"[¥￥\$]"#, with: "", options: .regularExpression)
+        // 去掉语气助词/数字/标点
+        target = target.replacingOccurrences(of: #"[的了在给和去个吧啊呢哦嘛把\s,\.，。、\d]+"#,
+                                             with: "", options: .regularExpression)
+        target = target.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 找到目标账单（找不到返回 nil，让外层回退为新建）
+        guard let bill = target.isEmpty ? nil : findBillTarget(targetTitle: target, fallbackToLatest: true)
+        else { return nil }
+
+        let oldAmount = bill.amount
+        bill.amount = newAmount
+        bill.syncUpdatedAt = Date()
+        try? context.save()
+        ChatView.clearDedupKey("\(bill.merchant)\(String(format: "%.2f", oldAmount))", type: "bill")
+        ChatView.clearDedupKey("\(bill.merchant)\(String(format: "%.2f", newAmount))", type: "bill")
+        CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
+        return "\(opener)：🔄 已把「\(bill.merchant)」从 ¥\(String(format: "%.2f", oldAmount)) 改成 ¥\(String(format: "%.2f", newAmount))"
     }
 
     /// 本地创建饮食：食物类文本优先从本地营养库（硬编码 + 用户缓存）估算热量，
     /// 命中即直接建记录，无需等云端返回。未命中返回 nil，由外层走云端识别。
     /// 仅处理「早餐吃了一碗燕麦粥」这类明确饮食意图；有更新/删除/完成意图时返回 nil 交给云端。
-    private func createFoodLocally(from text: String) -> String? {
+    /// 云端查询超时辅助：最多等 12s，超时/失败返回 nil。
+    private static func queryFoodOrNil(_ name: String) async -> FoodRef? {
+        let task = Task<FoodRef?, Error> {
+            try await RecognizeService.queryFood(name: name)
+        }
+        let timeoutTask = Task<Void, Error> {
+            try await Task.sleep(nanoseconds: 12_000_000_000)
+            task.cancel()
+        }
+        let result = try? await task.value
+        timeoutTask.cancel()
+        return result
+    }
+
+    private func createFoodLocally(from text: String) async -> String? {
         if ChatView.hasExplicitUpdateIntent(text) ||
            ChatView.hasExplicitDeleteIntent(text) ||
            ChatView.hasExplicitCompleteIntent(text) {
@@ -1108,14 +1488,15 @@ struct ChatView: View {
             return nil
         }
 
-        // 所有项必须都能本地命中才走本地直存；任一缺营养就交给云端查询路径。
         var entries: [FoodEntry] = []
         var summaries: [String] = []
         var totalCal: Double = 0
         let foodIcon = ["🍽", "🍜", "🍚", "🥗", "😋", "🍱"].randomElement() ?? "🍽"
 
+        var missingNutrition: [String] = []
+        var cloudFilled: [String] = []
         for (name, weight, portion) in items {
-            let ref: FoodRef
+            var ref: FoodRef?
             if let builtin = NutritionLibrary.shared.match(name) {
                 ref = builtin
             } else if let meta = FoodMetaStore.lookup(name, in: context) {
@@ -1123,29 +1504,41 @@ struct ChatView: View {
                               kcal: meta.kcal, protein: meta.protein, carbs: meta.carbs, fat: meta.fat,
                               fiber: meta.fiber, sugar: meta.sugar, sodium: meta.sodium)
             } else {
-                return nil
+                // 本地库无 → 尝试云端查询营养（带超时，失败降级 0 占位）
+                if let cloudRef = await Self.queryFoodOrNil(name) {
+                    // 云端结果存本地经验库，下次同名菜本地直出
+                    FoodMetaStore.upsert(name: name, displayName: cloudRef.name,
+                                         kcal: cloudRef.kcal, protein: cloudRef.protein,
+                                         carbs: cloudRef.carbs, fat: cloudRef.fat,
+                                         source: "cloud", in: context)
+                    ref = cloudRef
+                    cloudFilled.append(name)
+                } else {
+                    ref = nil
+                    missingNutrition.append(name)
+                }
             }
 
             let ratio = weight / 100.0
-            let cal = ref.kcal * ratio
-            let protein = ref.protein * ratio
-            let carbs = ref.carbs * ratio
-            let fat = ref.fat * ratio
-            let fiber = ref.fiber * ratio
-            let sugar = ref.sugar * ratio
-            let sodium = ref.sodium * ratio
+            let cal = (ref?.kcal ?? 0) * ratio
+            let protein = (ref?.protein ?? 0) * ratio
+            let carbs = (ref?.carbs ?? 0) * ratio
+            let fat = (ref?.fat ?? 0) * ratio
+            let fiber = (ref?.fiber ?? 0) * ratio
+            let sugar = (ref?.sugar ?? 0) * ratio
+            let sodium = (ref?.sodium ?? 0) * ratio
 
             let entry = FoodEntry(name: name, calories: cal, protein: protein, carbs: carbs, fat: fat,
                                   fiber: fiber, sugar: sugar, sodium: sodium,
                                   portion: portion, meal: meal,
                                   weightGram: weight,
-                                  baseCalories: ref.kcal,
-                                  baseProtein: ref.protein,
-                                  baseCarbs: ref.carbs,
-                                  baseFat: ref.fat,
-                                  baseFiber: ref.fiber,
-                                  baseSugar: ref.sugar,
-                                  baseSodium: ref.sodium,
+                                  baseCalories: ref?.kcal,
+                                  baseProtein: ref?.protein,
+                                  baseCarbs: ref?.carbs,
+                                  baseFat: ref?.fat,
+                                  baseFiber: ref?.fiber,
+                                  baseSugar: ref?.sugar,
+                                  baseSodium: ref?.sodium,
                                   imageName: nil)
             entries.append(entry)
             totalCal += cal
@@ -1153,7 +1546,15 @@ struct ChatView: View {
             // 用「·」串联避免挤在一行；macro 值保留 1 位小数（钠 0 位），0 值也显示以让用户看到全貌
             let macros = String(format: "蛋白 %.1fg · 碳水 %.1fg · 脂肪 %.1fg · 纤维 %.1fg · 糖 %.1fg · 钠 %.0fmg",
                                 protein, carbs, fat, fiber, sugar, sodium)
-            summaries.append("\(foodIcon) \(meal)「\(name)」\(Int(cal)) kcal（\(portion)）\n  \(macros)")
+            let pendingTag: String
+            if ref == nil {
+                pendingTag = "（热量待补全）"
+            } else if cloudFilled.contains(name) {
+                pendingTag = "（云端查营养）"
+            } else {
+                pendingTag = ""
+            }
+            summaries.append("\(foodIcon) \(meal)「\(name)」\(Int(cal)) kcal（\(portion)）\(pendingTag)\n  \(macros)")
         }
 
         // 防重复：以整句话做 key（短期窗口）
@@ -1172,17 +1573,22 @@ struct ChatView: View {
         HealthManager.shared.saveCaloriesConsumed(totalCal, date: .now)
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
         let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
-        let disclaimer = "\n\n结果仅供参考，如需修改可到\"饮食记录\"页面进行修改。"
+        var disclaimer = "\n\n结果仅供参考，如需修改可到\"饮食记录\"页面进行修改。"
+        if !cloudFilled.isEmpty {
+            disclaimer = "\n（「\(cloudFilled.joined(separator: "、"))」已通过云端查询到营养并记下，同时存到了本地食物库）" + disclaimer
+        } else if !missingNutrition.isEmpty {
+            disclaimer = "\n（「\(missingNutrition.joined(separator: "、"))」本地与云端暂未收录营养，已先按 0 占位记下，到「饮食记录」补全即可）" + disclaimer
+        }
         return summaries.count == 1
             ? "\(opener)：\(summaries[0])" + disclaimer
             : "\(opener)：\n" + summaries.joined(separator: "\n") + disclaimer
     }
 
     /// 用户回复了重量后，组合成完整的食物文本再走正常创建流程。
-    private func createFoodWithWeight(name: String, text: String, meal: String) -> String {
+    private func createFoodWithWeight(name: String, text: String, meal: String) async -> String {
         // 构建合成文本让 createFoodLocally 复用同一套解析逻辑
         let syntheticText = "\(meal)吃了\(text)\(name)"
-        if let result = createFoodLocally(from: syntheticText) {
+        if let result = await createFoodLocally(from: syntheticText) {
             return result
         }
         // 兜底：即使合成文本也解析失败，至少记下食物名（让用户知道已处理）
@@ -2063,110 +2469,44 @@ struct ChatView: View {
             do {
                 let recentMessages = buildRecentMessages(limit: 5)
                 let responseText: String
-                if isQuestionLike(t) {
-                    let dataContext = buildContext()
-                    let reply = agentEnabled
-                        ? try await RecognizeService.agentChat(text: t, context: dataContext, userId: agentUserId)
-                        : try await RecognizeService.chat(text: t, context: dataContext)
-                    responseText = reply.isEmpty ? localReply(for: t) : reply
+                // —— 本地优先：所有结构化指令（记账/记饮食/待办/饮水/食物查询）先走本地，零云端调用 ——
+                if let local = await resolveLocally(t, recentMessages: recentMessages) {
+                    responseText = local
                 } else {
-                    // 1. 待办意图优先：含「提醒/待办/记得/叫」等明确动词时直接本地建待办，
-                    //    避免「晚上提醒我吃饭」被食物分支误吞。
-                    if let localTodo = createTodoLocally(from: t) {
-                        responseText = localTodo
-                    }
-                    // 2. 本地能解析的明确账单意图（如「记一笔星巴克35」「付了美团28」）直接本地建，复用 MerchantMeta 分类，跳过 AI。
-                    else if let localBill = createBillLocally(from: t) {
-                        // 账单已创建；若该文本同时含食物意图（如「晚餐吃了汉堡花了10元」），
-                        // 本地营养库命中则直接建饮食；未命中则先记账单，再异步联网查营养并以确认卡片形式让用户确认入库。
-                        if hasRawFoodIntent(t) {
-                            if let localFood = createFoodLocally(from: t) {
-                                responseText = localBill + "\n" + stripOpener(localFood)
-                            } else {
-                                responseText = localBill
-                                // 异步联网查营养，成功后发送聊天气泡内确认卡片（用户点确认才写入饮食库）
-                                Task { @MainActor in
-                                    await sendFoodConfirmCard(text: t)
-                                }
+                    // —— 仅本地兜不住才走云端 LLM ——
+                    let dataContext = buildContext()
+                    let agentReply = agentEnabled
+                        ? try? await RecognizeService.agentChat(text: t, context: dataContext, userId: agentUserId)
+                        : try? await RecognizeService.chat(text: t, context: dataContext)
+                    if let r = agentReply, !r.isEmpty {
+                        responseText = r
+                        if UserDefaults.standard.bool(forKey: "aia.isLoggedIn") {
+                            // Agent 可能在云端做了删除/修改/新建等动作（chat agent 是写权限的），
+                            // 这些变更只会落在云端，本地 SwiftData 不会自动同步——必须触发完整 sync
+                            // （push + pull + cleanupSyncedTombstones）才能让本地看到云端的删除/修改。
+                            // 否则会出现「阿宝说删了，但账单还在」的 UX 假象。
+                            Task { @MainActor in
+                                await CloudSyncManager.shared.sync(context: context)
                             }
-                        } else {
-                            responseText = localBill
-                        }
-                    }
-                    // 2.5. 饮水意图：含「喝+水/饮+水」+ 不含其他真实食物词时，直接走饮水路径（不查营养库、不走云端），
-                    //      避免「喝了 1 升水」被误识别为 food 然后去云端查「水」的营养失败被丢。
-                    else if let waterMsg = createWaterIntake(from: t) {
-                        responseText = waterMsg
-                    }
-                    // 2.6. 等待重量回复：之前有食物待补充重量（如用户说了「吃了苹果」没给重量）
-                    // 注意：pendingWeightFood 不在分支开头清空，失败时保留以便用户重试
-                    else if let pending = pendingWeightFood {
-                        // 取消意图
-                        let cancelWords = ["不吃了", "不要了", "算了", "不用了", "没吃", "取消"]
-                        if cancelWords.contains(t.trimmingCharacters(in: .whitespacesAndNewlines)) {
-                            pendingWeightFood = nil
-                            responseText = "好嘞，那就不记「\(pending.name)」啦～"
-                        }
-                        // 用户明确回复了重量 → 组合创建
-                        else if let (_, p) = ChatView.parseWeightOnly(t) {
-                            pendingWeightFood = nil  // 成功才清
-                            responseText = createFoodWithWeight(name: pending.name, text: p, meal: pending.meal)
-                        }
-                        // 用户说了一个新食物 → 替代 pending，走正常食物分支
-                        else if isFoodLike(t) {
-                            pendingWeightFood = nil
-                            if let localFood = createFoodLocally(from: t) {
-                                responseText = localFood
-                            } else if let newPending = self.pendingWeightFood {
-                                responseText = "你大概吃了多少\(newPending.name)呀？😊"
-                            } else {
-                                responseText = await createFoodFromCloud(text: t, recentMessages: recentMessages)
-                            }
-                        }
-                        // 什么都没解析到 → 不清 pending，让用户重试
-                        else {
-                            responseText = "没明白你说的，你大概吃了多少\(pending.name)呀？（比如\"两个\"或\"200克\"）😊"
-                        }
-                    }
-                    // 3. 食物意图：含「吃/喝/奶茶/咖啡/饭」等词，先尝试本地营养库估算，
-                    //    命中则直接创建记录；未命中且非 pending 再走云端查询，避免模型被上下文误导。
-                    else if isFoodLike(t) {
-                        if let localFood = createFoodLocally(from: t) {
-                            responseText = localFood
-                        } else if let pending = pendingWeightFood {
-                            // createFoodLocally 识别到食物但用户没给重量 → 追问
-                            responseText = "你大概吃了多少\(pending.name)呀？😊"
-                        } else {
-                            responseText = await createFoodFromCloud(text: t, recentMessages: recentMessages)
                         }
                     } else {
-                        // 4. 食物查询：用户只说食物名（如「苹果」「米饭」「牛肉的热量」），
-                        //    不记录，只回复每100克营养数据。本地命中最快，未命中则联网查并缓存。
-                        if let queryReply = await handleFoodQuery(t) {
-                            responseText = queryReply
+                        // 云端也失败：本地 resolveLocally 已处理过 todo/bill/water；
+                        // 此时只处理云端依赖的路径：createFoodFromCloud / parseText / localReply
+                        if isFoodLike(t) {
+                            responseText = await createFoodFromCloud(text: t, recentMessages: recentMessages)
                         } else {
-                            // 兜底：只有文本本身带有明确记录/创建意图，才走 parseText 保存记录；
-                            // 否则（如"好的好的""嗯嗯""知道了"）强制走 AI 聊天，避免被上下文污染导致重复创建。
                             let hasCreateIntent = ChatView.hasExplicitCreateIntent(t)
                             if hasCreateIntent {
                                 let (result, _) = try await RecognizeService.parseText(t, recentMessages: recentMessages)
                                 let summary = saveFromResult(result, originalText: t)
                                 if summary.isEmpty {
-                                    let dataContext = buildContext()
-                                    let reply = agentEnabled
-                            ? try await RecognizeService.agentChat(text: t, context: dataContext, userId: agentUserId)
-                            : try await RecognizeService.chat(text: t, context: dataContext)
-                                    responseText = reply.isEmpty ? localReply(for: t) : reply
+                                    responseText = localReply(for: t)
                                 } else {
                                     let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
                                     responseText = "\(opener)：\n" + summary.joined(separator: "\n")
                                 }
                             } else {
-                                let dataContext = buildContext()
-                                let reply = agentEnabled
-                            ? try await RecognizeService.agentChat(text: t, context: dataContext, userId: agentUserId)
-                            : try await RecognizeService.chat(text: t, context: dataContext)
-                                responseText = reply.isEmpty ? localReply(for: t) : reply
+                                responseText = localReply(for: t)
                             }
                         }
                     }
@@ -2184,14 +2524,225 @@ struct ChatView: View {
         }
     }
 
-    /// 简单判断是否为疑问句，疑问句优先走 AI 聊天而非记录意图。
-    private func isQuestionLike(_ text: String) -> Bool {
-        let t = text.trimmingCharacters(in: .whitespaces)
-        let questionMarks = ["?", "？"]
-        let questionWords = ["几点", "多少", "吗", "嘛", "呢", "怎么", "为什么", "什么", "如何", "好不", "行不", "能不能", "会吗", "好吗", "对吗", "谁", "哪位", "哪里", "哪", "请问", "几"]
-        if questionMarks.contains(where: { t.hasSuffix($0) }) { return true }
-        if questionWords.contains(where: { t.contains($0) }) { return true }
-        return false
+
+    // MARK: - 本地优先意图解析
+
+    /// 本地优先意图解析：纯本地（零云端调用），快速处理结构化指令。
+    /// 返回非空表示本地已处理完成；返回 nil 表示需走云端 LLM。
+    private func resolveLocally(_ t: String, recentMessages: [[String: String]]) async -> String? {
+        // 0. 端侧 LLM 意图分类（iOS 26+ 且可用时）：
+        //    用设备端 ~3B 小模型做快速意图分类，比纯正则更鲁棒。
+        //    端侧模型不可用时自动跳过，走下方正则链（与现有行为一致）。
+        if #available(iOS 26, *), LocalLLMClassifier.isAvailable {
+            if let llmIntent = await LocalLLMClassifier.classify(t) {
+                switch llmIntent {
+                case .chat, .unknown:
+                    // 端侧模型判定为闲聊/无法分类 → 直接交给云端，跳过整个本地链
+                    return nil
+                case .bill:
+                    if let bill = createBillLocally(from: t) {
+                        return bill
+                    }
+                case .food:
+                    if let food = await createFoodLocally(from: t) {
+                        return food
+                    }
+                case .todo:
+                    if let todo = createTodoLocally(from: t) {
+                        return todo
+                    }
+                case .water:
+                    if let water = createWaterIntake(from: t) {
+                        return water
+                    }
+                case .foodQuery:
+                    if let query = await handleFoodQuery(t) {
+                        return query
+                    }
+                }
+            }
+        }
+
+        // 0.5. 本地删除（针对"刚才/最近 + 删除" 类指令）：直接拿最近一条对应类型的本地记录删除。
+        //     解决 Phase 1 引入的回归：本地刚创建但还没推送云端时，云端 agent 找不到记录会幻觉"已删除"。
+        //     本地真删不会撒谎，且无网络往返、毫秒级。
+        if let deleted = resolveDeleteLocally(t) {
+            return deleted
+        }
+
+        // 1. 待办意图优先：含「提醒/待办/记得」等明确动词时直接本地建待办，
+        //    避免「晚上提醒我吃饭」被食物分支误吞。
+        if let localTodo = createTodoLocally(from: t) {
+            return localTodo
+        }
+
+        // 2. 本地能解析的明确账单意图（如「记一笔星巴克35」「付了美团28」）
+        //    直接本地建，复用 MerchantMeta 分类，跳过 AI。
+        if let localBill = createBillLocally(from: t) {
+            // 账单已创建；若该文本同时含食物意图，本地营养库命中则直接建饮食；
+            // 未命中则先记账单，再异步联网查营养并以确认卡片让用户确认入库。
+            if hasRawFoodIntent(t) {
+                if let localFood = await createFoodLocally(from: t) {
+                    return localBill + "\n" + stripOpener(localFood)
+                } else {
+                    Task { @MainActor in
+                        await sendFoodConfirmCard(text: t)
+                    }
+                    return localBill
+                }
+            }
+            return localBill
+        }
+
+        // 3. 饮水意图：含「喝+水/饮+水」+ 不含其他真实食物词时直接走饮水路径
+        if let waterMsg = createWaterIntake(from: t) {
+            return waterMsg
+        }
+
+        // 4. 等待重量回复：之前有食物待补充重量（如用户说了「吃了苹果」没给重量）
+        // 注意：pendingWeightFood 不在分支开头清空，失败时保留以便用户重试
+        if let pending = pendingWeightFood {
+            let cancelWords = ["不吃了", "不要了", "算了", "不用了", "没吃", "取消"]
+            if cancelWords.contains(t.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                pendingWeightFood = nil
+                return "好嘞，那就不记「\(pending.name)」啦～"
+            }
+            // 用户明确回复了重量 → 组合创建
+            if let (_, p) = ChatView.parseWeightOnly(t) {
+                pendingWeightFood = nil
+                return await createFoodWithWeight(name: pending.name, text: p, meal: pending.meal)
+            }
+            // 用户说了一个新食物 → 替代 pending，走正常食物分支
+            if isFoodLike(t) {
+                pendingWeightFood = nil
+                if let localFood = await createFoodLocally(from: t) {
+                    return localFood
+                }
+                // 本地也解析不了 → 交给云端 createFoodFromCloud
+                return nil
+            }
+            // 什么都没解析到 → 保留 pending，让用户重试
+            return "没明白你说的，你大概吃了多少\(pending.name)呀？（比如\"两个\"或\"200克\"）😊"
+        }
+
+        // 5. 食物意图：含「吃/喝/奶茶/咖啡/饭」等词，先尝试本地营养库估算
+        if isFoodLike(t) {
+            if let localFood = await createFoodLocally(from: t) {
+                return localFood
+            }
+            if let pending = pendingWeightFood {
+                // createFoodLocally 识别到食物但用户没给重量 → 追问
+                return "你大概吃了多少\(pending.name)呀？😊"
+            }
+            // 本地未命中 → 交给云端 createFoodFromCloud
+            return nil
+        }
+
+        // 6. 食物查询：用户只说食物名（如「苹果」「牛肉的热量」），不记录，只回复营养数据
+        if let queryReply = await handleFoodQuery(t) {
+            return queryReply
+        }
+
+        // 7. 本地确能回答的元意图（问候/身份），不包含「今天花了多少」等可能需上下文的数据查询
+        if let meta = replyForMetaIntent(t) {
+            return meta
+        }
+
+        // 本地兜不住 → 交给云端 LLM
+        return nil
+    }
+
+    // MARK: - 本地删除助手（针对"刚才/最近" 类指令）
+
+    /// 本地处理"刚才/最近 + 删除" 类指令：直接从本地 SwiftData 拿最近一条记录删除。
+    /// - 触发条件：含明确删除动词（删了/删掉/删除/去掉/撤销/撤回/取消）+ 明确指代（刚才/刚刚/最后/最近/上一笔/上一条/那条/那个）。
+    /// - 类型推断：用关键词猜；猜不到按 bill → food → reminder 顺序尝试。
+    private func resolveDeleteLocally(_ t: String) -> String? {
+        let lower = t.lowercased()
+        let deleteVerbs = ["删了", "删掉", "删除", "去掉", "撤销", "撤回", "取消"]
+        guard deleteVerbs.contains(where: { lower.contains($0) }) else { return nil }
+        let references = ["刚才", "刚刚", "最后", "最近", "上一笔", "上一条", "那条", "那个"]
+        guard references.contains(where: { lower.contains($0) }) else { return nil }
+
+        // 类型推断
+        let mentionsBill = ["账单", "那笔", "支出", "消费", "花了", "花掉", "付了", "买了"].contains { lower.contains($0) }
+        let mentionsFood = ["那餐", "那顿", "饮食", "食物", "吃的", "喝的"].contains { lower.contains($0) }
+        let mentionsTodo = ["待办", "提醒", "事项", "任务"].contains { lower.contains($0) }
+
+        // 按类型优先级查找（无明确类型时按可能性顺序：账单 > 食物 > 待办）
+        if mentionsBill {
+            if let r = deleteMostRecentBill() { return r }
+            if let r = deleteMostRecentFood() { return r }
+            if let r = deleteMostRecentReminder() { return r }
+        } else if mentionsFood {
+            if let r = deleteMostRecentFood() { return r }
+            if let r = deleteMostRecentBill() { return r }
+            if let r = deleteMostRecentReminder() { return r }
+        } else if mentionsTodo {
+            if let r = deleteMostRecentReminder() { return r }
+            if let r = deleteMostRecentBill() { return r }
+            if let r = deleteMostRecentFood() { return r }
+        } else {
+            if let r = deleteMostRecentBill() { return r }
+            if let r = deleteMostRecentFood() { return r }
+            if let r = deleteMostRecentReminder() { return r }
+        }
+        return nil
+    }
+
+    /// 取最近一条 Bill 删除（按 time 倒序）。返回删除成功的回复文案；找不到返回 nil。
+    private func deleteMostRecentBill() -> String? {
+        var desc = FetchDescriptor<Bill>(
+            predicate: #Predicate<Bill> { !$0.syncDeleted },
+            sortBy: [SortDescriptor(\.time, order: .reverse)]
+        )
+        desc.fetchLimit = 1
+        guard let bills = try? context.fetch(desc), let bill = bills.first else { return nil }
+        let label = bill.merchant.isEmpty ? "账单" : "「\(bill.merchant)」账单"
+        let amountStr = String(format: "%.2f", bill.amount)
+        // 同步清掉该账单对应的 dedup key（用最近一条用户文本无法直接定位，用「商户+金额」反查的 key）
+        ChatView.clearDedupKey("\(bill.merchant)\(amountStr)", type: "bill")
+        context.delete(bill)
+        try? context.save()
+        CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
+        return "\(opener)：🗑️ 已删除最近\(label)¥\(amountStr)"
+    }
+
+    /// 取最近一条 FoodEntry 删除（按 date 倒序，水也按此路径走——"喝水"也算"那餐"）。
+    private func deleteMostRecentFood() -> String? {
+        var desc = FetchDescriptor<FoodEntry>(
+            predicate: #Predicate<FoodEntry> { !$0.syncDeleted },
+            sortBy: [SortDescriptor(\.date, order: .reverse)]
+        )
+        desc.fetchLimit = 1
+        guard let foods = try? context.fetch(desc), let food = foods.first else { return nil }
+        let name = food.name.isEmpty ? "食物" : "「\(food.name)」"
+        ChatView.clearDedupKey(food.name, type: "food")
+        ChatView.clearDedupKey(food.name, type: "water")
+        context.delete(food)
+        try? context.save()
+        CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
+        return "\(opener)：🗑️ 已删除最近一餐\(name)"
+    }
+
+    /// 取最近一条 Reminder 删除（按 syncUpdatedAt 倒序，因 Reminder 没有 createdAt）。
+    private func deleteMostRecentReminder() -> String? {
+        var desc = FetchDescriptor<Reminder>(
+            predicate: #Predicate<Reminder> { !$0.syncDeleted },
+            sortBy: [SortDescriptor(\.syncUpdatedAt, order: .reverse)]
+        )
+        desc.fetchLimit = 1
+        guard let todos = try? context.fetch(desc), let todo = todos.first else { return nil }
+        let title = todo.title.isEmpty ? "提醒" : "「\(todo.title)」"
+        ChatView.clearDedupKey(todo.title, type: "todo")
+        ReminderNotificationManager.cancel(todo)
+        context.delete(todo)
+        try? context.save()
+        CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
+        return "\(opener)：🗑️ 已删除最近一个待办\(title)"
     }
 
     // 按当前时间判断餐次（与 ResultConfirmView 规则一致）
@@ -2446,7 +2997,7 @@ struct ChatView: View {
                         target.isIncome = income
                         target.time = time
                         target.syncUpdatedAt = Date()
-                        summary.append("🔄 已更新「\(merchant)」：¥\(String(format: "%.2f", amount))")
+                        summary.append("🔄 已更新「\(merchant)」：\(String(format: "%.2f", amount))")
                     } else {
                         fallthrough
                     }
@@ -2461,7 +3012,7 @@ struct ChatView: View {
                 default:
                     context.insert(Bill(merchant: merchant, amount: amount, category: category, time: time,
                                         isIncome: income, imageName: nil))
-                    summary.append("🧾 \(income ? "收入" : "支出")「\(merchant)」¥\(String(format: "%.2f", amount))")
+                    summary.append("🧾 \(income ? "收入" : "支出")「\(merchant)」\(String(format: "%.2f", amount))")
                 }
             }
         }
@@ -2640,160 +3191,184 @@ struct ChatView: View {
     // 把本地数据整理成 JSON 摘要，供 AI 聊天时作为上下文
     private func buildContext() -> [String: Any] {
         let cal = Calendar.current
-        let fmt = ISO8601DateFormatter()
         let startOfToday = cal.startOfDay(for: Date())
-
+        let startOfYesterday = cal.date(byAdding: .day, value: -1, to: startOfToday)!
+        let startOf7DaysAgo = cal.date(byAdding: .day, value: -6, to: startOfToday)!
         let todayFoods = foods.filter { cal.isDateInToday($0.date) }
         let todayBills = bills.filter { cal.isDateInToday($0.time) }
+        let yesterdayFoods = foods.filter { $0.date >= startOfYesterday && $0.date < startOfToday }
+        let yesterdayBills = bills.filter { $0.time >= startOfYesterday && $0.time < startOfToday }
+        let weekFoodEntries = foods.filter { $0.date >= startOf7DaysAgo }
+        let weekBillEntries = bills.filter { $0.time >= startOf7DaysAgo }
+        // 重要：传给云端 LLM 的所有日期必须带本地时区偏移（+HH:MM），否则默认 ISO8601 输出 UTC（Z），
+        // 本地 11:45 会变成 03:45Z 被 LLM 误读为「凌晨 3 点」。
+        let fmt = ISO8601DateFormatter()
+        fmt.timeZone = .current
         let todayTodos = reminders.filter { r in
             if let due = r.due { return cal.isDateInToday(due) && !r.done } else { return false }
         }
-
-        // 昨日（用于回答"昨天"类问题）
-        let startOfYesterday = cal.date(byAdding: .day, value: -1, to: startOfToday)!
-        let endOfYesterday = startOfToday
-        let yesterdayFoods = foods.filter { $0.date >= startOfYesterday && $0.date < endOfYesterday }
-        let yesterdayBills = bills.filter { $0.time >= startOfYesterday && $0.time < endOfYesterday }
         let yesterdayTodos = reminders.filter { r in
-            if let due = r.due { return due >= startOfYesterday && due < endOfYesterday && !r.done } else { return false }
+            if let due = r.due { return due >= startOfYesterday && due < startOfToday && !r.done } else { return false }
         }
+        return [
+            "today": buildContext_daySection(date: Date(), foods: todayFoods, bills: todayBills, todos: todayTodos, fmt: fmt),
+            "yesterday": buildContext_daySection(date: startOfYesterday, foods: yesterdayFoods, bills: yesterdayBills, todos: yesterdayTodos, fmt: fmt),
+            "last7Days": buildContext_weekSection(weekFoods: weekFoodEntries, weekBills: weekBillEntries, startOf7DaysAgo: startOf7DaysAgo, fmt: fmt),
+            "health": buildContext_healthSection(fmt: fmt),
+            "upcomingTodos": buildContext_upcomingTodosSection(fmt: fmt),
+            "activeTodos": buildContext_activeTodosSection(fmt: fmt),
+            // —— 最近记录列表（按时间倒序，含 id）—— agent 需要用 id 做 update 工具调用（upsert）。
+            // 上限 10 条/类，既覆盖"刚才记的那条"又不让 context 过大。
+            "recentFoods": foods.sorted { $0.date > $1.date }.prefix(10).map { buildContext_foodDict($0, fmt: fmt) },
+            "recentBills": bills.sorted { $0.time > $1.time }.prefix(10).map { buildContext_billDict($0, fmt: fmt) },
+            "recentReminders": reminders.sorted { ($0.due ?? .distantPast) > ($1.due ?? .distantPast) }.prefix(10).map { buildContext_todoDict($0, fmt: fmt) },
+            "recentHealth": healths.sorted { $0.date > $1.date }.prefix(10).map { buildContext_healthDict($0, fmt: fmt) },
+            "merchantRules": merchantMetas.sorted { ($0.lastSeen ?? .distantPast) > ($1.lastSeen ?? .distantPast) }.prefix(20).map { buildContext_merchantDict($0) },
+            "recentRecognitions": recognitions.prefix(10).map { buildContext_recognitionDict($0, fmt: fmt) },
+            // —— 饮水与周期规则（v10/v9 模型，buildContext 之前漏了导致 agent 第一句话看不到）——
+            "recentWaters": waters.prefix(20).map { ["id": $0.syncId.uuidString, "amount": $0.amount, "date": fmt.string(from: $0.date)] },
+            "recurringRules": recurringRules.map { ["id": $0.syncId.uuidString, "merchant": $0.merchant, "amount": $0.amount, "category": $0.category, "isIncome": $0.isIncome, "cycleRaw": $0.cycleRaw ?? "monthly", "dayOfMonth": $0.dayOfMonth, "note": $0.note] }
+        ]
+    }
 
-        // 最近 7 天（含今天）的汇总，用于回答"最近"类问题
-        let startOf7DaysAgo = cal.date(byAdding: .day, value: -6, to: startOfToday)!
-        let weekFoodEntries = foods.filter { $0.date >= startOf7DaysAgo }
-        let weekBillEntries = bills.filter { $0.time >= startOf7DaysAgo }
-        let last7Days = (0..<7).map { cal.date(byAdding: .day, value: $0, to: startOf7DaysAgo)! }
+    private func buildContext_daySection(date: Date, foods: [FoodEntry], bills: [Bill], todos: [Reminder], fmt: ISO8601DateFormatter) -> [String: Any] {
+        // 明细只保留最近 15 条（覆盖绝大多数对话场景），聚合 totals 仍基于全量，不影响"今日总热量"等回答准确性。
+        let recentFoods = foods.sorted { $0.date > $1.date }.prefix(15)
+        let recentBills = bills.sorted { $0.time > $1.time }.prefix(15)
+        return [
+            "date": fmt.string(from: date),
+            "foods": Array(recentFoods).map { buildContext_foodDict($0, fmt: fmt) },
+            "totalCalories": foods.reduce(0) { $0 + $1.calories },
+            "totalProtein": foods.reduce(0) { $0 + $1.protein },
+            "totalCarbs": foods.reduce(0) { $0 + $1.carbs },
+            "totalFat": foods.reduce(0) { $0 + $1.fat },
+            "bills": Array(recentBills).map { buildContext_billDict($0, fmt: fmt) },
+            "totalExpense": bills.filter { !$0.isIncome }.reduce(0) { $0 + $1.amount },
+            "totalIncome": bills.filter { $0.isIncome }.reduce(0) { $0 + $1.amount },
+            "todos": todos.map { buildContext_todoDict($0, fmt: fmt) }
+        ]
+    }
 
-        let upcomingTodos = reminders
+    private func buildContext_weekSection(weekFoods: [FoodEntry], weekBills: [Bill], startOf7DaysAgo: Date, fmt: ISO8601DateFormatter) -> [String: Any] {
+        // 一周内未完成待办通常很多，明细只保留最近 15 条（按 due 升序），避免 context 膨胀。
+        let weekTodos = reminders.filter { r in
+            guard let due = r.due else { return false }
+            return due >= startOf7DaysAgo && !r.done
+        }
+        .sorted { ($0.due ?? .distantFuture) < ($1.due ?? .distantFuture) }
+        .prefix(15)
+        return [
+            "dateRange": fmt.string(from: startOf7DaysAgo) + " to " + fmt.string(from: Date()),
+            "totalCalories": weekFoods.reduce(0) { $0 + $1.calories },
+            "totalProtein": weekFoods.reduce(0) { $0 + $1.protein },
+            "totalCarbs": weekFoods.reduce(0) { $0 + $1.carbs },
+            "totalFat": weekFoods.reduce(0) { $0 + $1.fat },
+            "totalExpense": weekBills.filter { !$0.isIncome }.reduce(0) { $0 + $1.amount },
+            "totalIncome": weekBills.filter { $0.isIncome }.reduce(0) { $0 + $1.amount },
+            "todos": Array(weekTodos).map { buildContext_todoDictWeekly($0, fmt: fmt) }
+        ]
+    }
+
+    private func buildContext_healthSection(fmt: ISO8601DateFormatter) -> [String: Any] {
+        let latestMetrics: [String: [String: Any]] = Dictionary(grouping: healths, by: { $0.metric })
+            .mapValues { records -> [String: Any] in
+                let r = records.max(by: { $0.date < $1.date })!
+                return ["value": r.value, "unit": r.unit, "date": fmt.string(from: r.date)]
+            }
+        return [
+            "stepsToday": health.stepsToday,
+            "activeEnergyToday": health.activeEnergyToday,
+            "latestMetrics": latestMetrics
+        ]
+    }
+
+    private func buildContext_upcomingTodosSection(fmt: ISO8601DateFormatter) -> [[String: Any]] {
+        let upcoming = reminders
             .filter { !$0.done && ($0.due ?? .distantPast) > Date() }
             .sorted { ($0.due ?? .distantFuture) < ($1.due ?? .distantFuture) }
             .prefix(5)
+        return Array(upcoming).map { buildContext_todoDict($0, fmt: fmt) }
+    }
 
-        let activeTodos = reminders.filter { !$0.done }.prefix(10)
+    private func buildContext_activeTodosSection(fmt: ISO8601DateFormatter) -> [[String: Any]] {
+        let active = reminders.filter { !$0.done }.prefix(10)
+        return Array(active).map { buildContext_todoDictWeekly($0, fmt: fmt) }
+    }
 
-        // 最近的健康指标记录（按 metric 取最新一条），覆盖体重/身高/心率/体检等 SwiftData 数据
-        let latestHealthMetrics: [String: [String: Any]] = Dictionary(grouping: healths, by: { $0.metric })
-            .mapValues { records in
-                let r = records.max(by: { $0.date < $1.date })!
-                return ["value": r.value, "unit": r.unit, "date": fmt.string(from: r.date)] as [String: Any]
-            }
-
-        return [
-            "today": [
-                "date": fmt.string(from: Date()),
-                "foods": todayFoods.map { [
-                    "name": $0.name,
-                    "calories": $0.calories,
-                    "protein": $0.protein,
-                    "carbs": $0.carbs,
-                    "fat": $0.fat,
-                    "meal": $0.meal,
-                    "portion": $0.portion,
-                    "date": fmt.string(from: $0.date)
-                ] as [String: Any] },
-                "totalCalories": todayFoods.reduce(0) { $0 + $1.calories },
-                "totalProtein": todayFoods.reduce(0) { $0 + $1.protein },
-                "totalCarbs": todayFoods.reduce(0) { $0 + $1.carbs },
-                "totalFat": todayFoods.reduce(0) { $0 + $1.fat },
-                "bills": todayBills.map { [
-                    "merchant": $0.merchant,
-                    "amount": $0.amount,
-                    "category": $0.category,
-                    "isIncome": $0.isIncome,
-                    "time": fmt.string(from: $0.time),
-                    "note": $0.note
-                ] as [String: Any] },
-                "totalExpense": todayBills.filter { !$0.isIncome }.reduce(0) { $0 + $1.amount },
-                "totalIncome": todayBills.filter { $0.isIncome }.reduce(0) { $0 + $1.amount },
-                "todos": todayTodos.map { [
-                    "title": $0.title,
-                    "due": fmt.string(from: $0.due ?? Date()),
-                    "priority": $0.priority
-                ] as [String: Any] }
-            ],
-            "yesterday": [
-                "date": fmt.string(from: startOfYesterday),
-                "foods": yesterdayFoods.map { [
-                    "name": $0.name,
-                    "calories": $0.calories,
-                    "protein": $0.protein,
-                    "carbs": $0.carbs,
-                    "fat": $0.fat,
-                    "meal": $0.meal,
-                    "portion": $0.portion,
-                    "date": fmt.string(from: $0.date)
-                ] as [String: Any] },
-                "totalCalories": yesterdayFoods.reduce(0) { $0 + $1.calories },
-                "totalProtein": yesterdayFoods.reduce(0) { $0 + $1.protein },
-                "totalCarbs": yesterdayFoods.reduce(0) { $0 + $1.carbs },
-                "totalFat": yesterdayFoods.reduce(0) { $0 + $1.fat },
-                "bills": yesterdayBills.map { [
-                    "merchant": $0.merchant,
-                    "amount": $0.amount,
-                    "category": $0.category,
-                    "isIncome": $0.isIncome,
-                    "time": fmt.string(from: $0.time),
-                    "note": $0.note
-                ] as [String: Any] },
-                "totalExpense": yesterdayBills.filter { !$0.isIncome }.reduce(0) { $0 + $1.amount },
-                "totalIncome": yesterdayBills.filter { $0.isIncome }.reduce(0) { $0 + $1.amount },
-                "todos": yesterdayTodos.map { [
-                    "title": $0.title,
-                    "due": fmt.string(from: $0.due ?? Date()),
-                    "priority": $0.priority
-                ] as [String: Any] }
-            ],
-            "last7Days": [
-                "dateRange": "\(fmt.string(from: startOf7DaysAgo)) to \(fmt.string(from: Date()))",
-                "totalCalories": weekFoodEntries.reduce(0) { $0 + $1.calories },
-                "totalProtein": weekFoodEntries.reduce(0) { $0 + $1.protein },
-                "totalCarbs": weekFoodEntries.reduce(0) { $0 + $1.carbs },
-                "totalFat": weekFoodEntries.reduce(0) { $0 + $1.fat },
-                "totalExpense": weekBillEntries.filter { !$0.isIncome }.reduce(0) { $0 + $1.amount },
-                "totalIncome": weekBillEntries.filter { $0.isIncome }.reduce(0) { $0 + $1.amount },
-                "dailyFoods": last7Days.map { d -> [String: Any] in
-                    let dayFoods = weekFoodEntries.filter { cal.isDate($0.date, inSameDayAs: d) }
-                    return [
-                        "date": fmt.string(from: d),
-                        "totalCalories": dayFoods.reduce(0) { $0 + $1.calories },
-                        "totalProtein": dayFoods.reduce(0) { $0 + $1.protein },
-                        "totalCarbs": dayFoods.reduce(0) { $0 + $1.carbs },
-                        "totalFat": dayFoods.reduce(0) { $0 + $1.fat }
-                    ]
-                },
-                "dailyBills": last7Days.map { d -> [String: Any] in
-                    let dayBills = weekBillEntries.filter { cal.isDate($0.time, inSameDayAs: d) }
-                    return [
-                        "date": fmt.string(from: d),
-                        "totalExpense": dayBills.filter { !$0.isIncome }.reduce(0) { $0 + $1.amount },
-                        "totalIncome": dayBills.filter { $0.isIncome }.reduce(0) { $0 + $1.amount },
-                        "bills": dayBills.map { [
-                            "merchant": $0.merchant,
-                            "amount": $0.amount,
-                            "category": $0.category,
-                            "isIncome": $0.isIncome,
-                            "time": fmt.string(from: $0.time),
-                            "note": $0.note
-                        ] as [String: Any] }
-                    ]
-                }
-            ],
-            "health": [
-                "stepsToday": health.stepsToday,
-                "activeEnergyToday": health.activeEnergyToday,
-                "latestMetrics": latestHealthMetrics
-            ],
-            "upcomingTodos": Array(upcomingTodos).map { [
-                "title": $0.title,
-                "due": fmt.string(from: $0.due ?? Date()),
-                "priority": $0.priority
-            ] as [String: Any] },
-            "activeTodos": Array(activeTodos).map { [
-                "title": $0.title,
-                "due": fmt.string(from: $0.due ?? Date()),
-                "priority": $0.priority,
-                "repeatRule": $0.repeatRule
-            ] as [String: Any] }
+    private func buildContext_foodDict(_ f: FoodEntry, fmt: ISO8601DateFormatter) -> [String: Any] {
+        [
+            "id": f.syncId.uuidString,
+            "name": f.name,
+            "calories": f.calories,
+            "protein": f.protein,
+            "carbs": f.carbs,
+            "fat": f.fat,
+            "meal": f.meal,
+            "portion": f.portion,
+            "weightGram": f.weightGram ?? 0,
+            "waterIntake": f.waterIntake,
+            "date": fmt.string(from: f.date)
         ]
     }
+
+    private func buildContext_billDict(_ b: Bill, fmt: ISO8601DateFormatter) -> [String: Any] {
+        [
+            "id": b.syncId.uuidString,
+            "merchant": b.merchant,
+            "amount": b.amount,
+            "category": b.category,
+            "isIncome": b.isIncome,
+            "time": fmt.string(from: b.time),
+            "note": b.note
+        ]
+    }
+
+    private func buildContext_todoDict(_ r: Reminder, fmt: ISO8601DateFormatter) -> [String: Any] {
+        var d: [String: Any] = [
+            "id": r.syncId.uuidString,
+            "title": r.title,
+            "priority": r.priority,
+            "done": r.done
+        ]
+    if let due = r.due { d["due"] = fmt.string(from: due) }
+    return d
+  }
+
+  private func buildContext_healthDict(_ h: HealthMetric, fmt: ISO8601DateFormatter) -> [String: Any] {
+    [
+      "id": h.syncId.uuidString,
+      "metric": h.metric,
+      "value": h.value,
+      "unit": h.unit,
+      "date": fmt.string(from: h.date),
+    ]
+  }
+
+  private func buildContext_merchantDict(_ m: MerchantMeta) -> [String: Any] {
+    [
+      "id": m.syncId.uuidString,
+      "merchant": m.merchant,
+      "category": m.category,
+      "isIncome": m.isIncome,
+    ]
+  }
+
+  private func buildContext_recognitionDict(_ r: RecognitionRecord, fmt: ISO8601DateFormatter) -> [String: Any] {
+    [
+      "id": r.syncId.uuidString,
+      "rawText": String(r.rawText.prefix(120)),
+      "types": r.types,
+      "recognizedAt": fmt.string(from: r.recognizedAt),
+    ]
+  }
+
+    private func buildContext_todoDictWeekly(_ r: Reminder, fmt: ISO8601DateFormatter) -> [String: Any] {
+        [
+            "title": r.title,
+            "due": fmt.string(from: r.due ?? Date()),
+            "priority": r.priority,
+            "repeatRule": r.repeatRule
+        ]
+    }
+
 }

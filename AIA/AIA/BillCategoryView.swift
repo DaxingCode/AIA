@@ -128,7 +128,7 @@ struct BillCategoryView: View {
             }
             .padding()
         }
-        AIBottomBar()
+        AIBottomBar(entrySource: "bill")
     }
     .background(Color(.secondarySystemBackground))
     .navigationTitle("\(category)支出")

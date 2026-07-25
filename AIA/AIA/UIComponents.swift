@@ -685,6 +685,7 @@ struct AIPrompt: Equatable {
 
 struct AIBottomBar: View {
     let prompts: [AIPrompt]
+    let entrySource: String   // "food" / "health" / "bill" / "todo" / "home"
     @State private var promptIndex = 0
     @State private var rolling = false
     @State private var showCamera = false
@@ -711,7 +712,7 @@ struct AIBottomBar: View {
         return arrow == "←" ? arrow + prompt.text : prompt.text + arrow
     }
 
-    init(prompts: [AIPrompt]? = nil) {
+    init(prompts: [AIPrompt]? = nil, entrySource: String = "home") {
         self.prompts = prompts ?? [
             AIPrompt(text: "问问阿宝AI", pointsTo: nil),
             AIPrompt(text: "点拍照能自动识别哦", pointsTo: .camera),
@@ -720,6 +721,7 @@ struct AIBottomBar: View {
             AIPrompt(text: "叫阿宝AI帮总结", pointsTo: nil),
             AIPrompt(text: "点相册可上传、识别哦", pointsTo: .album)
         ]
+        self.entrySource = entrySource
     }
 
     var body: some View {
@@ -727,7 +729,7 @@ struct AIBottomBar: View {
         // 玻璃材质 + 柔阴影 + 左右 12pt 边距 → 真正"浮动"，不再贴满屏幕宽。
         HStack(spacing: 4) {
             // 语音按钮（不再有独立圆背景，图标直接浮在胶囊玻璃底色上）
-            Button { router.path.append(.chatVoice) } label: {
+            Button { router.chatEntrySource = "voice"; router.path.append(.chatVoice) } label: {
                 Image(systemName: "mic.fill")
                     .font(AIATheme.Font.title3.weight(.medium))
                     .foregroundStyle(AIATheme.sub)
@@ -736,7 +738,7 @@ struct AIBottomBar: View {
             .buttonStyle(.plain)
 
             // 中间滚动文案区（浅灰填充的小胶囊，与外部大胶囊形成双层视觉层次）
-            Button { router.path.append(.chat) } label: {
+            Button { router.chatEntrySource = entrySource; router.path.append(.chat) } label: {
                 HStack {
                     Spacer()
                     ZStack(alignment: .center) {
