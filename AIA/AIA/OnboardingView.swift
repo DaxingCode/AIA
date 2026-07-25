@@ -146,8 +146,8 @@ struct OnboardingView: View {
     }
     private var voiceScenarioPage: some View {
         pageContent(kind: .voice,
-                    title: "开口说话阿宝自动记",
-                    message: "你开口说句话，阿宝 AI 自动帮你记账、记待办、记饮食")
+                    title: "记账、待办、饮食，一句话搞定",
+                    message: "跟阿宝说「中午吃烤肉花了50元」，自动记一笔账单和烤肉热量\n跟阿宝说「周五提醒我交报表」，自动记好周五的待办，会自动提醒哦")
     }
     private var siriPage: some View {
         pageContent(kind: .siri,
