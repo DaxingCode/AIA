@@ -7,7 +7,7 @@ import SwiftUI
 /// 用渐变圆角方块 + 大号 SF Symbol + 柔光晕 + 小亮点，画出"干净极简"的模块插画。
 struct IllustrationView: View {
     enum Kind {
-        case welcome, screenshot, voice, shortcuts, siri
+        case welcome, screenshot, voice, shortcuts, siri, ask
         case diet, health, bill, todo
     }
     let kind: Kind
@@ -20,6 +20,7 @@ struct IllustrationView: View {
         case .screenshot:return (AIATheme.blue,   AIATheme.green,  "text.viewfinder")
         case .voice:     return (AIATheme.green,  AIATheme.blue,   "mic.fill")
         case .siri:      return (AIATheme.blue,   AIATheme.purple, "waveform.circle.fill")
+        case .ask:       return (AIATheme.blue,   AIATheme.purple, "bubble.left.fill")
         case .shortcuts: return (AIATheme.purple, AIATheme.blue,   "command")
         case .diet:      return (AIATheme.food,   AIATheme.bill,   "fork.knife")
         case .health:    return (AIATheme.health, AIATheme.todo,   "heart.fill")

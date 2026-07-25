@@ -9,7 +9,7 @@ struct OnboardingView: View {
     var onFinish: () -> Void
 
     @State private var page = 0
-    private let total = 7
+    private let total = 8
 
     // 快捷指令配置页状态
     @State private var expandedTrigger: TriggerType? = .assistiveTouch
@@ -41,7 +41,8 @@ struct OnboardingView: View {
                     siriPage.tag(3)
                     quickActionsPage.tag(4)
                     shortcutsPage.tag(5)
-                    donePage.tag(6)
+                    askPage.tag(6)
+                    donePage.tag(7)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .animation(.easeInOut, value: page)
@@ -127,6 +128,11 @@ struct OnboardingView: View {
         pageContent(kind: .siri,
                     title: "通过Siri记账、记待办、记饮食",
                     message: "跟Siri说「用阿宝AI管家记」，就可以自动记账、记饮食、记待办，到点自动提醒")
+    }
+    private var askPage: some View {
+        pageContent(kind: .ask,
+                    title: "都可以问阿宝 AI",
+                    message: "账单、饮食、待办、运动、睡眠、健康管理，都可以问「阿宝 AI」")
     }
     private var quickActionsPage: some View {
         VStack(spacing: 0) {
