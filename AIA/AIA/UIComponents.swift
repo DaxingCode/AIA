@@ -230,6 +230,14 @@ struct SegmentedPicker<T: Hashable>: View {
         HStack(spacing: 0) {
             ForEach(0..<options.count, id: \.self) { i in
                 let opt = options[i]
+                // 页签之间竖向 hairline 分隔：深色模式 0x636366 + 0.7pt 清晰可见，
+                // 让「饮食记录/喜好/分析」与「早/午/晚/加餐」两组页签不再糊成一坨。
+                if i > 0 {
+                    Rectangle()
+                        .fill(AIATheme.hairline)
+                        .frame(width: 0.7)
+                        .padding(.vertical, 8)
+                }
                 Button { selection = opt.value } label: {
                     Text(opt.label)
                         .font(AIATheme.Font.caption)
@@ -237,6 +245,8 @@ struct SegmentedPicker<T: Hashable>: View {
                         .padding(.vertical, 7)
                 }
                 .background(selection == opt.value ? Color.white : Color.clear)
+                // 选中文字用 AIATheme.ink（白底上近黑可读，符合 iOS 标准分段控件）；
+                // 未选中用 AIATheme.sub（深浅自适应中性灰）。
                 .foregroundStyle(selection == opt.value ? AIATheme.ink : AIATheme.sub)
                 .clipShape(RoundedRectangle(cornerRadius: AIATheme.rXS))
                 // 禁用背景色变化的隐式动画，避免切换时两个 segment 同时出现白色中间态。
@@ -246,6 +256,11 @@ struct SegmentedPicker<T: Hashable>: View {
         .padding(3)
         .background(AIATheme.fillSoft)
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+        // 外层描边：深色模式下让整组页签边界清晰（与内部 hairline 同标准 0.7pt）。
+        .overlay(
+            RoundedRectangle(cornerRadius: AIATheme.rMD)
+                .stroke(AIATheme.hairline, lineWidth: 0.7)
+        )
     }
 }
 
