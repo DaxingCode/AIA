@@ -230,11 +230,13 @@ struct SegmentedPicker<T: Hashable>: View {
         HStack(spacing: 0) {
             ForEach(0..<options.count, id: \.self) { i in
                 let opt = options[i]
-                // 页签之间竖向 hairline 分隔：深色模式 0x636366 + 0.7pt 清晰可见，
-                // 让「饮食记录/喜好/分析」与「早/午/晚/加餐」两组页签不再糊成一坨。
+                // 页签之间竖向分隔：用 AIATheme.iconInactive（不是 hairline）——
+                // hairline light 0xe6e9ec vs 容器 fillSoft 0xeef1f4 色差仅 ~6 级，
+                // 浅色模式几乎不可见；iconInactive light 0xc9ced3 色差 ~38 级清晰可见。
+                // 深色模式两侧都有足够对比（iconInactive 0x5a5a5e vs fillSoft 0x2c2c2e ≈ 46 级）。
                 if i > 0 {
                     Rectangle()
-                        .fill(AIATheme.hairline)
+                        .fill(AIATheme.iconInactive)
                         .frame(width: 0.7)
                         .padding(.vertical, 8)
                 }
@@ -256,10 +258,11 @@ struct SegmentedPicker<T: Hashable>: View {
         .padding(3)
         .background(AIATheme.fillSoft)
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
-        // 外层描边：深色模式下让整组页签边界清晰（与内部 hairline 同标准 0.7pt）。
+        // 外层描边：用 iconInactive 而非 hairline（浅色模式可见性提升）+ 线宽 0.7→1.0
+        // 让整组页签边界在浅色模式下也清晰勾勒。
         .overlay(
             RoundedRectangle(cornerRadius: AIATheme.rMD)
-                .stroke(AIATheme.hairline, lineWidth: 0.7)
+                .stroke(AIATheme.iconInactive, lineWidth: 1.0)
         )
     }
 }
