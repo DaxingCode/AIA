@@ -180,20 +180,19 @@ struct FoodListView: View {
     }
 
     /// 点 +100ml：建一条 WaterLog + 触觉反馈；SwiftData @Query 自动刷新 UI。
-    /// 只在「今天」可加（selectedDate == 今天）；历史日期点 tap 无反应（防止乱回填）。
+    /// 所有日期都可加（WaterLog 用 selectedDate 落库，manualWaterToday 按 selectedDate 统计，
+    /// 显示数字会即时反映；切回"今天"看时也已合并进总数，无需额外迁移）。
     private func addWaterTap() {
-        guard Calendar.current.isDateInToday(selectedDate) else { return }
-        let log = WaterLog(date: Date(), amount: 100)
+        let log = WaterLog(date: selectedDate, amount: 100)
         context.insert(log)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
-    /// 「今日饮水」卡片：自动在「正面（今日饮水 + ml）」与「背面（点击 +100ml）」间循环翻转；
-    /// 点击行为不变（每点 +100ml + 震动，由 addWaterTap 提供）。
+    /// 「饮水」卡片：自动在「正面（饮水量 + ml）」与「背面（点击 +100ml）」间循环翻转；
+    /// 所有日期都可点击 + 正常显示（历史日期也能补加 +100ml，落库到 selectedDate）。
     private var waterCard: some View {
         WaterFlipCard(
             totalML: waterIntakeToday,
-            isToday: Calendar.current.isDateInToday(selectedDate),
             onTap: addWaterTap
         )
     }
@@ -254,7 +253,6 @@ struct FoodListView: View {
     /// 「今日饮水」翻转卡本体：3D 翻牌 + 自动循环；尊重系统「减少动态效果」偏好。
     private struct WaterFlipCard: View {
         let totalML: Double
-        let isToday: Bool
         let onTap: () -> Void
 
         @State private var flipped = false
@@ -300,14 +298,9 @@ struct FoodListView: View {
                     }
                 }
             )
-            // 只在「今天」时启用（历史日期置灰不响应，且不自动翻转）
-            .disabled(!isToday)
-            .opacity(isToday ? 1.0 : 0.55)
+            // 所有日期都可点击 + 正常显示（历史日期也能补加 +100ml）
             .onAppear(perform: startTimer)
             .onDisappear(perform: stopTimer)
-            .onChange(of: isToday) { _, newVal in
-                if newVal { startTimer() } else { stopTimer() }
-            }
         }
 
         /// 正面：数字（健康色）+ 单位 + 「今日饮水」小字
@@ -348,9 +341,9 @@ struct FoodListView: View {
             .rotation3DEffect(.degrees(180), axis: (x: 0, y: 1, z: 0))
         }
 
-        /// 启动自动翻转定时器（历史日期 / 减少动态效果偏好 → 不翻）
+        /// 启动自动翻转定时器（所有日期均翻；仅在「减少动态效果」时停翻以尊重无障碍偏好）。
         private func startTimer() {
-            guard isToday, !UIAccessibility.isReduceMotionEnabled else { return }
+            guard !UIAccessibility.isReduceMotionEnabled else { return }
             stopTimer()
             timer = Timer.scheduledTimer(withTimeInterval: flipInterval, repeats: true) { _ in
                 withAnimation(.easeInOut(duration: 0.9)) { flipped.toggle() }
