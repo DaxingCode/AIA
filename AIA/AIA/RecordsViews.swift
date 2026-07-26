@@ -516,7 +516,8 @@ struct FoodListView: View {
                 switch dietTab {
                 case .records:
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 12) {
+                        // Card1 · 热量概览（日期 + 进度 + 净热量/TDEE/消耗 + 饮水）
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 8) {
                             Button {
@@ -563,98 +564,107 @@ struct FoodListView: View {
                         }
 
                         MiniBar(value: selectedCalories / goal, color: AIATheme.food)
-                    }
-                    .padding(.bottom, 4)
 
-                    // 3 列热量指标：净热量 / TDEE / 今日消耗（等宽 + 细竖线分隔）
-                    HStack(spacing: 8) {
-                        HStack(spacing: 0) {
-                            // 净热量（英雄数字，食物色突出）
-                            VStack(spacing: 2) {
-                                Text("\(Int(net))")
-                                    .font(AIATheme.Font.title3.weight(.semibold))
-                                    .foregroundStyle(AIATheme.food)
-                                Text(NSLocalizedString("food.netLabel", comment: ""))
-                                    .font(AIATheme.Font.micro)
-                                    .foregroundStyle(AIATheme.sub)
+                        // 3 列热量指标：净热量 / TDEE / 今日消耗（等宽 + 细竖线分隔）
+                        HStack(spacing: 8) {
+                            HStack(spacing: 0) {
+                                // 净热量（英雄数字，食物色突出）
+                                VStack(spacing: 2) {
+                                    Text("\(Int(net))")
+                                        .font(AIATheme.Font.title3.weight(.semibold))
+                                        .foregroundStyle(AIATheme.food)
+                                    Text(NSLocalizedString("food.netLabel", comment: ""))
+                                        .font(AIATheme.Font.micro)
+                                        .foregroundStyle(AIATheme.sub)
+                                }
+                                .frame(maxWidth: .infinity)
+
+                                Rectangle()
+                                    .fill(AIATheme.hairline)
+                                    .frame(width: 0.5, height: 32)
+
+                                // TDEE（基础能量消耗，ink 色中性）
+                                VStack(spacing: 2) {
+                                    Text("\(Int(tdee))")
+                                        .font(AIATheme.Font.title3.weight(.semibold))
+                                        .foregroundStyle(AIATheme.ink)
+                                    Text(NSLocalizedString("food.tdeeLabel", comment: ""))
+                                        .font(AIATheme.Font.micro)
+                                        .foregroundStyle(AIATheme.sub)
+                                }
+                                .frame(maxWidth: .infinity)
+
+                                Rectangle()
+                                    .fill(AIATheme.hairline)
+                                    .frame(width: 0.5, height: 32)
+
+                                // 今日消耗（活动能量，ink 色中性）
+                                VStack(spacing: 2) {
+                                    Text("\(Int(health.activeEnergyToday))")
+                                        .font(AIATheme.Font.title3.weight(.semibold))
+                                        .foregroundStyle(AIATheme.ink)
+                                    Text(NSLocalizedString("food.burned", comment: "") + " kcal")
+                                        .font(AIATheme.Font.micro)
+                                        .foregroundStyle(AIATheme.sub)
+                                }
+                                .frame(maxWidth: .infinity)
                             }
-                            .frame(maxWidth: .infinity)
 
-                            Rectangle()
-                                .fill(AIATheme.hairline)
-                                .frame(width: 0.5, height: 32)
-
-                            // TDEE（基础能量消耗，ink 色中性）
-                            VStack(spacing: 2) {
-                                Text("\(Int(tdee))")
-                                    .font(AIATheme.Font.title3.weight(.semibold))
-                                    .foregroundStyle(AIATheme.ink)
-                                Text(NSLocalizedString("food.tdeeLabel", comment: ""))
-                                    .font(AIATheme.Font.micro)
-                                    .foregroundStyle(AIATheme.sub)
-                            }
-                            .frame(maxWidth: .infinity)
-
-                            Rectangle()
-                                .fill(AIATheme.hairline)
-                                .frame(width: 0.5, height: 32)
-
-                            // 今日消耗（活动能量，ink 色中性）
-                            VStack(spacing: 2) {
-                                Text("\(Int(health.activeEnergyToday))")
-                                    .font(AIATheme.Font.title3.weight(.semibold))
-                                    .foregroundStyle(AIATheme.ink)
-                                Text(NSLocalizedString("food.burned", comment: "") + " kcal")
-                                    .font(AIATheme.Font.micro)
-                                    .foregroundStyle(AIATheme.sub)
-                            }
-                            .frame(maxWidth: .infinity)
+                            waterCard
                         }
-                        .padding(12)
-                        .background(AIATheme.billBG)
-                        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
-
-                        waterCard
                     }
+                    .padding(12)
+                    .card(radius: AIATheme.rMD)
 
-                    SectionTitle(text: NSLocalizedString("food.nutrition", comment: ""),
-                                 trailing: String(format: NSLocalizedString("food.nutritionTarget", comment: ""), 75, 220, 55))
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                        MacroCard(title: NSLocalizedString("food.macro.carb", comment: ""), value: "\(Int(macros.c))g", progress: macros.c / 220, color: AIATheme.amber)
-                        MacroCard(title: NSLocalizedString("food.macro.protein", comment: ""), value: "\(Int(macros.p))g", progress: macros.p / 75, color: AIATheme.blue)
-                        MacroCard(title: NSLocalizedString("food.macro.fat", comment: ""), value: "\(Int(macros.f))g", progress: macros.f / 55, color: AIATheme.green)
-                        MacroCard(title: NSLocalizedString("food.macro.fiber", comment: ""), value: "\(Int(macros.fiber))g", progress: macros.fiber / 25, color: AIATheme.health)
-                        MacroCard(title: NSLocalizedString("food.macro.sugar", comment: ""), value: "\(Int(macros.sugar))g", progress: macros.sugar / 50, color: AIATheme.food)
-                        MacroCard(title: NSLocalizedString("food.macro.sodium", comment: ""), value: "\(Int(macros.sodium))mg", progress: macros.sodium / 2000, color: AIATheme.todo)
+                    // Card2 · 营养构成
+                    VStack(alignment: .leading, spacing: 8) {
+                        SectionTitle(text: NSLocalizedString("food.nutrition", comment: ""),
+                                     trailing: String(format: NSLocalizedString("food.nutritionTarget", comment: ""), 75, 220, 55))
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                            MacroCard(title: NSLocalizedString("food.macro.carb", comment: ""), value: "\(Int(macros.c))g", progress: macros.c / 220, color: AIATheme.amber)
+                            MacroCard(title: NSLocalizedString("food.macro.protein", comment: ""), value: "\(Int(macros.p))g", progress: macros.p / 75, color: AIATheme.blue)
+                            MacroCard(title: NSLocalizedString("food.macro.fat", comment: ""), value: "\(Int(macros.f))g", progress: macros.f / 55, color: AIATheme.green)
+                            MacroCard(title: NSLocalizedString("food.macro.fiber", comment: ""), value: "\(Int(macros.fiber))g", progress: macros.fiber / 25, color: AIATheme.health)
+                            MacroCard(title: NSLocalizedString("food.macro.sugar", comment: ""), value: "\(Int(macros.sugar))g", progress: macros.sugar / 50, color: AIATheme.food)
+                            MacroCard(title: NSLocalizedString("food.macro.sodium", comment: ""), value: "\(Int(macros.sodium))mg", progress: macros.sodium / 2000, color: AIATheme.todo)
+                        }
                     }
+                    .padding(12)
+                    .card(radius: AIATheme.rMD)
 
                     if !foods.isEmpty {
-                        SectionTitle(text: NSLocalizedString("food.last7days", comment: ""))
-                        Chart(weekData) { p in
-                            LineMark(x: .value(NSLocalizedString("chart.day", comment: ""), p.label), y: .value(NSLocalizedString("chart.kcal", comment: ""), p.value))
-                                .foregroundStyle(AIATheme.food)
-                                .interpolationMethod(.monotone)
+                        // Card3 · 近7日热量
+                        VStack(alignment: .leading, spacing: 8) {
+                            SectionTitle(text: NSLocalizedString("food.last7days", comment: ""))
+                            Chart(weekData) { p in
+                                LineMark(x: .value(NSLocalizedString("chart.day", comment: ""), p.label), y: .value(NSLocalizedString("chart.kcal", comment: ""), p.value))
+                                    .foregroundStyle(AIATheme.food)
+                                    .interpolationMethod(.monotone)
+                            }
+                            .frame(height: 64)
+                            .chartYAxis(.hidden).chartXAxis(.hidden)
                         }
-                        .frame(height: 64)
-                        .chartYAxis(.hidden).chartXAxis(.hidden)
+                        .padding(12)
+                        .card(radius: AIATheme.rMD)
 
-                        SegmentedPicker(options: MealFilter.allCases.map { (value: $0, label: $0.label) }, selection: $meal)
-                            .padding(.top, 4)
+                        // Card4 · 当前餐次
+                        VStack(alignment: .leading, spacing: 8) {
+                            SegmentedPicker(options: MealFilter.allCases.map { (value: $0, label: $0.label) }, selection: $meal)
 
-                        // 本餐热量汇总
-                        HStack {
-                            Text(meal.label)
-                                .font(AIATheme.Font.footnote.weight(.semibold))
-                            Spacer()
-                            Text("共 \(Int(mealTotal)) kcal")
-                                .font(AIATheme.Font.footnote.weight(.medium))
-                                .foregroundStyle(AIATheme.food)
+                            // 本餐热量汇总
+                            HStack {
+                                Text(meal.label)
+                                    .font(AIATheme.Font.footnote.weight(.semibold))
+                                Spacer()
+                                Text("共 \(Int(mealTotal)) kcal")
+                                    .font(AIATheme.Font.footnote.weight(.medium))
+                                    .foregroundStyle(AIATheme.food)
+                            }
+
+                            frequentFoodRegion
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .card(radius: AIATheme.rMD, shadow: false)
-
-                        frequentFoodRegion
+                        .padding(12)
+                        .card(radius: AIATheme.rMD)
                     }
 
                     if mealItems.isEmpty {
