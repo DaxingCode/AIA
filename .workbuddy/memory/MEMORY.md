@@ -29,6 +29,8 @@
 - push 一致性：全编程式 `path.append` 或全闭包 `NavigationLink`，混用会绕过中间页。
 - Button 不能嵌 NavigationLink.label；行内多交互用 ZStack 分层。禁 `ForEach(0..<n)+数组[i]` 遍历 @Query 派生数组→`ForEach(Array(x.enumerated()),id:\.offset)`。
 - **监听 SegmentedPicker/Picker/Stepper/Toggle 等用户控件的 Binding 写入做副作用时，别用 `.onChange(of: state)`**——首次渲染/状态恢复存在边界误触发（即使 iOS 17+ 文档说 default `initial:false`）。**正确做法：自定义 `Binding(get:set:)`**——getter 直返 `@State`，setter 同步写状态 + 副作用（SegmentedPicker 的 `selection = opt.value` 只在 Button 内被调，首次渲染只读不写，零误触发）。
+- **跨日期共享 UI（日期选择器下的卡片）写入层用 `selectedDate`，禁 `Date()` 替代**（2026-07-26 踩坑）：统计查询天然按 `selectedDate` 过滤（已落库的历史数据各自归属日期），写入只要落到 `selectedDate` 即可与统计对齐；用 `Date()` 会让"选历史日期点 tap"产生错觉——数据进了今天但 UI 显示的是昨天（不增加）→ 用户体感"按了没反应"。**卡片视觉/可点性也应跟统计对齐**，不要单独加 `disabled/opacity(isToday)` 之类的"只今天"门控，除非业务上确实禁止补录。饮食记录页饮水卡（`addWaterTap` + `WaterFlipCard.disabled(!isToday)`）是反例标准修复场景。
+- **大段删除前先数清闭合链再删**（2026-07-26 踩坑）：删 `LazyVStack` 内一张卡片末尾的 `.padding(12).card(...)` 时，**`.padding/.card` 修饰后面就是 `LazyVStack` 的 `}`**——一并删掉 → `ScrollViewReader/ScrollView/LazyVStack` 三层闭合错位，后续 `AIBottomBar/.background/.navigationTitle` 全部被推到 ScrollView 外，编译报 `extraneous '}' at top level`。**安全流程**：① 删前 `Grep` 父级 `ScrollViewReader / ScrollView / LazyVStack / switch` 起点行号；② 数 `}` 数 → 确认要删的边界；③ 删完先跑 `xcodebuild` 再 commit；④ 出错撤销用 `git checkout -- <file>` 精准还原单文件（不要 `git checkout .`，会清掉其他并行对话的未提交改动）。
 
 ## 图片识别链路（2026-07-22 单一入口）
 `recognizeWithLocalPriority`：①本地 OCR 仅判营养成分表+视觉失败兜底；②营养成分表→本地版面解析；③其它图片统一走视觉模型；④失败本地兜底，无则抛错绝不返 0 空账单。营养库匹配：精确→别名→子串(头名词靠后优先)→调料前缀护栏。
