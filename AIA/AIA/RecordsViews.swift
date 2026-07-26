@@ -2470,6 +2470,15 @@ struct ReminderListView: View {
 
     private func toggleDone(_ r: Reminder) {
         let wasDone = r.done
+        // 触觉反馈（双向语义区分）：
+        //   未完成 → 完成：用 .success 通知反馈（强烈三段式，标志「任务完成」）
+        //   完成 → 未完成：用 .light 触觉（轻触，反向操作不打扰）
+        // 与现有项目震动规范对齐（ChatView/MerchantRuleViews/MonthlyBillListView 都是 success+light 配对）
+        if wasDone {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        } else {
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        }
         // 不包 withAnimation，也不主动切 filter：
         // 用户反馈点击圆圈后想停留在当前页签（如「待办」），不要自动跳到「已完成」。
         // 直接同步改 done，@Query 会在下一帧自然重 fetch 一次，当前行从列表消失即可。
