@@ -404,18 +404,18 @@ struct FoodListView: View {
         selectedFoods.filter { $0.meal == meal.mealString }.reduce(0) { $0 + $1.calories }
     }
 
-    /// 常吃食物：从用户历史记录聚合最常吃的菜名（按出现次数排序）；无历史则回退默认清单。
+    /// 常吃食物：从用户历史记录聚合所有记过的菜名（去重、按出现过次数倒序）；无历史则回退默认清单。
     private static let defaultFrequentFoods = ["米饭", "鸡蛋", "牛奶", "苹果", "鸡胸肉", "面包", "面条", "牛肉", "西兰花", "香蕉"]
     private var frequentFoods: [String] {
         var counts: [String: Int] = [:]
         for f in foods { counts[f.name, default: 0] += 1 }
-        let top = counts.sorted { $0.value > $1.value }.prefix(10).map { $0.key }
-        return top.isEmpty ? Self.defaultFrequentFoods : Array(top)
+        let all = counts.sorted { $0.value > $1.value }.map { $0.key }
+        return all.isEmpty ? Self.defaultFrequentFoods : all
     }
 
     /// 点「常吃食物」名称：按库内每100g营养 ×100g 入库当前餐次；无匹配则热量归零（用户可改）。
     private func saveFrequentFood(_ name: String) {
-        let ref = NutritionLibrary.shared.match(name)
+        let ref = NutritionLibrary.shared.match(name, in: context)
         let weight = 100.0
         let ratio = weight / 100.0
         let entry = FoodEntry(
