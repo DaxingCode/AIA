@@ -771,6 +771,12 @@ struct FoodListView: View {
                     }
 
                     mealItemsSection
+
+                    // 底部占位：保证 ScrollView 内容始终足够高，使「滚到 Card4 顶」在食物条目少/为空的餐次
+                    // 也能落到正确位置。否则内容过短会被 SwiftUI 钳制到最大可滚偏移，早餐（内容高）正常、
+                    // 午餐/加餐（内容短）却「没滚够」——因为 Card4 顶对不到屏幕顶。
+                    Color.clear
+                        .frame(minHeight: 1000)
                 }
                 .padding()
                 .onChange(of: scrollToFoodNonce) { _ in
