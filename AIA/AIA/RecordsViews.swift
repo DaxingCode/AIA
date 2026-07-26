@@ -772,7 +772,7 @@ struct FoodListView: View {
                         .frame(minHeight: 1000)
                 }
                 .padding()
-                .onChange(of: scrollToFoodNonce) { _ in
+                .onChange(of: scrollToFoodNonce) { _, _ in
                     withAnimation {
                         proxy.scrollTo("foodListTop", anchor: .top)
                     }
