@@ -11,7 +11,7 @@ struct SwipeToDeleteCard<Content: View>: View {
     @State private var offset: CGFloat = 0
     @State private var revealed = false
 
-    private let buttonWidth: CGFloat = 76
+    private let buttonWidth: CGFloat = 96
     private let revealThreshold: CGFloat = 50
     private let deleteThreshold: CGFloat = 110
 
@@ -32,17 +32,18 @@ struct SwipeToDeleteCard<Content: View>: View {
                 Button {
                     delete()
                 } label: {
-                    VStack(spacing: 3) {
+                    VStack(spacing: 4) {
                         Image(systemName: "trash")
-                            .font(AIATheme.Font.title3.weight(.medium))
+                            .font(AIATheme.Font.title2.weight(.medium))
                         Text("删除")
-                            .font(AIATheme.Font.micro.weight(.medium))
+                            .font(AIATheme.Font.footnote.weight(.medium))
                     }
                     .foregroundStyle(.white)
-                    .frame(width: buttonWidth)
+                    .frame(width: buttonWidth, height: .infinity)
                 }
                 .buttonStyle(.plain)
             }
+            .frame(maxHeight: .infinity)
             .padding(.trailing, 12)
 
             content
@@ -79,7 +80,6 @@ struct SwipeToDeleteCard<Content: View>: View {
                         : nil
                 )
         }
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: offset)
         .clipped()
     }
 

@@ -6,6 +6,7 @@ import SwiftUI
 
 struct MyAccountView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var auth: AuthManager
 
     @AppStorage("userNickname") private var userNickname = "阿宝的朋友"
@@ -26,6 +27,12 @@ struct MyAccountView: View {
         .background(AIATheme.fillSoft)
         .navigationTitle("我的账号")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: userNickname) { _, _ in
+            // 记录修改时间并触发增量同步：昵称随后经 aia_records(type:"profile") 上云，
+            // 下次登录 pull 会自动回写。未登录时不推送（CloudSyncManager 内部已守卫）。
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "userNicknameUpdatedAt")
+            CloudSyncManager.shared.syncAfterLocalChange(context: modelContext)
+        }
     }
 
     // MARK: - 顶部头像 + 昵称
@@ -65,7 +72,7 @@ struct MyAccountView: View {
                 .padding(12)
                 .background(AIATheme.surfaceSecondary)
                 .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
-            Text("昵称会显示在首页招呼与识别记录等位置，仅本地保存。")
+            Text("昵称会显示在首页招呼与识别记录等位置，修改后会同步到云端，换设备登录沿用。")
                 .font(AIATheme.Font.micro)
                 .foregroundStyle(AIATheme.muted)
                 .lineSpacing(2)

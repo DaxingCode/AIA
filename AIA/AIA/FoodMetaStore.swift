@@ -23,12 +23,16 @@ enum FoodMetaStore {
 
     /// 将云端/用户修正的营养数据写入本地缓存。已存在则覆盖更新。
     /// 写入的是「每100g」基准，便于下次按不同重量自动换算。
+    /// fiber/sugar/sodium 传 nil 表示「调用方没有该数据」：更新时保留既有值（不清零），新建时按 0 落库。
     static func upsert(name: String,
                        displayName: String? = nil,
                        kcal: Double,
                        protein: Double,
                        carbs: Double,
                        fat: Double,
+                       fiber: Double? = nil,
+                       sugar: Double? = nil,
+                       sodium: Double? = nil,
                        source: String = "cloud",
                        in context: ModelContext) {
         let key = FoodMeta.normalize(name)
@@ -40,6 +44,10 @@ enum FoodMetaStore {
             existing.protein = protein
             existing.carbs = carbs
             existing.fat = fat
+            // nil = 调用方无此数据 → 保留既有值，避免把云端之前补齐的微营养素清零
+            if let fiber { existing.fiber = fiber }
+            if let sugar { existing.sugar = sugar }
+            if let sodium { existing.sodium = sodium }
             existing.source = source
             existing.lastSeen = .now
             // hitCount 已在 lookup 中 +1
@@ -51,6 +59,9 @@ enum FoodMetaStore {
                 protein: protein,
                 carbs: carbs,
                 fat: fat,
+                fiber: fiber ?? 0,
+                sugar: sugar ?? 0,
+                sodium: sodium ?? 0,
                 source: source,
                 hitCount: 1,
                 lastSeen: .now
@@ -66,6 +77,9 @@ enum FoodMetaStore {
                                 totalProtein: Double,
                                 totalCarbs: Double,
                                 totalFat: Double,
+                                totalFiber: Double? = nil,
+                                totalSugar: Double? = nil,
+                                totalSodium: Double? = nil,
                                 weightGram: Double,
                                 source: String = "cloud",
                                 in context: ModelContext) {
@@ -77,6 +91,9 @@ enum FoodMetaStore {
             protein: totalProtein / weight * 100,
             carbs: totalCarbs / weight * 100,
             fat: totalFat / weight * 100,
+            fiber: totalFiber.map { $0 / weight * 100 },
+            sugar: totalSugar.map { $0 / weight * 100 },
+            sodium: totalSodium.map { $0 / weight * 100 },
             source: source,
             in: context
         )

@@ -18,6 +18,28 @@ struct FoodSearchResult: Identifiable, Hashable {
     var sugar: Double
     var sodium: Double
     var source: String  // "library" / "cache" / "cloud"
+
+    /// 名称去掉末尾括号及其内容（兼容中英文括号）。
+    /// 云端 queryFood 会为复合菜品返回带口径的名称（如「玉米猪肉饺子（熟，约值）」），
+    /// 括号内容是模型标注的「估算说明」，不应该作为正式食物名落库或展示。
+    /// 例：`玉米猪肉饺子（熟，约值）` → `玉米猪肉饺子`；`牛肉 (瘦, 生)` → `牛肉`。
+    /// 若括号不在末尾（如 `xxx(中)yyy`），不动——本项目云端口径只会放在末尾。
+    func cleanedName() -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        // 末尾的中文括号（...）— 注意全角括号
+        if let rParen = trimmed.range(of: "）", options: .backwards),
+           let lParen = trimmed.range(of: "（", options: .backwards),
+           lParen.upperBound <= rParen.lowerBound {
+            return trimmed[..<lParen.lowerBound].trimmingCharacters(in: .whitespaces)
+        }
+        // 末尾的英文括号 (...)
+        if trimmed.hasSuffix(")"),
+           let lParen = trimmed.range(of: "(", options: .backwards),
+           lParen.upperBound < trimmed.endIndex {
+            return trimmed[..<lParen.lowerBound].trimmingCharacters(in: .whitespaces)
+        }
+        return trimmed
+    }
 }
 
 /// 食物搜索核心逻辑（本地 + 联网兜底）。两边页面共用，避免代码重复。
@@ -179,17 +201,10 @@ struct AddFoodManualView: View {
                 .foregroundStyle(.primary)
                 .autocorrectionDisabled()
 
-            if showSearchResults && !searchResults.isEmpty {
+            if !searchText.trimmingCharacters(in: .whitespaces).isEmpty && showSearchResults {
+                // 搜索词非空就展示列表（即使本地 0 命中，也展示「联网搜索」按钮供用户主动查询）
                 searchResultList
-            } else if isCloudSearching {
-                HStack(spacing: 6) {
-                    ProgressView().scaleEffect(0.7)
-                    Text("联网搜索中...")
-                        .font(AIATheme.Font.caption)
-                        .foregroundStyle(AIATheme.blue)
-                }
-                .padding(.top, 4)
-            } else if let err = cloudErrorMessage {
+            } else if let err = cloudErrorMessage, !err.isEmpty {
                 HStack(spacing: 4) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(AIATheme.Font.micro)
@@ -199,11 +214,6 @@ struct AddFoodManualView: View {
                         .foregroundStyle(AIATheme.warning)
                 }
                 .padding(.top, 4)
-            } else if showSearchResults && !searchText.isEmpty && searchResults.isEmpty {
-                Text("未找到匹配食物，请手动填写下方营养信息")
-                    .font(AIATheme.Font.caption)
-                    .foregroundStyle(AIATheme.muted)
-                    .padding(.top, 4)
             }
         }
         .padding(14)
@@ -212,6 +222,7 @@ struct AddFoodManualView: View {
 
     private var searchResultList: some View {
         VStack(spacing: 0) {
+            // ① 本地命中结果（NutritionLibrary 内置库 / FoodMeta 历史缓存）
             ForEach(searchResults) { result in
                 Button {
                     applySearchResult(result)
@@ -238,6 +249,68 @@ struct AddFoodManualView: View {
 
                 if result.id != searchResults.last?.id {
                     Divider().padding(.leading, 4)
+                }
+            }
+
+            // ② 联网搜索按钮（始终可见，搜索词非空时展示）
+            let trimmedSearch = searchText.trimmingCharacters(in: .whitespaces)
+            if !trimmedSearch.isEmpty {
+                // 若有本地结果，加分割线
+                if !searchResults.isEmpty {
+                    Divider().padding(.leading, 4)
+                }
+                Button {
+                    triggerCloudSearch(trimmedSearch)
+                } label: {
+                    HStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(AIATheme.blue.opacity(0.12))
+                                .frame(width: 28, height: 28)
+                            if isCloudSearching {
+                                ProgressView().scaleEffect(0.6)
+                            } else {
+                                Image(systemName: "cloud.fill")
+                                    .font(AIATheme.Font.caption.weight(.medium))
+                                    .foregroundStyle(AIATheme.blue)
+                            }
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(isCloudSearching ? "联网搜索中..." : "联网搜索营养")
+                                .font(AIATheme.Font.subhead.weight(.medium))
+                                .foregroundStyle(isCloudSearching ? AIATheme.muted : AIATheme.blue)
+                            Text(isCloudSearching
+                                 ? "正在查询 '\(trimmedSearch)' 的热量和营养信息"
+                                 : "未在库中查到时，点击查询并自动填充表单")
+                                .font(AIATheme.Font.micro)
+                                .foregroundStyle(AIATheme.muted)
+                                .lineLimit(2)
+                        }
+                        Spacer(minLength: 0)
+                        if !isCloudSearching {
+                            Image(systemName: "magnifyingglass.circle.fill")
+                                .font(AIATheme.Font.body)
+                                .foregroundStyle(AIATheme.blue)
+                        }
+                    }
+                    .padding(.vertical, 10)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(isCloudSearching)
+
+                // ③ 联网失败/无结果的错误提示（内联显示在按钮下方）
+                if let err = cloudErrorMessage {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(AIATheme.Font.micro)
+                            .foregroundStyle(AIATheme.warning)
+                        Text(err)
+                            .font(AIATheme.Font.caption)
+                            .foregroundStyle(AIATheme.warning)
+                    }
+                    .padding(.top, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
@@ -469,7 +542,7 @@ struct AddFoodManualView: View {
 
     private func performSearch(_ query: String) {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
-        // 取消上一轮联网任务（防抖）
+        // 取消上一轮未完成的联网任务（防抖）
         searchTask?.cancel()
         guard !trimmed.isEmpty else {
             searchResults = []
@@ -487,60 +560,16 @@ struct AddFoodManualView: View {
         let results = FoodSearcher.localSearch(trimmed, foodMetas: foodMetas, in: context)
         searchResults = results
         isSearching = false
-
-        // ② 本地无命中 → 启 Task 联网兜底（600ms 防抖 + 取消旧任务）
-        if results.isEmpty {
-            searchTask = Task { @MainActor in
-                do {
-                    try await Task.sleep(nanoseconds: 600_000_000)  // 600ms 防抖
-                    if Task.isCancelled { return }
-                    isCloudSearching = true
-                    cloudErrorMessage = nil
-
-                    let result: FoodSearchResult?
-                    do {
-                        result = try await FoodSearcher.cloudSearch(name: trimmed)
-                    } catch {
-                        isCloudSearching = false
-                        cloudErrorMessage = "联网搜索失败，请稍后重试或手动填写"
-                        return
-                    }
-                    if Task.isCancelled { return }
-
-                    guard let result else {
-                        isCloudSearching = false
-                        cloudErrorMessage = "联网未找到该食物，请手动填写"
-                        return
-                    }
-
-                    // 落库 FoodMeta，下次直接命中
-                    FoodMetaStore.upsert(
-                        name: result.name,
-                        displayName: result.name,
-                        kcal: result.kcal, protein: result.protein,
-                        carbs: result.carbs, fat: result.fat,
-                        source: "cloud", in: context
-                    )
-
-                    if Task.isCancelled { return }
-                    searchResults = [result]
-                    isCloudSearching = false
-                } catch {
-                    // CancellationError 或其他（兜底）
-                    isCloudSearching = false
-                    if !Task.isCancelled {
-                        cloudErrorMessage = "联网搜索失败，请稍后重试或手动填写"
-                    }
-                }
-            }
-        } else {
-            cloudErrorMessage = nil
-        }
+        // 联网搜索改为用户手动触发：searchResultList 底部始终展示「联网搜索营养」按钮。
     }
 
     /// 选择搜索结果后，自动填充表单
     private func applySearchResult(_ result: FoodSearchResult) {
-        name = result.name
+        // 云端 queryFood 会为复合菜品返回带口径的名称（如「玉米猪肉饺子（熟，约值）」），
+        // 括号内容是模型标注的"估算说明"，不应该作为正式食物名落库或展示给用户。
+        // 在落库/展示前一律剥掉「(...)」/「（...）」及其内部内容。
+        let cleanName = result.cleanedName()
+        name = cleanName
         // 搜索结果的基础营养按 100g 算 → 显式把食用重量重置为 100g，
         // 让"营养成分（按当前重量）" = 基础营养，避免用户之前改的 200g 等
         // 旧值继续影响计算（用户后续可再调）。
@@ -552,21 +581,68 @@ struct AddFoodManualView: View {
         baseFiberText = result.fiber > 0 ? String(format: "%.1f", result.fiber) : ""
         baseSugarText = result.sugar > 0 ? String(format: "%.1f", result.sugar) : ""
         baseSodiumText = result.sodium > 0 ? String(format: "%.1f", result.sodium) : ""
-        searchText = result.name   // 选中后搜索框展示已选食物名（不再清空）
+        searchText = cleanName   // 选中后搜索框展示已选食物名（不再清空）
         searchResults = []
         showSearchResults = false
 
         // 也写入 FoodMeta 缓存，下次可直接命中
         FoodMetaStore.upsert(
-            name: result.name,
-            displayName: result.name,
+            name: cleanName,
+            displayName: cleanName,
             kcal: result.kcal,
             protein: result.protein,
             carbs: result.carbs,
             fat: result.fat,
+            fiber: result.fiber,
+            sugar: result.sugar,
+            sodium: result.sodium,
             source: result.source,
             in: context
         )
+    }
+
+    /// 用户点击「联网搜索营养」按钮触发：调云端 queryFood，命中后自动填充表单并落库 FoodMeta。
+    private func triggerCloudSearch(_ query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        // 取消旧任务，避免上一轮未完成覆盖本轮结果
+        searchTask?.cancel()
+        searchTask = Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: 300_000_000)  // 300ms 防抖，连点不浪费请求
+                if Task.isCancelled { return }
+                isCloudSearching = true
+                cloudErrorMessage = nil
+                let result: FoodSearchResult?
+                do {
+                    result = try await FoodSearcher.cloudSearch(name: trimmed)
+                } catch let e as NSError where e.domain == "Recognize" && e.code == -4 {
+                    // 云端业务错误（如"该食物不在数据库"）：直接展示云端给的原因
+                    isCloudSearching = false
+                    cloudErrorMessage = e.localizedDescription
+                    return
+                } catch {
+                    // 网络/超时等系统错误：给通用提示，避免暴露底层技术信息
+                    isCloudSearching = false
+                    cloudErrorMessage = "联网搜索失败，请检查网络后重试"
+                    return
+                }
+                if Task.isCancelled { return }
+                guard let result else {
+                    isCloudSearching = false
+                    cloudErrorMessage = "联网未找到该食物，请手动填写"
+                    return
+                }
+                // 命中：自动填充表单 + 落库 FoodMeta（applySearchResult 内部已 upsert）
+                applySearchResult(result)
+                isCloudSearching = false
+            } catch {
+                isCloudSearching = false
+                if !Task.isCancelled {
+                    cloudErrorMessage = "联网搜索失败，请稍后重试"
+                }
+            }
+        }
     }
 
     // MARK: - 保存
@@ -617,6 +693,9 @@ struct AddFoodManualView: View {
             totalProtein: basePro * ratio,
             totalCarbs: baseCar * ratio,
             totalFat: baseFat * ratio,
+            totalFiber: baseFib * ratio,
+            totalSugar: baseSug * ratio,
+            totalSodium: baseSod * ratio,
             weightGram: w,
             source: "manual",
             in: context

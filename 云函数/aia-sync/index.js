@@ -2,7 +2,7 @@
 // 数据集合：aia_records
 //   _id:        记录唯一 id（客户端生成，UUID 字符串）
 //   userId:     同步账号（客户端生成/可改）
-//   type:       bill | reminder | food | health
+//   type:       bill | reminder | food | health | profile(昵称)
 //   updatedAt:  最后修改时间（秒，浮点），冲突按后写胜出
 //   deleted:    软删除标记（墓碑）
 //   payload:    记录字段对象

@@ -68,6 +68,10 @@ final class CloudSyncManager: ObservableObject {
         return URL(string: url)!
     }()
 
+    /// 昵称走 aia_records 的 type:"profile" 通道。云端 push 以 {id, userId} 唯一、pull 按 userId 过滤，
+    /// 因此用固定 id 即可（同用户多次 push 都 upsert 同一条文档，不会每人新建一条）。
+    private static let profileRecordId = UUID(uuidString: "9F2B4C7E-3A1D-4E8B-9C6F-2D5A8B1E0F33")!
+
     // MARK: - 自动同步触发（登录后 / 前后台 / 数据变更）
     private var changeSyncWorkItem: DispatchWorkItem?
 
@@ -229,8 +233,9 @@ final class CloudSyncManager: ObservableObject {
             for f in foods {
                 guard f.syncUpdatedAt.timeIntervalSince1970 > sinceTime else { continue }
                 items.append(item(id: f.syncId, type: "food", updatedAt: f.syncUpdatedAt,
-                                  deleted: f.syncDeleted, payload: [
+                                  deleted: f.syncDeleted,                                   payload: [
                                     "name": f.name,
+                                    "waterIntake": f.waterIntake,
                                     "calories": f.calories,
                                     "protein": f.protein,
                                     "carbs": f.carbs,
@@ -335,6 +340,18 @@ final class CloudSyncManager: ObservableObject {
                                   ]))
             }
         }
+        // 昵称（profile）：仅在本地修改过（userNicknameUpdatedAt 超过增量边界）时上传，
+        // 走与业务记录相同的 aia_records 通道（type:"profile"），登录后 pull 自动回写。
+        let nickUpdated = UserDefaults.standard.double(forKey: "userNicknameUpdatedAt")
+        if nickUpdated > sinceTime {
+            let nick = UserDefaults.standard.string(forKey: "userNickname") ?? ""
+            items.append(item(id: Self.profileRecordId,
+                              type: "profile",
+                              updatedAt: Date(timeIntervalSince1970: nickUpdated),
+                              deleted: false,
+                              payload: ["nickname": nick]))
+        }
+
         print("[sync] push 本地共 \(totalFetched) 条，增量筛选后上传 \(items.count) 条（跳过未变更 \(totalFetched - items.count) 条）")
         return (items: items, localTotal: totalFetched)
     }
@@ -392,6 +409,8 @@ final class CloudSyncManager: ObservableObject {
                 merged += applyWater(context: context, id: id, remoteDate: remoteDate, deleted: deleted, payload: payload)
             case "recurring_rule":
                 merged += applyRecurring(context: context, id: id, remoteDate: remoteDate, deleted: deleted, payload: payload)
+            case "profile":
+                merged += applyProfile(remoteDate: remoteDate, payload: payload)
             default:
                 break
             }
@@ -505,6 +524,7 @@ final class CloudSyncManager: ObservableObject {
             existing.protein = payload["protein"] as? Double ?? existing.protein
             existing.carbs = payload["carbs"] as? Double ?? existing.carbs
             existing.fat = payload["fat"] as? Double ?? existing.fat
+            existing.waterIntake = payload["waterIntake"] as? Double ?? existing.waterIntake
             existing.portion = payload["portion"] as? String ?? existing.portion
             existing.meal = payload["meal"] as? String ?? existing.meal
             existing.date = Date(timeIntervalSince1970: payload["date"] as? Double ?? existing.date.timeIntervalSince1970)
@@ -522,6 +542,7 @@ final class CloudSyncManager: ObservableObject {
                               protein: payload["protein"] as? Double ?? 0,
                               carbs: payload["carbs"] as? Double ?? 0,
                               fat: payload["fat"] as? Double ?? 0,
+                              waterIntake: payload["waterIntake"] as? Double ?? 0,
                               portion: payload["portion"] as? String ?? "",
                               meal: payload["meal"] as? String ?? "午餐",
                               date: Date(timeIntervalSince1970: payload["date"] as? Double ?? Date().timeIntervalSince1970),
@@ -635,6 +656,18 @@ final class CloudSyncManager: ObservableObject {
             context.insert(r)
             return 1
         }
+    }
+
+    // MARK: - 昵称（profile）
+    /// 把云端昵称写回本地 userNickname。仅当云端更新时间晚于本地时才覆盖（后写胜出），
+    /// 避免把本次登录刚拉到的旧值又写回、或覆盖本地更新的编辑。
+    private func applyProfile(remoteDate: Date, payload: [String: Any]) -> Int {
+        guard let nick = payload["nickname"] as? String, !nick.isEmpty else { return 0 }
+        let localUpdated = UserDefaults.standard.double(forKey: "userNicknameUpdatedAt")
+        guard remoteDate.timeIntervalSince1970 > localUpdated else { return 0 }
+        UserDefaults.standard.set(nick, forKey: "userNickname")
+        UserDefaults.standard.set(remoteDate.timeIntervalSince1970, forKey: "userNicknameUpdatedAt")
+        return 1
     }
 
     private func applyChat(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {

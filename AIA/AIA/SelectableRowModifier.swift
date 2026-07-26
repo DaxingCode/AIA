@@ -28,7 +28,7 @@ struct SelectableRow<Content: View>: View {
     @State private var swiping = false
     @State private var hapticRevealed = false
 
-    private let buttonWidth: CGFloat = 76
+    private let buttonWidth: CGFloat = 96
     private let revealThreshold: CGFloat = 65
     private let deleteThreshold: CGFloat = 116
 
@@ -50,7 +50,6 @@ struct SelectableRow<Content: View>: View {
                 ? AIATheme.blue.opacity(0.08)
                 : Color.clear)
             .offset(x: isSelecting ? 0 : offset)
-            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: offset)
             .animation(.easeInOut(duration: 0.18), value: isSelecting)
 
         ZStack(alignment: .trailing) {
@@ -58,7 +57,7 @@ struct SelectableRow<Content: View>: View {
             if !isSelecting, onDelete != nil {
                 RoundedRectangle(cornerRadius: AIATheme.rMD)
                     .fill(AIATheme.warn)
-                    .frame(width: buttonWidth + 12, alignment: .trailing)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                     .frame(maxHeight: .infinity)
                     .opacity(revealed || offset < -8 ? 1 : 0)
                 HStack {
@@ -66,17 +65,18 @@ struct SelectableRow<Content: View>: View {
                     Button {
                         performDelete()
                     } label: {
-                        VStack(spacing: 3) {
+                        VStack(spacing: 4) {
                             Image(systemName: "trash")
-                                .font(AIATheme.Font.title3.weight(.medium))
+                                .font(AIATheme.Font.title2.weight(.medium))
                             Text("删除")
-                                .font(AIATheme.Font.micro.weight(.medium))
+                                .font(AIATheme.Font.footnote.weight(.medium))
                         }
                         .foregroundStyle(.white)
-                        .frame(width: buttonWidth)
+                        .frame(width: buttonWidth, height: .infinity)
                     }
                     .buttonStyle(.plain)
                 }
+                .frame(maxHeight: .infinity)
                 .padding(.trailing, 12)
                 .opacity(revealed || offset < -8 ? 1 : 0)
             }

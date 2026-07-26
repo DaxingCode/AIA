@@ -253,6 +253,7 @@ struct MonthlyBillListView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
+        .background(AIATheme.surface)
         .contentShape(Rectangle())
     }
 

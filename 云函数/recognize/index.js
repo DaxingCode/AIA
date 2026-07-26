@@ -73,6 +73,14 @@ const PROVIDERS = {
     model: 'glm-4.7-flash',
     apiKeyEnv: 'GLM_API_KEY',
   },
+  // 智谱 GLM-4-Flash-250414（基础版，非推理、永久免费、无 <think> 思考链）
+  // 专为 queryFood 营养查表设计：比 glm-4.7-flash 快很多。共用 GLM_API_KEY，无需新增环境变量。
+  // 注：旧名 glm-4-flash 已更名为 glm-4-flash-250414（智谱有自动路由，但用现名最稳）。
+  glmFlash: {
+    endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+    model: 'glm-4-flash-250414',
+    apiKeyEnv: 'GLM_API_KEY',
+  },
   // 百度千帆 ERNIE（OpenAI 兼容，base_url: https://qianfan.baidubce.com/v2）
   // 视觉用 ERNIE-4.0-Turbo（多模态）；文字用 ERNIE-Speed（最便宜）
   // 注册：https://cloud.baidu.com/ → 千帆控制台 → API Key
@@ -106,7 +114,7 @@ const PROVIDERS = {
 
 // 版本标记：发布后 curl 可通过返回值里的 ver 字段确认是否部署了最新代码
 // 注意：保持全小写+连字符，package-recognize.sh 的正则 [a-z]+ 兼容（小写 + 数字后缀 + 可选 -xxx 后缀，不支持大写）
-const FN_VERSION = '20260725b-deletion-honest';
+const FN_VERSION = '20260726g-water2food';
 
 // 服务端兜底：纯通用回应（不论上下文）强制 types:["none"]，不依赖模型是否听话。
 // 与云端提示词规则 10 双保险，杜绝「好的/可以」被当成记录指令重复建待办。
@@ -290,13 +298,15 @@ function callChatCompletions(provider, { imageBase64, text, recentMessages }, ap
 }
 
 // 通用对话：不强制 JSON，返回模型原始文本（用于基于本地数据的聊天）
-function callChatRaw(provider, messages, apiKey) {
+function callChatRaw(provider, messages, apiKey, opts = {}) {
   return new Promise((resolve, reject) => {
-    const body = JSON.stringify({
+    const reqBody = {
       model: provider.model,
       messages,
-      temperature: 0.7,
-    });
+      temperature: opts.temperature != null ? opts.temperature : 0.7,
+    };
+    if (opts.max_tokens != null) reqBody.max_tokens = opts.max_tokens;
+    const body = JSON.stringify(reqBody);
 
     const u = new URL(provider.endpoint);
     const req = https.request(
@@ -404,28 +414,101 @@ async function handleGreeting(provider, body, apiKey) {
 //   或前后多空行，extractJSON 做了防御性清洗。
 // - 关键：模型说"不知道"或不是食物时，必须返回 {ok:false, error}，禁止把 caloriess=0 的伪结果返给前端。
 //   客户端 queryFood() 用 calories > 0 判定"有效"，但 0 容易混在「空数据」里出错，前端显示更不友好。
+// queryFood 专用的宽松 JSON 提取：extractJSON() 是图片识别专用（强制要求 types 数组，
+// 缺失时丢弃解析结果返回 {types:['none']}），营养 JSON {name,calories,...} 没有 types，
+// 用 extractJSON 永远解析失败。此函数只做通用清洗：剥 Markdown 围栏 / 截取首尾大括号。
+function extractPlainJSON(text) {
+  // 剥掉推理模型（如 glm-4.7-flash）可能夹带的 <think>...</think> 段，其中的大括号会干扰截取
+  const t = (text || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  if (!t) return null;
+  const fenced = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  let candidate = (fenced ? fenced[1] : t).trim();
+  try {
+    return JSON.parse(candidate);
+  } catch (e) {
+    // 模型可能在 JSON 前后加了说明文字：截取第一个 { 到最后一个 } 再试
+    const first = candidate.indexOf('{');
+    const last = candidate.lastIndexOf('}');
+    if (first >= 0 && last > first) {
+      try { return JSON.parse(candidate.slice(first, last + 1)); } catch (_) { /* fallthrough */ }
+    }
+    console.log(`[extractPlainJSON] 解析失败: ${e.message}, 原文: ${t.slice(0, 200)}`);
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// queryFood 性能优化（A+B+C 三合一）
+// A：营养查表是确定性任务，优先用「非推理快模型」（无 <think> 思考链、首字延迟低）。
+//    按候选顺序选第一个 Key 已配置的 provider；都不满足则回落前端传入的 provider（保证不退化）。
+// B：callChatRaw 已支持 opts.temperature/max_tokens，queryFood 用 temperature:0 + max_tokens:300 限长。
+// C：同实例内存 LRU 缓存，挡热词与跨用户重复查询（事件函数冷启会清空，属可接受）。
+// ─────────────────────────────────────────────────────────────
+// queryFood 结果缓存：key=归一化食物名（去空格小写），10 分钟 TTL，最多 300 条。
+// 仅缓存成功结果（失败不缓存，避免缓存"无数据"）。
+const _qfCache = new Map();
+const QF_CACHE_TTL = 10 * 60 * 1000;
+const QF_CACHE_MAX = 300;
+const _qfNormKey = (n) => (n || '').trim().toLowerCase();
+function _qfCacheGet(k) {
+  const h = _qfCache.get(k);
+  if (!h) return null;
+  if (Date.now() - h.ts > QF_CACHE_TTL) { _qfCache.delete(k); return null; }
+  return h.payload;
+}
+function _qfCacheSet(k, payload) {
+  _qfCache.set(k, { ts: Date.now(), payload });
+  if (_qfCache.size > QF_CACHE_MAX) {
+    const fk = _qfCache.keys().next().value;
+    if (fk !== undefined) _qfCache.delete(fk);
+  }
+}
+// 选非推理快模型：候选顺序优先便宜/快模型，最后回落推理模型兜底。
+const NUTRITION_PROVIDER_PRIORITY = ['glmFlash', 'qianfanText', 'deepseek', 'sensenovaText'];
+function pickNutritionProvider(fallbackProvider, fallbackKey) {
+  for (const name of NUTRITION_PROVIDER_PRIORITY) {
+    const p = PROVIDERS[name];
+    if (p && process.env[p.apiKeyEnv]) return { provider: p, key: process.env[p.apiKeyEnv], used: name };
+  }
+  return { provider: fallbackProvider, key: fallbackKey, used: 'fallback' };
+}
+
 async function handleQueryFood(provider, body, apiKey) {
   const rawName = (body.foodName || '').trim();
   if (!rawName) {
     return { ok: false, error: '缺少 foodName' };
   }
+
+  // ① 缓存命中 → 直接返回，不调模型
+  const cacheKey = _qfNormKey(rawName);
+  const cached = _qfCacheGet(cacheKey);
+  if (cached) {
+    console.log(`[queryFood] 缓存命中: ${rawName}`);
+    return { ...cached, cached: true };
+  }
+
+  // ② 选非推理快模型（无 <think> 思考链、首字延迟低）
+  const { provider: np, key: nkey, used } = pickNutritionProvider(provider, apiKey);
+
   const system = `你是食物营养助手。严格基于公开营养数据库（中国食物成分表 / USDA FoodData Central）输出食物每 100 克的可食部分营养。
 回答规则：
 1. 必须是 JSON 对象，不要解释、不要 Markdown 围栏、不要前后缀文字。
-2. 字段：name（标准中文名）、calories（千卡/100g，number）、protein（克/100g）、carbs（克/100g）、fat（克/100g）、fiber（克/100g，可选）、sugar（克/100g，可选）、sodium（毫克/100g，可选）。
-3. 如果是地方小吃、复合菜品、罕见品牌、或你不确定，请把 calories 设为 0 并把 name 设为 null，让前端知道"没找到"，绝不要瞎编数字。
-4. 数字字段必须是 number 类型（不要带"g""kcal"等单位字符串）。`;
+2. 字段：name（标准中文名）、calories（千卡/100g，number）、protein（克/100g）、carbs（克/100g）、fat（克/100g）、fiber（膳食纤维，克/100g，必填）、sugar（糖，克/100g，必填）、sodium（钠，毫克/100g，必填）。fiber/sugar/sodium 是用户每日摄入追踪的关键指标，必须返回；数据库未直接标注时按典型配方估算（如白米饭 fiber≈0.3、sugar≈0.1、sodium≈1），不要省略字段。
+3. 绝大多数常见单一食物与复合菜品（如饺子、披萨、红烧肉、奶茶）都有可参考的典型营养值，请直接给出合理估算（基于典型配方或通用数据库），不要因为"不确定精确值"就返回 0。复合菜品可在 name 中标注口径，例如"玉米猪肉饺子（熟，约值）"。
+4. 仅当满足以下之一才返回失败（calories 设为 0、name 设为 null）：a) 完全不是食物（如品牌名、虚构/臆造物、人名）；b) 你确实没有任何可参考的数据。绝不要瞎编数字。
+5. 数字字段必须是 number 类型（不要带"g""kcal"等单位字符串）。`;
   const messages = [
     { role: 'system', content: system },
     { role: 'user', content: `请告诉我"${rawName}"每 100 克可食部分的营养。` },
   ];
   let reply;
   try {
-    reply = await callChatRaw(provider, messages, apiKey);
+    // ③ 确定性任务：低温度 + 限长，砍掉推理/啰嗦尾巴
+    reply = await callChatRaw(np, messages, nkey, { temperature: 0, max_tokens: 300 });
   } catch (e) {
     return { ok: false, error: `模型调用失败: ${e.message}` };
   }
-  const parsed = extractJSON(reply);
+  const parsed = extractPlainJSON(reply);
   // 强制约束：必须是 {name, calories, ...} 的对象
   if (!parsed || typeof parsed !== 'object' || !('calories' in parsed)) {
     console.log(`[queryFood] 解析无 calories 字段: ${String(reply).slice(0, 200)}`);
@@ -442,7 +525,7 @@ async function handleQueryFood(provider, body, apiKey) {
     const n = Number(v);
     return Number.isFinite(n) && n >= 0 ? n : 0;
   };
-  return {
+  const result = {
     ok: true,
     result: {
       types: ['food'],
@@ -457,7 +540,10 @@ async function handleQueryFood(provider, body, apiKey) {
         sodium:  toNum(parsed.sodium),
       },
     },
+    provider: used,
   };
+  _qfCacheSet(cacheKey, result);   // ④ 仅缓存成功结果
+  return result;
 }
 
 // 有些模型会在 JSON 外面包 ```json 代码块，这里做防御性清洗。
@@ -500,7 +586,11 @@ exports.main = async (event, context) => {
     const provider = PROVIDERS[providerName] || PROVIDERS.qwen;
     const apiKey = process.env[provider.apiKeyEnv];
     if (!apiKey) return { ok: false, error: `缺少环境变量 ${provider.apiKeyEnv}（请在 CloudBase 配置）`, ver: FN_VERSION };
-    if (!body.imageBase64 && !body.text) return { ok: false, error: '缺少 imageBase64 或 text', ver: FN_VERSION };
+    // 图片识别（默认/聊天分支）必须有 imageBase64 或 text；但 queryFood（食物营养查询，只带 foodName）
+    // 与 greeting（招呼，只带 context/userId）是纯文本/上下文模式，不需要图片或 text，须在此门禁前放行，
+    // 否则会先于各自 handler 被"缺少 imageBase64 或 text"拦截（此前联网搜索/云端招呼一直静默失效的根因）。
+    const needsImageOrText = body.mode !== 'queryFood' && body.mode !== 'greeting';
+    if (needsImageOrText && !body.imageBase64 && !body.text) return { ok: false, error: '缺少 imageBase64 或 text', ver: FN_VERSION };
 
     // 服务端兜底：纯通用回应（非聊天、非图片）强制 none，省一次模型调用且确定性生效，
     // 不依赖模型是否听话（提示词规则 10 的双保险）。含具体指令的（如"好的帮我改"）不拦。

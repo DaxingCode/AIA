@@ -213,8 +213,41 @@ async function get_summary(args = {}) {
 // userId 由 agentHandler 在调用前注入（args.userId）。
 // 支持 upsert：传 args.id 表示更新已有记录（用于「把刚记的那条改成 50g」类修改意图）。
 
+// 剥离写入类命令动词前缀（记/记录/添加/增加/创建/新建/设置/录入/保存/帮我/给我…），
+// 与 App 端 ChatView.commandVerbPrefixes 保持一致，作为开启「智能问答 Agent」开关时的兜底。
+// 只剥前缀、循环剥离，避免名字里正常的「记/添加」被误删（如「记号笔」「添加剂」）。
+function normalizeCommandVerb(name) {
+  if (!name) return name;
+  let t = String(name);
+  const prefixes = [
+    '帮我记一笔', '给我记一笔', '帮我记录一笔', '给我记录一笔',
+    '帮我记一下', '给我记一下', '帮我记个', '给我记个', '帮我记下来', '给我记下来',
+    '帮我记账', '给我记账',
+    '记一笔', '记一下', '记个', '记下来', '记账', '记录下', '记录了', '记录', '记',
+    '帮我记', '给我记', '帮我记录', '给我记录',
+    '帮我增加一笔', '给我增加一笔', '帮我添加一笔', '给我添加一笔',
+    '增加一笔', '添加一笔', '加一笔', '来一笔',
+    '帮我增加', '给我增加', '帮我添加', '给我添加',
+    '增加', '添加',
+    '帮我创建一个', '给我创建一个', '帮我新建一个', '给我新建一个', '帮我设置一个', '给我设置一个',
+    '帮我创建', '给我创建', '帮我新建', '给我新建', '帮我设置', '给我设置',
+    '创建', '新建', '设置',
+    '帮我录入', '给我录入', '录入',
+    '帮我保存', '给我保存', '保存',
+    '帮我', '给我'
+  ];
+  const measures = ['一个', '一条', '一项', '一件', '这台', '这部', '这张', '这把', '那只', '那个', '这个'];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const p of prefixes) { if (t.startsWith(p)) { t = t.slice(p.length); changed = true; break; } }
+    for (const m of measures) { if (t.startsWith(m)) { t = t.slice(m.length); changed = true; break; } }
+  }
+  return t;
+}
+
 async function create_bill(args = {}) {
-  const merchant = (args.merchant || '').toString().trim();
+  const merchant = normalizeCommandVerb((args.merchant || '').toString().trim());
   const amountRaw = Number(args.amount);
   const db = getDB();
   const coll = db.collection(COLLECTION);
@@ -263,7 +296,7 @@ async function create_bill(args = {}) {
 }
 
 async function create_food(args = {}) {
-  const name = (args.name || '').toString().trim();
+  const name = normalizeCommandVerb((args.name || '').toString().trim());
   const db = getDB();
   const coll = db.collection(COLLECTION);
   const nowSec = Math.floor(Date.now() / 1000);
@@ -319,7 +352,7 @@ async function create_food(args = {}) {
 }
 
 async function create_todo(args = {}) {
-  const title = (args.title || '').toString().trim();
+  const title = normalizeCommandVerb((args.title || '').toString().trim());
   const db = getDB();
   const coll = db.collection(COLLECTION);
   const nowSec = Math.floor(Date.now() / 1000);
@@ -807,6 +840,9 @@ function waterRangeBounds(range) {
   }
 }
 
+// 云端记水与 App 端 ChatView.createWaterIntake 对齐：统一写入饮食记录（food 类型）
+// 的 waterIntake 字段（营养全 0，name="饮用水"），不再使用独立的 water 类型。
+// 这样无论本地还是云端记的水，回到 App 后都落在同一本 FoodEntry，饮水统计一致。
 async function create_water(args = {}) {
   const amount = Number(args.amount);
   if (!amount || amount <= 0) return { code: -1, message: '饮水量(amount)需为正数(毫升)' };
@@ -815,8 +851,19 @@ async function create_water(args = {}) {
   const nowSec = Math.floor(Date.now() / 1000);
   const id = (args.id && String(args.id).trim()) || crypto.randomUUID();
   const dateSec = args.date ? Math.floor(new Date(args.date).getTime() / 1000) : nowSec;
-  const payload = { amount, date: dateSec, note: (args.note || '').toString().trim() };
-  await coll.add({ id, userId: args.userId, type: 'water', updatedAt: nowSec, deleted: false, payload });
+  const note = (args.note || '').toString().trim();
+  const payload = {
+    name: '饮用水',
+    calories: 0, protein: 0, carbs: 0, fat: 0,
+    fiber: 0, sugar: 0, sodium: 0,
+    waterIntake: amount,
+    portion: note || `${amount}毫升`,
+    meal: (args.meal && String(args.meal).trim()) || '加餐',
+    date: dateSec,
+    weightGram: 0,
+    note,
+  };
+  await coll.add({ id, userId: args.userId, type: 'food', updatedAt: nowSec, deleted: false, payload });
   return { code: 0, id, message: `已记录饮水 ${amount} 毫升` };
 }
 
@@ -824,12 +871,21 @@ async function delete_water(args = {}) {
   const db = getDB();
   const coll = db.collection(COLLECTION);
   const nowSec = Math.floor(Date.now() / 1000);
+  // 按 id 删除：新建的饮水为 food(waterIntake>0)，历史的为 water，均软删
   if (args.id && String(args.id).trim()) {
-    await coll.where({ id: String(args.id).trim(), userId: args.userId, type: 'water' }).update({ deleted: true, updatedAt: nowSec });
+    const rid = String(args.id).trim();
+    await coll.where({ id: rid, userId: args.userId, type: 'food' }).update({ deleted: true, updatedAt: nowSec });
+    await coll.where({ id: rid, userId: args.userId, type: 'water' }).update({ deleted: true, updatedAt: nowSec });
     return { code: 0, message: '已删除该条饮水记录' };
   }
-  const { data } = await queryRecords(args.userId, 'water', { limit: 100 });
-  let list = data.map((d) => ({ id: d.id, amount: Number(d.payload.amount) || 0, date: d.payload.date || 0, note: (d.payload.note || '') }));
+  // 无 id：取最新的饮水记录（food 中 waterIntake>0 或老 water）
+  const { data: waterData } = await queryRecords(args.userId, 'water', { limit: 100 });
+  const { data: foodData } = await queryRecords(args.userId, 'food', { limit: 100 });
+  let list = waterData.map((d) => ({ id: d.id, amount: Number(d.payload.amount) || 0, date: d.payload.date || 0, type: 'water', note: (d.payload.note || '') }));
+  for (const d of foodData) {
+    const w = Number(d.payload.waterIntake) || 0;
+    if (w > 0) list.push({ id: d.id, amount: w, date: d.payload.date || 0, type: 'food', note: (d.payload.note || '') });
+  }
   if (typeof args.keyword === 'string' && args.keyword.trim()) {
     const k = args.keyword.trim().toLowerCase();
     list = list.filter((x) => `${x.note} ${x.amount}`.toLowerCase().includes(k));
@@ -837,14 +893,20 @@ async function delete_water(args = {}) {
   if (!list.length) return { code: 0, deleted: 0, message: '未找到可删除的饮水记录' };
   list.sort((a, b) => b.date - a.date);
   const rec = list[0];
-  await coll.where({ id: rec.id, userId: args.userId, type: 'water' }).update({ deleted: true, updatedAt: nowSec });
+  await coll.where({ id: rec.id, userId: args.userId, type: rec.type }).update({ deleted: true, updatedAt: nowSec });
   return { code: 0, deleted: 1, id: rec.id, message: `已删除一条饮水记录（${rec.amount} 毫升）` };
 }
 
 async function list_waters(args = {}) {
-  const { data } = await queryRecords(args.userId, 'water', { limit: args.limit || 500 });
+  const { data: waterData } = await queryRecords(args.userId, 'water', { limit: args.limit || 500 });
+  const { data: foodData } = await queryRecords(args.userId, 'food', { limit: args.limit || 500 });
+  // 合并老 water 记录与新的 food 中 waterIntake>0 的记录
+  let list = waterData.map((d) => ({ id: d.id, amount: Number(d.payload.amount) || 0, date: d.payload.date || 0, note: (d.payload.note || '') }));
+  for (const d of foodData) {
+    const w = Number(d.payload.waterIntake) || 0;
+    if (w > 0) list.push({ id: d.id, amount: w, date: d.payload.date || 0, note: (d.payload.note || '') });
+  }
   const { from, to } = waterRangeBounds(args.range);
-  let list = data.map((d) => ({ id: d.id, amount: Number(d.payload.amount) || 0, date: d.payload.date || 0, note: (d.payload.note || '') }));
   if (from > 0) list = list.filter((x) => x.date >= from && x.date < to);
   const total = list.reduce((s, x) => s + x.amount, 0);
   const rangeLabel = { today: '今天', yesterday: '昨天', last7Days: '近7天', last30Days: '近30天', thisMonth: '本月' }[args.range] || '全部';

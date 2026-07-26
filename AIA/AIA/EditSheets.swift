@@ -742,6 +742,7 @@ struct EditFoodView: View {
                         name: result.name, displayName: result.name,
                         kcal: result.kcal, protein: result.protein,
                         carbs: result.carbs, fat: result.fat,
+                        fiber: result.fiber, sugar: result.sugar, sodium: result.sodium,
                         source: "cloud", in: context
                     )
 
@@ -763,7 +764,10 @@ struct EditFoodView: View {
     /// 用户点击搜索结果：把 base* 字段全部覆盖为该食物每 100g 营养。
     /// 重量保留用户当前值（用户可能之前手动改过），由 displayedKcalText 按比例算出当前份量下的总热量。
     private func applySearchResult(_ result: FoodSearchResult) {
-        name = result.name
+        // 云端 queryFood 会为复合菜品返回带口径的名称（如「玉米猪肉饺子（熟，约值）」），
+        // 括号内容是模型标注的"估算说明"，在落库/展示前一律剥掉。
+        let cleanName = result.cleanedName()
+        name = cleanName
         baseCaloriesText = String(format: "%.1f", result.kcal)
         baseProteinText = result.protein > 0 ? String(format: "%.1f", result.protein) : ""
         baseCarbsText = result.carbs > 0 ? String(format: "%.1f", result.carbs) : ""
@@ -771,14 +775,15 @@ struct EditFoodView: View {
         baseFiberText = result.fiber > 0 ? String(format: "%.1f", result.fiber) : ""
         baseSugarText = result.sugar > 0 ? String(format: "%.1f", result.sugar) : ""
         baseSodiumText = result.sodium > 0 ? String(format: "%.1f", result.sodium) : ""
-        searchText = result.name
+        searchText = cleanName
         searchResults = []
         showSearchResults = false
 
         FoodMetaStore.upsert(
-            name: result.name, displayName: result.name,
+            name: cleanName, displayName: cleanName,
             kcal: result.kcal, protein: result.protein,
             carbs: result.carbs, fat: result.fat,
+            fiber: result.fiber, sugar: result.sugar, sodium: result.sodium,
             source: result.source, in: context
         )
     }

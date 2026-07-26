@@ -729,7 +729,10 @@ struct AIBottomBar: View {
         // 玻璃材质 + 柔阴影 + 左右 12pt 边距 → 真正"浮动"，不再贴满屏幕宽。
         HStack(spacing: 4) {
             // 语音按钮（不再有独立圆背景，图标直接浮在胶囊玻璃底色上）
-            Button { router.chatEntrySource = "voice"; router.path.append(.chatVoice) } label: {
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                router.chatEntrySource = "voice"; router.path.append(.chatVoice)
+            } label: {
                 Image(systemName: "mic.fill")
                     .font(AIATheme.Font.title3.weight(.medium))
                     .foregroundStyle(AIATheme.sub)

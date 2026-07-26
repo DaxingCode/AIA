@@ -225,19 +225,30 @@ struct RecognizeService {
         }
 
         let wrapper = try JSONDecoder().decode(CloudResponse.self, from: respData)
-        guard wrapper.ok,
-              let result = wrapper.result,
+        // 云端明确返回失败时，抛出其错误信息（如"该食物不在数据库或无可靠数据"），
+        // 让前端能区分"模型拒答"与"网络/调用失败"，而不是一律显示"未找到"。
+        guard wrapper.ok else {
+            let msg = wrapper.error ?? "云端未返回营养数据"
+            print("[queryFood] 云端返回失败：\(msg)")
+            throw NSError(domain: "Recognize", code: -4,
+                          userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+        guard let result = wrapper.result,
               let food = result.food,
               let foodName = food.name, !foodName.isEmpty,
               let calories = food.calories, calories > 0 else {
             print("[queryFood] 无有效营养数据：\(rawText.prefix(300))")
-            return nil
+            throw NSError(domain: "Recognize", code: -4,
+                          userInfo: [NSLocalizedDescriptionKey: "云端未返回「\(name)」的有效营养数据"])
         }
         return FoodRef(name: foodName,
                        kcal: calories,
                        protein: food.protein ?? 0,
                        carbs: food.carbs ?? 0,
-                       fat: food.fat ?? 0)
+                       fat: food.fat ?? 0,
+                       fiber: food.fiber ?? 0,
+                       sugar: food.sugar ?? 0,
+                       sodium: food.sodium ?? 0)
     }
 
     static func recognize(base64: String) async throws -> (result: RecognitionResult, rawText: String) {

@@ -34,8 +34,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UIWindowSceneDelegate, UN
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         application.shortcutItems = [
-            UIApplicationShortcutItem(type: "com.aia.shortcut.camera", localizedTitle: "拍照记录", localizedSubtitle: nil, icon: UIApplicationShortcutIcon(systemImageName: "camera.fill"), userInfo: nil),
             UIApplicationShortcutItem(type: "com.aia.shortcut.voice", localizedTitle: "语音记录", localizedSubtitle: nil, icon: UIApplicationShortcutIcon(systemImageName: "mic.fill"), userInfo: nil),
+            UIApplicationShortcutItem(type: "com.aia.shortcut.camera", localizedTitle: "拍照记录", localizedSubtitle: nil, icon: UIApplicationShortcutIcon(systemImageName: "camera.fill"), userInfo: nil),
             UIApplicationShortcutItem(type: "com.aia.shortcut.chat", localizedTitle: "问阿宝AI", localizedSubtitle: nil, icon: UIApplicationShortcutIcon(systemImageName: "bubble.left.fill"), userInfo: nil),
             UIApplicationShortcutItem(type: "com.aia.shortcut.todo", localizedTitle: "查待办", localizedSubtitle: nil, icon: UIApplicationShortcutIcon(systemImageName: "checklist"), userInfo: nil),
         ]

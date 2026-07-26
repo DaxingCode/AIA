@@ -271,10 +271,18 @@ struct ChatView: View {
                 HStack(spacing: 9) {
                     Button {
                         if recognizer.isRecording {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
                             recognizer.stop()
                         } else {
                             isInputFocused = false
-                            recognizer.start()
+                            // 先立即同步触发触觉（与关麦同款时机），再把录音会话激活推迟 100ms，
+                            // 避免 setActive(true) 的同步音频初始化把 Taptic Engine 渲染挤掉。
+                            let gen = UIImpactFeedbackGenerator(style: .medium)
+                            gen.prepare()
+                            gen.impactOccurred()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                recognizer.start()
+                            }
                         }
                     } label: {
                         Image(systemName: recognizer.isRecording ? "stop.circle.fill" : "mic.fill")
@@ -331,7 +339,12 @@ struct ChatView: View {
                     print("[ChatView] onAppear calling recognizer.start()")
                     #endif
                     if !recognizer.isRecording {
-                        recognizer.start()
+                        let gen = UIImpactFeedbackGenerator(style: .medium)
+                        gen.prepare()
+                        gen.impactOccurred()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            recognizer.start()
+                        }
                     }
                 }
             }
@@ -365,6 +378,7 @@ struct ChatView: View {
                     #if DEBUG
                     print("[ChatView] (notification) calling recognizer.start()")
                     #endif
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     recognizer.start()
                 }
             }
@@ -1288,7 +1302,7 @@ struct ChatView: View {
         var t = text.lowercased()
         t = t.replacingOccurrences(of: #"\d+(\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?"#,
                                    with: "", options: .regularExpression)
-        let verbs = ["记一笔","记账","记一下","记个","记下来","帮我记","给我记","添加","增加","创建",
+        let verbs = ["记一笔","记账","记一下","记个","记下来","记","帮我记","给我记","添加","增加","创建",
                      "新建","保存","录入","花了","花掉","付了","付给","买了","消费","支出","账单",
                      "花销","开销","扫码付","提醒我","提醒","吃了","喝了","喝","吃"]
         for v in verbs { t = t.replacingOccurrences(of: v, with: "") }
@@ -1350,13 +1364,9 @@ struct ChatView: View {
 
         // 商户名：去掉金额数字及单位、去掉记账关键词、命令前缀、去掉时间/饮食动词与语气助词后剩下的文本
         var merchant = text
-        // 去掉命令前缀（如「帮我增加一笔」「增加一笔」「帮我记」），避免「帮我增加一笔收入」被当成商户名。
-        // 必须按长度降序，否则「帮我」会先被删，留下「增加一笔收入」。
-        let commandNoise = ["帮我增加一笔", "帮我添加一笔", "帮我记一笔", "给我记一笔",
-                            "增加一笔", "添加一笔", "加一笔", "来一笔",
-                            "帮我记", "给我记", "帮我", "给我",
-                            "记一下", "记下来", "记个"]
-        for kw in commandNoise { merchant = merchant.replacingOccurrences(of: kw, with: "") }
+        // 去掉命令动词前缀（记/记录/添加/增加/创建/新建/设置/录入/保存/帮我/给我…），
+        // 避免「记星巴克35」被当成商户「记星巴克」；与饮食/待办/云端共用 commandVerbPrefixes。
+        merchant = ChatView.stripCommandVerbPrefix(merchant)
         // 去掉「花」作花费动词且后接金额（如「汉堡花10元」），放在金额提取前，避免残留成商户名；
         // 用占位符保护爆米花等含「花」菜品（stripSpendPhrase 已做保护）。
         merchant = ChatView.stripSpendPhrase(merchant)
@@ -1504,6 +1514,7 @@ struct ChatView: View {
                     FoodMetaStore.upsert(name: name, displayName: cloudRef.name,
                                          kcal: cloudRef.kcal, protein: cloudRef.protein,
                                          carbs: cloudRef.carbs, fat: cloudRef.fat,
+                                         fiber: cloudRef.fiber, sugar: cloudRef.sugar, sodium: cloudRef.sodium,
                                          source: "cloud", in: context)
                     ref = cloudRef
                     cloudFilled.append(name)
@@ -1607,6 +1618,7 @@ struct ChatView: View {
             FoodMetaStore.upsert(name: trimmed, displayName: cloudRef.name,
                                  kcal: cloudRef.kcal, protein: cloudRef.protein,
                                  carbs: cloudRef.carbs, fat: cloudRef.fat,
+                                 fiber: cloudRef.fiber, sugar: cloudRef.sugar, sodium: cloudRef.sodium,
                                  source: "cloud", in: context)
             ref = cloudRef
         }
@@ -1676,6 +1688,7 @@ struct ChatView: View {
 
                     FoodMetaStore.upsert(name: name, displayName: ref.name,
                                          kcal: ref.kcal, protein: ref.protein, carbs: ref.carbs, fat: ref.fat,
+                                         fiber: ref.fiber, sugar: ref.sugar, sodium: ref.sodium,
                                          source: "cloud", in: context)
 
                     let pending = PendingFoodConfirm(
@@ -1788,6 +1801,7 @@ struct ChatView: View {
 
                     FoodMetaStore.upsert(name: name, displayName: ref.name,
                                          kcal: ref.kcal, protein: ref.protein, carbs: ref.carbs, fat: ref.fat,
+                                         fiber: ref.fiber, sugar: ref.sugar, sodium: ref.sodium,
                                          source: "cloud", in: context)
 
                     let entry = FoodEntry(name: ref.name, calories: cal, protein: protein, carbs: carbs, fat: fat,
@@ -1891,8 +1905,63 @@ struct ChatView: View {
         return t
     }
 
+    // MARK: - 共享：写入类命令动词前缀清洗
+    /// 所有"写记录"类命令动词前缀（记/记录/添加/增加/创建/新建/设置/录入/保存/帮我/给我…）。
+    /// 食物名 / 账单商户 / 待办标题 / 云端 create_* 共用同一份，避免换种说法又漏。
+    /// 必须按长度降序：否则「帮我记一笔」会被「记」截成「帮我一笔」。
+    private static let commandVerbPrefixes: [String] = [
+        // 记 / 记录
+        "帮我记一笔", "给我记一笔", "帮我记录一笔", "给我记录一笔",
+        "帮我记一下", "给我记一下", "帮我记个", "给我记个", "帮我记下来", "给我记下来",
+        "帮我记账", "给我记账",
+        "记一笔", "记一下", "记个", "记下来", "记账", "记录下", "记录了", "记录", "记",
+        "帮我记", "给我记", "帮我记录", "给我记录",
+        // 添加 / 增加
+        "帮我增加一笔", "给我增加一笔", "帮我添加一笔", "给我添加一笔",
+        "增加一笔", "添加一笔", "加一笔", "来一笔",
+        "帮我增加", "给我增加", "帮我添加", "给我添加",
+        "增加", "添加",
+        // 创建 / 新建 / 设置
+        "帮我创建一个", "给我创建一个", "帮我新建一个", "给我新建一个", "帮我设置一个", "给我设置一个",
+        "帮我创建", "给我创建", "帮我新建", "给我新建", "帮我设置", "给我设置",
+        "创建", "新建", "设置",
+        // 录入 / 保存
+        "帮我录入", "给我录入", "录入",
+        "帮我保存", "给我保存", "保存",
+        // 通用「帮我 / 给我」
+        "帮我", "给我"
+    ]
+
+    /// 剥离命令动词前缀后，紧接的量词（一个/一条…）也应去掉，避免「帮我添加一个买菜提醒」残留成「一个买菜提醒」。
+    private static let commandMeasureWords: [String] = [
+        "一个", "一条", "一项", "一件", "这台", "这部", "这张", "这把", "那只", "那个", "这个"
+    ]
+
+    /// 剥离写入类命令动词前缀（只剥前缀，不全局删除，避免名字里正常的「记/添加」被误删）。
+    /// 循环剥离：处理「帮我记一下」这类组合，直到不再命中前缀为止。
+    private static func stripCommandVerbPrefix(_ text: String) -> String {
+        var t = text
+        var changed = true
+        while changed {
+            changed = false
+            for p in commandVerbPrefixes where t.hasPrefix(p) {
+                t = String(t.dropFirst(p.count))
+                changed = true
+                break
+            }
+            for m in commandMeasureWords where t.hasPrefix(m) {
+                t = String(t.dropFirst(m.count))
+                changed = true
+                break
+            }
+        }
+        return t
+    }
+
     private static func parseFoodNameAndWeight(_ text: String) -> (name: String, weight: Double, portion: String)? {
         var t = text
+        // 剥离写入类命令动词前缀（记/记录/添加/…），避免「记午餐吃了饺子200克」残留成「记饺子」
+        t = ChatView.stripCommandVerbPrefix(t)
 
         // 先去掉餐次词，避免餐次混入食物名
         for meal in ["早餐", "早饭", "早上", "今早",
@@ -1901,6 +1970,8 @@ struct ChatView: View {
                      "夜宵", "加餐", "点心", "零食"] {
             t = t.replacingOccurrences(of: meal, with: "")
         }
+        // 餐次词移除后，命令动词可能暴露到句首（如「中午记了…」→「记了…」），再剥一次命令动词前缀。
+        t = ChatView.stripCommandVerbPrefix(t)
 
         // 在份量提取之前，先清掉「花」作花费动词且后接金额（含可选「了」，如「汉堡花10元」「汉堡花了10元」「汉堡花32块」），
         // 否则「块」等会被当成重量单位吃掉，导致残留成「汉堡花」。
@@ -2361,14 +2432,9 @@ struct ChatView: View {
 
         // 提取标题：先移除前缀动词，再移除日期、时段词和「提醒/待办」后缀
         var title = text
-        let prefixes = ["帮我增加一个", "帮我添加一个", "帮我创建一个", "帮我新建一个", "帮我设置一个", "帮我记一个",
-                        "增加一个", "添加一个", "创建一个", "新建一个", "设置一个", "记一个",
-                        "帮我增加", "帮我添加", "帮我创建", "帮我新建", "帮我设置", "帮我记",
-                        "增加", "添加", "创建", "新建", "设置", "记"]
-        for p in prefixes where title.hasPrefix(p) {
-            title = String(title.dropFirst(p.count))
-            break
-        }
+        // 去掉命令动词前缀（记/记录/添加/增加/创建/新建/设置/录入/保存/帮我/给我…），
+        // 与饮食/账单/云端共用 commandVerbPrefixes，避免「给我记个买菜提醒」残留成「给我记个买菜提醒」。
+        title = ChatView.stripCommandVerbPrefix(title)
         title = title.replacingOccurrences(of: datePattern, with: "", options: .regularExpression)
         title = title.replacingOccurrences(of: "明天|后天|明日", with: "", options: .regularExpression)
         // 移除星期词（下周六/这周六/礼拜天/星期一等），避免标题残留
@@ -2927,6 +2993,7 @@ struct ChatView: View {
                         HealthManager.shared.saveCaloriesConsumed(cal, date: target.date)
                         FoodMetaStore.upsert(name: foodName, displayName: foodName,
                                              kcal: baseCal, protein: basePro, carbs: baseCar, fat: baseFat,
+                                             fiber: baseFiber, sugar: baseSugar, sodium: baseSodium,
                                              source: "cloud", in: context)
                         summary.append("🔄 已更新「\(foodName)」：\(target.meal) \(Int(cal)) kcal\n  蛋白 \(String(format: "%.1f", target.protein))g · 碳水 \(String(format: "%.1f", target.carbs))g · 脂肪 \(String(format: "%.1f", target.fat))g · 纤维 \(String(format: "%.1f", target.fiber))g · 糖 \(String(format: "%.1f", target.sugar))g · 钠 \(String(format: "%.0f", target.sodium))mg\n\n结果仅供参考，如需修改可到\"饮食记录\"页面进行修改。")
                     } else {
@@ -2960,6 +3027,7 @@ struct ChatView: View {
                                              imageName: nil))
                     FoodMetaStore.upsert(name: foodName, displayName: foodName,
                                          kcal: baseCal, protein: basePro, carbs: baseCar, fat: baseFat,
+                                         fiber: baseFiber, sugar: baseSugar, sodium: baseSodium,
                                          source: "cloud", in: context)
                     HealthManager.shared.saveCaloriesConsumed(cal, date: .now)
                     summary.append("🍽 \(meal)「\(foodName)」\(Int(cal)) kcal\n  蛋白 \(String(format: "%.1f", protein))g · 碳水 \(String(format: "%.1f", carbs))g · 脂肪 \(String(format: "%.1f", fat))g · 纤维 \(String(format: "%.1f", fiber))g · 糖 \(String(format: "%.1f", sugar))g · 钠 \(String(format: "%.0f", sodium))mg\n\n结果仅供参考，如需修改可到\"饮食记录\"页面进行修改。")

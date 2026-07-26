@@ -952,6 +952,7 @@ struct ResultConfirmView: View {
                 FoodMetaStore.upsert(name: name, displayName: ref.name,
                                      kcal: ref.kcal, protein: ref.protein,
                                      carbs: ref.carbs, fat: ref.fat,
+                                     fiber: ref.fiber, sugar: ref.sugar, sodium: ref.sodium,
                                      source: "cloud", in: context)
                 editableFoods[0].caloriesPer100g = ref.kcal
                 editableFoods[0].proteinPer100g = ref.protein
