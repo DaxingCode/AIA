@@ -25,8 +25,10 @@
 - view 若会被 navigationDestination 推入父级 NavigationStack，自身**绝不能**包 NavigationStack；双调用点（push+sheet）必须拆 `XxxSheet` wrapper。历史崩过的 view（EditTodoView）即使只剩 sheet 调用也永留 wrapper。
 - Swift struct 带默认属性（如 `let isAdding: Bool = false`）必须显式写 init，否则调用方报 extra argument。
 - 加 toolbar+多 sheet+多层 ZStack 报 type-check timeout → 拆 `@ViewBuilder private func` helper，body 只调 helper。
+- **`ScrollViewReader` 包裹大 body 同样会触发 type-check timeout**（如饮食记录页把整段 `if/else` 食物列表留在 body + Reader 包裹 → `unable to type-check this expression in reasonable time`）。把条件分支区抽成 `@ViewBuilder private var xxx: some View`（必须标 `@ViewBuilder`，否则 `if/else` 两分支类型不一致报 `branches have mismatching types`；`@ViewBuilder` 走 `buildEither` 统一为 `_ConditionalContent`，同原内联在 `body` 效果），body 内只调 `xxx.id("anchor")` 供 `proxy.scrollTo` 用。
 - push 一致性：全编程式 `path.append` 或全闭包 `NavigationLink`，混用会绕过中间页。
 - Button 不能嵌 NavigationLink.label；行内多交互用 ZStack 分层。禁 `ForEach(0..<n)+数组[i]` 遍历 @Query 派生数组→`ForEach(Array(x.enumerated()),id:\.offset)`。
+- **监听 SegmentedPicker/Picker/Stepper/Toggle 等用户控件的 Binding 写入做副作用时，别用 `.onChange(of: state)`**——首次渲染/状态恢复存在边界误触发（即使 iOS 17+ 文档说 default `initial:false`）。**正确做法：自定义 `Binding(get:set:)`**——getter 直返 `@State`，setter 同步写状态 + 副作用（SegmentedPicker 的 `selection = opt.value` 只在 Button 内被调，首次渲染只读不写，零误触发）。
 
 ## 图片识别链路（2026-07-22 单一入口）
 `recognizeWithLocalPriority`：①本地 OCR 仅判营养成分表+视觉失败兜底；②营养成分表→本地版面解析；③其它图片统一走视觉模型；④失败本地兜底，无则抛错绝不返 0 空账单。营养库匹配：精确→别名→子串(头名词靠后优先)→调料前缀护栏。
@@ -43,6 +45,8 @@
 - 深色 hairline 标准 dark `0x636366` + 宽度≥0.7pt（light `0xe6e9ec` 不动）。按字段分组列表相邻组间插 hairline 0.7pt。
 - **hairline vs iconInactive 分工（2026-07-26 踩坑）**：`AIATheme.hairline` light `0xe6e9ec` vs `fillSoft` light `0xeef1f4` 色差仅 ~6 级，**作"容器边框/控件分隔"在浅色下几乎不可见**。「**全行/全段分隔细线**」用 hairline（克制、深色对）；「**需可见但克制的容器描边/控件分隔**」（如 SegmentedPicker 外层描边 + 页签间分隔）改用 `AIATheme.iconInactive`（light `0xc9ced3`、dark `0x5a5a5e`，双模式色差都 ~38-46 级清晰）。
 - **HStack/VStack 内 Rectangle/Divider 控高/控宽必须用显式 `frame(width:height:)`**（2026-07-26 踩坑）：`Rectangle` 在父容器默认被拉满到「最高子项」尺寸，`.padding(.vertical/horizontal, ...)` 只缩**内部**内容、**不影响外部撑满**。要控高必须 `frame(width: 0.7, height: 18)` 这种显式指定。SegmentedPicker 竖线高度 ≈ 60% 容器高 = 18pt 是 iOS 标准克制比例。
+- **ScrollView 内动态列表用 LazyVStack 不用 VStack**（2026-07-26 踩坑）：`VStack` eager 渲染全部子项；content 结构变化时（如 `EmptyStateView` ↔ `ForEach` 互换、`@Query` 触发重排）SwiftUI 会**复位 scroll position 到 top**，用户体感「点 tab/chip 跳回顶部」。`LazyVStack` 只渲染可见项，content 尺寸变化时 scroll position 保持稳定。饮食记录页（FoodListView 主 ScrollView）是该铁律的标准应用场景。
+- **`scrollTo(anchor:)` 要让某锚点稳定贴顶，必须保证 content 总高足够**（2026-07-26 踩坑）：SwiftUI 的最大可滚偏移 = max(0, content总高 − 视口高)。若某餐次/某状态下内容过短（空态 `EmptyStateView` 在 `LazyVStack` 塌缩、条目少），content 总高 < 视口高 → 最大偏移被钳制到很小值 → `scrollTo(anchor:.top)` 贴不了顶，体感「这个 tab 没滚够」（早餐内容高正常、午餐/加餐内容短不足）。**根治：在 `LazyVStack`/content 末尾加 `Color.clear.frame(minHeight: N)`（N 取大于一屏余量的常值，本例 1000pt）占位**——`Color.clear` 不渲染、不占可见空间，仅撑高 content，使各状态锚点都能落到位。
 - 列表图标用语义色 SF Symbol 直显，避开 iOS 新版复杂 symbol（如 `sparkles.rectangle.portrait.fill` 渲染退化）。经典：`wand.and.stars`/`bell.badge.fill`/`viewfinder.circle`。
 
 ## 协作/用户/营养库
