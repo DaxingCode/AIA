@@ -199,7 +199,7 @@ struct FoodListView: View {
                 Image(systemName: "fork.knife")
                     .font(AIATheme.Font.micro.weight(.semibold))
                     .foregroundStyle(AIATheme.food)
-                Text("常吃食物 · 点一下快速记录")
+                Text("常吃食物 · 点一下快速记录 100g")
                     .font(AIATheme.Font.footnote.weight(.semibold))
                     .foregroundStyle(AIATheme.ink)
                 Spacer()
