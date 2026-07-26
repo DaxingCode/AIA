@@ -140,6 +140,11 @@ struct FoodListView: View {
     @State private var selectedIDs = Set<PersistentIdentifier>()
     @State private var showDeleteConfirm = false
 
+    /// 点餐次 tab / 常吃食物 chip 后，触发自动下滚到食物列表（彩色圆点图标）位置。
+    /// 用计数器 nonce 而非直接 scrollTo，是因为 chip 的入库动作发生在 saveFrequentFood 内部，
+    /// 那里拿不到 ScrollViewReader 的 proxy；统一在 reader 内靠 onChange(nonce) 完成滚动。
+    @State private var scrollToFoodNonce: Int = 0
+
     // 按进入时间自动匹配餐次页签：5-11 早餐、11-16 午餐、16-22 晚餐，其余为加餐
     private static func defaultMeal(for date: Date) -> MealFilter {
         let hour = Calendar.current.component(.hour, from: date)
@@ -454,6 +459,84 @@ struct FoodListView: View {
         )
         context.insert(entry)   // SwiftData autosave 自动持久化，无需手动 save()
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        // 入库成功后触发自动下滚，让新记录（彩色圆点图标）进入视野
+        scrollToFoodNonce += 1
+    }
+
+    /// 当前餐次的食物记录列表区（空态 / 列表）。
+    /// 单独抽成计算属性，隔离类型检查复杂度——原 body 过大 + ScrollViewReader 包裹后
+    /// 触发 "the compiler is unable to type-check this expression in reasonable time"；
+    /// 抽出后 body 与该属性各自独立类型检查即通过。
+    /// 该区在 body 中通过 `.id("foodListTop")` 标记，供点餐次 tab / 点 chip 后自动下滚到此处
+    /// （每条左侧 `Circle().fill(AIATheme.food)` 彩色圆点图标）。
+    @ViewBuilder
+    private var mealItemsSection: some View {
+        if mealItems.isEmpty {
+            EmptyStateView(
+                kind: .diet,
+                title: "这餐还没记录",
+                message: "到相册选一张照片，阿宝会自动识别菜名、热量和营养元素。",
+                actionTitle: "到相册选一张",
+                action: { showPicker = true },
+                footer: "点击底部拍照、相册上传食物照片\n或点击文字输入、语音输入\n也可使用AI快速记录哦"
+            )
+        } else {
+            ForEach(mealItems) { f in
+                SelectableRow(
+                    isSelecting: multiSelectMode,
+                    isSelected: selectedIDs.contains(f.persistentModelID),
+                    onTap: { editFood = f },
+                    onLongPress: { enterFoodMultiSelect(f.persistentModelID) },
+                    onToggle: { toggleFoodSelection(f.persistentModelID) },
+                    onDelete: { SafeDelete.food(f, in: context) }
+                ) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        // hero：左食物名 + 餐次·份量；右热量大数字
+                        HStack(alignment: .center, spacing: 10) {
+                            Circle()
+                                .fill(AIATheme.food)
+                                .frame(width: 8, height: 8)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(f.name)
+                                    .font(AIATheme.Font.subhead.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                let sourceText = (f.imageName?.isEmpty == false)
+                                    ? NSLocalizedString("food.recognized", comment: "")
+                                    : NSLocalizedString("food.by_chat", comment: "")
+                                Text([f.portion, sourceText].compactMap { $0.isEmpty ? nil : $0 }.joined(separator: " · "))
+                                    .font(AIATheme.Font.micro)
+                                    .foregroundStyle(AIATheme.muted)
+                            }
+                            Spacer()
+                            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                                Text("\(Int(f.calories))")
+                                    .font(AIATheme.Font.title3.weight(.bold))
+                                    .foregroundStyle(AIATheme.food)
+                                    .contentTransition(.numericText())
+                                Text("kcal")
+                                    .font(AIATheme.Font.micro)
+                                    .foregroundStyle(AIATheme.sub)
+                            }
+                        }
+
+                        Divider()
+                            .background(AIATheme.hairline)
+
+                        // 6 列营养明细：碳水 / 蛋白 / 脂肪 / 纤维 / 糖 / 钠
+                        HStack(spacing: 4) {
+                            macroCell("碳水", f.carbs, "g")
+                            macroCell("蛋白", f.protein, "g")
+                            macroCell("脂肪", f.fat, "g")
+                            macroCell("纤维", f.fiber, "g")
+                            macroCell("糖", f.sugar, "g")
+                            macroCell("钠", f.sodium, "mg")
+                        }
+                    }
+                    .padding(.vertical, 10).padding(.horizontal, 12)
+                    .card(radius: AIATheme.rMD, shadow: false)
+                }
+            }
+        }
     }
 
     private var dateTitleText: String {
@@ -515,7 +598,8 @@ struct FoodListView: View {
             Group {
                 switch dietTab {
                 case .records:
-                    ScrollView {
+                    ScrollViewReader { proxy in
+                        ScrollView {
                         // 用 LazyVStack 而非 VStack：VStack eager 渲染全部子项，
                         // 当餐次 filter 切换或新 food 入库触发 content 重建时（EmptyStateView ↔ ForEach 互换），
                         // SwiftUI 会在 content 尺寸剧烈变化时 scroll position 复位到 top（用户反馈的"点 tab / chip 跳回顶部"）。
@@ -671,76 +755,19 @@ struct FoodListView: View {
                         .card(radius: AIATheme.rMD)
                     }
 
-                    if mealItems.isEmpty {
-                        EmptyStateView(
-                            kind: .diet,
-                            title: "这餐还没记录",
-                            message: "到相册选一张照片，阿宝会自动识别菜名、热量和营养元素。",
-                            actionTitle: "到相册选一张",
-                            action: { showPicker = true },
-                            footer: "点击底部拍照、相册上传食物照片\n或点击文字输入、语音输入\n也可使用AI快速记录哦"
-                        )
-                        // EmptyStateView 内部已自带 .frame(maxWidth:.infinity, maxHeight:.infinity)（AIAIllustrations.swift:121），
-                        // 这里无需重复；移除冗余 modifier 避免叠层干扰 LazyVStack 的 layout pass。
-                    } else {
-                        ForEach(mealItems) { f in
-                            SelectableRow(
-                                isSelecting: multiSelectMode,
-                                isSelected: selectedIDs.contains(f.persistentModelID),
-                                onTap: { editFood = f },
-                                onLongPress: { enterFoodMultiSelect(f.persistentModelID) },
-                                onToggle: { toggleFoodSelection(f.persistentModelID) },
-                                onDelete: { SafeDelete.food(f, in: context) }
-                            ) {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    // hero：左食物名 + 餐次·份量；右热量大数字
-                                    HStack(alignment: .center, spacing: 10) {
-                                        Circle()
-                                            .fill(AIATheme.food)
-                                            .frame(width: 8, height: 8)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(f.name)
-                                                .font(AIATheme.Font.subhead.weight(.semibold))
-                                                .foregroundStyle(.primary)
-                                            let sourceText = (f.imageName?.isEmpty == false)
-                                                ? NSLocalizedString("food.recognized", comment: "")
-                                                : NSLocalizedString("food.by_chat", comment: "")
-                                            Text([f.portion, sourceText].compactMap { $0.isEmpty ? nil : $0 }.joined(separator: " · "))
-                                                .font(AIATheme.Font.micro)
-                                                .foregroundStyle(AIATheme.muted)
-                                        }
-                                        Spacer()
-                                        HStack(alignment: .firstTextBaseline, spacing: 2) {
-                                            Text("\(Int(f.calories))")
-                                                .font(AIATheme.Font.title3.weight(.bold))
-                                                .foregroundStyle(AIATheme.food)
-                                                .contentTransition(.numericText())
-                                            Text("kcal")
-                                                .font(AIATheme.Font.micro)
-                                                .foregroundStyle(AIATheme.sub)
-                                        }
-                                    }
-
-                                    Divider()
-                                        .background(AIATheme.hairline)
-
-                                    // 6 列营养明细：碳水 / 蛋白 / 脂肪 / 纤维 / 糖 / 钠
-                                    HStack(spacing: 4) {
-                                        macroCell("碳水", f.carbs, "g")
-                                        macroCell("蛋白", f.protein, "g")
-                                        macroCell("脂肪", f.fat, "g")
-                                        macroCell("纤维", f.fiber, "g")
-                                        macroCell("糖", f.sugar, "g")
-                                        macroCell("钠", f.sodium, "mg")
-                                    }
-                                }
-                                .padding(.vertical, 10).padding(.horizontal, 12)
-                                .card(radius: AIATheme.rMD, shadow: false)
-                            }
-                        }
-                    }
+                    mealItemsSection
+                        .id("foodListTop")
                 }
                 .padding()
+                .onChange(of: scrollToFoodNonce) { _ in
+                    withAnimation {
+                        proxy.scrollTo("foodListTop", anchor: .top)
+                    }
+                }
+                .onChange(of: meal) { _ in
+                    scrollToFoodNonce += 1
+                }
+                }
             }
         case .preferences:
             DietPreferencesView()
