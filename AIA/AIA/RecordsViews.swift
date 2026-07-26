@@ -192,7 +192,7 @@ struct FoodListView: View {
         )
     }
 
-    /// 「常吃食物」快速记录区：横向分页展示常用食物，点击名称一键入库当前餐次，左右滑动切换。
+    /// 「常吃食物」快速记录区：横向一排胶囊标签，左右滑动浏览，点 chip 一键入库当前餐次。
     private var frequentFoodRegion: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 4) {
@@ -203,53 +203,40 @@ struct FoodListView: View {
                     .font(AIATheme.Font.footnote.weight(.semibold))
                     .foregroundStyle(AIATheme.ink)
                 Spacer()
-                Text("左右滑动切换")
+                Text("左右滑动浏览")
                     .font(AIATheme.Font.micro)
                     .foregroundStyle(AIATheme.muted)
             }
             .padding(.horizontal, 2)
 
-            TabView {
-                ForEach(Array(frequentFoods.enumerated()), id: \.element) { _, name in
-                    frequentFoodCard(name)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(frequentFoods.enumerated()), id: \.element) { idx, name in
+                        frequentFoodChip(name, highlighted: idx == 0)
+                    }
                 }
+                .padding(.horizontal, 2)
+                .padding(.vertical, 2)
             }
-            .tabViewStyle(.page(indexDisplayMode: .always))
-            .frame(height: 64)
         }
         .padding(.top, 4)
     }
 
-    private func frequentFoodCard(_ name: String) -> some View {
-        let ref = NutritionLibrary.shared.match(name)
-        return Button {
+    private func frequentFoodChip(_ name: String, highlighted: Bool) -> some View {
+        Button {
             saveFrequentFood(name)
         } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "plus.circle.fill")
-                    .foregroundStyle(AIATheme.food)
-                    .font(.system(size: 18))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(name)
-                        .font(AIATheme.Font.subhead.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    if let ref {
-                        Text("\(Int(ref.kcal)) kcal / 100g")
-                            .font(AIATheme.Font.micro)
-                            .foregroundStyle(AIATheme.muted)
-                    }
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(AIATheme.food.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
-            .overlay(
-                RoundedRectangle(cornerRadius: AIATheme.rMD)
-                    .stroke(AIATheme.food.opacity(0.22), lineWidth: 0.5)
-            )
+            Text(name)
+                .font(AIATheme.Font.footnote.weight(.medium))
+                .foregroundStyle(AIATheme.ink)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(AIATheme.food.opacity(highlighted ? 0.16 : 0.08))
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(AIATheme.food.opacity(highlighted ? 0.45 : 0.22), lineWidth: 0.5)
+                )
         }
         .buttonStyle(.plain)
     }
