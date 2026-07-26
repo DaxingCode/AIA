@@ -113,7 +113,6 @@ private enum MealFilter: String, CaseIterable {
 
 struct FoodListView: View {
     @Environment(\.modelContext) private var context
-    @Environment(\.colorScheme) private var colorScheme
     @Query(filter: #Predicate { !$0.syncDeleted }, sort: \FoodEntry.date, order: .reverse) private var foods: [FoodEntry]
     @Query(filter: #Predicate<WaterLog> { !$0.syncDeleted }) private var waterLogs: [WaterLog]
     @State private var meal: MealFilter = .lu
@@ -224,24 +223,20 @@ struct FoodListView: View {
     }
 
     private func frequentFoodChip(_ name: String, highlighted: Bool) -> some View {
-        let isDark = colorScheme == .dark
-        let bg = isDark ? AIATheme.dietBG : AIATheme.food.opacity(highlighted ? 0.16 : 0.08)
-        let fg = isDark ? AIATheme.food : AIATheme.ink
-        let stroke = isDark
-            ? AIATheme.food.opacity(highlighted ? 0.7 : 0.35)
-            : AIATheme.food.opacity(highlighted ? 0.45 : 0.22)
-        let strokeW: CGFloat = (isDark && highlighted) ? 1 : 0.5
-        return Button {
+        Button {
             saveFrequentFood(name)
         } label: {
             Text(name)
                 .font(AIATheme.Font.footnote.weight(.medium))
-                .foregroundStyle(fg)
+                .foregroundStyle(AIATheme.ink) // 胶囊底是 food 琥珀色（非深底），深字在琥珀上清晰可读
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .background(bg)
+                .background(AIATheme.food) // 与标题开头 fork.knife 图标同色
                 .clipShape(Capsule())
-                .overlay(Capsule().stroke(stroke, lineWidth: strokeW))
+                .overlay(
+                    Capsule()
+                        .stroke(AIATheme.ink.opacity(highlighted ? 0.55 : 0.22), lineWidth: highlighted ? 1.5 : 0.5)
+                )
         }
         .buttonStyle(.plain)
     }
