@@ -1392,7 +1392,7 @@ struct BillListView: View {
                 .padding(.bottom, 6)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     if filter == .all {
                         // 聚合入口：周期记账 / 账单导入 / 自动记账
                         // 2026-07-24：改编程式 push 走根 NavigationStack(path:)，跟 TodoToolsView 入口同源。
@@ -1424,6 +1424,8 @@ struct BillListView: View {
                         }
                         .buttonStyle(.plain)
 
+                    // Card · 月度预算
+                    VStack(alignment: .leading, spacing: 8) {
                         SectionTitle(text: NSLocalizedString("bill.budget", comment: ""))
                         Button {
                             editedBudget = monthlyBudget
@@ -1445,12 +1447,17 @@ struct BillListView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                    }
+                    .padding(12)
+                    .card(radius: AIATheme.rMD)
 
                         summaryCarousel
                     }
 
                     if filter == .calendar {
                         billCalendarView
+                            .padding(12)
+                            .card(radius: AIATheme.rMD)
                     } else if filter == .month {
                         VStack(alignment: .leading, spacing: 8) {
                             // 月报 / 数据导出入口：按月导出 CSV、生成月报图片分享
