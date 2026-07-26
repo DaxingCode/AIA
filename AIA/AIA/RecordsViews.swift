@@ -1002,64 +1002,83 @@ struct HealthListView: View {
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    // 顶部4个圆环，与下方4模块同列宽对齐
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                        RingView(value: "\(health.stepsToday)", caption: NSLocalizedString("health.ring.steps", comment: ""),
-                                 progress: Double(health.stepsToday) / 10000, color: AIATheme.health,
-                                 size: 74, lineWidth: 7)
-                        RingView(value: sleepHours > 0 ? String(format: "%.1f", sleepHours) : "—",
-                                 caption: NSLocalizedString("health.ring.sleep", comment: ""),
-                                 progress: sleepHours / 8, color: AIATheme.health,
-                                 size: 74, lineWidth: 7)
-                        RingView(value: health.activeEnergyToday > 0 ? "\(Int(health.activeEnergyToday))" : "—",
-                                 caption: NSLocalizedString("health.ring.energy", comment: ""),
-                                 progress: health.activeEnergyToday / 500, color: AIATheme.health,
-                                 size: 74, lineWidth: 7)
-                        RingView(value: health.exerciseTimeToday > 0 ? "\(Int(health.exerciseTimeToday))" : "—",
-                                 caption: NSLocalizedString("health.ring.exercise", comment: ""),
-                                 progress: health.exerciseTimeToday / 30, color: AIATheme.health,
-                                 size: 74, lineWidth: 7)
-                    }
-
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                        NavigationLink { WeightTrendView() } label: {
-                            StatCard(value: stat("体重"), caption: NSLocalizedString("health.stat.weight", comment: ""))
+                VStack(alignment: .leading, spacing: 12) {
+                    // Card A · 今日概览（圆环 + 关键指标）
+                    VStack(alignment: .leading, spacing: 12) {
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                            RingView(value: "\(health.stepsToday)", caption: NSLocalizedString("health.ring.steps", comment: ""),
+                                     progress: Double(health.stepsToday) / 10000, color: AIATheme.health,
+                                     size: 74, lineWidth: 7)
+                            RingView(value: sleepHours > 0 ? String(format: "%.1f", sleepHours) : "—",
+                                     caption: NSLocalizedString("health.ring.sleep", comment: ""),
+                                     progress: sleepHours / 8, color: AIATheme.health,
+                                     size: 74, lineWidth: 7)
+                            RingView(value: health.activeEnergyToday > 0 ? "\(Int(health.activeEnergyToday))" : "—",
+                                     caption: NSLocalizedString("health.ring.energy", comment: ""),
+                                     progress: health.activeEnergyToday / 500, color: AIATheme.health,
+                                     size: 74, lineWidth: 7)
+                            RingView(value: health.exerciseTimeToday > 0 ? "\(Int(health.exerciseTimeToday))" : "—",
+                                     caption: NSLocalizedString("health.ring.exercise", comment: ""),
+                                     progress: health.exerciseTimeToday / 30, color: AIATheme.health,
+                                     size: 74, lineWidth: 7)
                         }
-                        .buttonStyle(.plain)
-                        StatCard(value: stat("身高"), caption: NSLocalizedString("health.stat.height", comment: ""))
-                        StatCard(value: stat("心率"), caption: NSLocalizedString("health.stat.restingHR", comment: ""))
-                        StatCard(value: stat("BMI"), caption: NSLocalizedString("health.stat.bmi", comment: ""))
-                    }
 
-                    SectionTitle(text: NSLocalizedString("health.weightTrend", comment: ""))
-                    if weightTrend.isEmpty {
-                        Text(NSLocalizedString("health.noWeight", comment: "")).font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
-                    } else {
-                        Chart(weightTrend) { p in
-                            LineMark(x: .value(NSLocalizedString("chart.day", comment: ""), p.label), y: .value(NSLocalizedString("chart.kg", comment: ""), p.value))
-                                .foregroundStyle(AIATheme.health).interpolationMethod(.monotone)
-                            PointMark(x: .value(NSLocalizedString("chart.day", comment: ""), p.label), y: .value(NSLocalizedString("chart.kg", comment: ""), p.value))
-                                .foregroundStyle(AIATheme.health)
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                            NavigationLink { WeightTrendView() } label: {
+                                StatCard(value: stat("体重"), caption: NSLocalizedString("health.stat.weight", comment: ""))
+                            }
+                            .buttonStyle(.plain)
+                            StatCard(value: stat("身高"), caption: NSLocalizedString("health.stat.height", comment: ""))
+                            StatCard(value: stat("心率"), caption: NSLocalizedString("health.stat.restingHR", comment: ""))
+                            StatCard(value: stat("BMI"), caption: NSLocalizedString("health.stat.bmi", comment: ""))
                         }
-                        .frame(height: 80)
-                        .chartYAxis(.hidden).chartXAxis(.hidden)
                     }
+                    .padding(12)
+                    .card(radius: AIATheme.rMD)
 
-                    SectionTitle(text: NSLocalizedString("health.sleepStages", comment: ""))
-                    CardRow(icon: "🌙", iconBG: AIATheme.surfaceSecondary, title: String(format: NSLocalizedString("health.sleep.deep", comment: ""), 1.8), subtitle: String(format: NSLocalizedString("health.sleep.deepSub", comment: ""), 25), value: "25%")
-                    CardRow(icon: "💤", iconBG: AIATheme.surfaceSecondary, title: String(format: NSLocalizedString("health.sleep.light", comment: ""), 4.2), subtitle: NSLocalizedString("common.none", comment: ""), value: "58%")
-                    CardRow(icon: "⚡", iconBG: AIATheme.surfaceSecondary, title: String(format: NSLocalizedString("health.sleep.rem", comment: ""), 1.2), subtitle: NSLocalizedString("health.sleep.remSub", comment: ""), value: "17%")
-
-                    if !healths.isEmpty {
-                        SectionTitle(text: NSLocalizedString("health.weekSteps", comment: ""))
-                        Chart(weekSteps) { p in
-                            BarMark(x: .value(NSLocalizedString("chart.day", comment: ""), p.label), y: .value(NSLocalizedString("chart.step", comment: ""), p.value))
-                                .foregroundStyle(AIATheme.health.opacity(0.7))
+                    // Card B · 体重趋势
+                    VStack(alignment: .leading, spacing: 8) {
+                        SectionTitle(text: NSLocalizedString("health.weightTrend", comment: ""))
+                        if weightTrend.isEmpty {
+                            Text(NSLocalizedString("health.noWeight", comment: "")).font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
+                        } else {
+                            Chart(weightTrend) { p in
+                                LineMark(x: .value(NSLocalizedString("chart.day", comment: ""), p.label), y: .value(NSLocalizedString("chart.kg", comment: ""), p.value))
+                                    .foregroundStyle(AIATheme.health).interpolationMethod(.monotone)
+                                PointMark(x: .value(NSLocalizedString("chart.day", comment: ""), p.label), y: .value(NSLocalizedString("chart.kg", comment: ""), p.value))
+                                    .foregroundStyle(AIATheme.health)
+                            }
+                            .frame(height: 80)
+                            .chartYAxis(.hidden).chartXAxis(.hidden)
                         }
-                        .frame(height: 70)
-                        .chartYAxis(.hidden).chartXAxis(.hidden)
                     }
+                    .padding(12)
+                    .card(radius: AIATheme.rMD)
+
+                    // Card C · 睡眠阶段
+                    VStack(alignment: .leading, spacing: 8) {
+                        SectionTitle(text: NSLocalizedString("health.sleepStages", comment: ""))
+                        CardRow(icon: "🌙", iconBG: AIATheme.surfaceSecondary, title: String(format: NSLocalizedString("health.sleep.deep", comment: ""), 1.8), subtitle: String(format: NSLocalizedString("health.sleep.deepSub", comment: ""), 25), value: "25%")
+                        CardRow(icon: "💤", iconBG: AIATheme.surfaceSecondary, title: String(format: NSLocalizedString("health.sleep.light", comment: ""), 4.2), subtitle: NSLocalizedString("common.none", comment: ""), value: "58%")
+                        CardRow(icon: "⚡", iconBG: AIATheme.surfaceSecondary, title: String(format: NSLocalizedString("health.sleep.rem", comment: ""), 1.2), subtitle: NSLocalizedString("health.sleep.remSub", comment: ""), value: "17%")
+                    }
+                    .padding(12)
+                    .card(radius: AIATheme.rMD)
+
+                    // Card D · 本周步数
+                    VStack(alignment: .leading, spacing: 8) {
+                        if !healths.isEmpty {
+                            SectionTitle(text: NSLocalizedString("health.weekSteps", comment: ""))
+                            Chart(weekSteps) { p in
+                                BarMark(x: .value(NSLocalizedString("chart.day", comment: ""), p.label), y: .value(NSLocalizedString("chart.step", comment: ""), p.value))
+                                    .foregroundStyle(AIATheme.health.opacity(0.7))
+                            }
+                            .frame(height: 70)
+                            .chartYAxis(.hidden).chartXAxis(.hidden)
+                        }
+                    }
+                    .padding(12)
+                    .card(radius: AIATheme.rMD)
 
                     SectionTitle(text: "健康记录")
                     if healths.isEmpty {

@@ -41,6 +41,8 @@
 - 空态垂直居中；底部栏 `AIBottomBar` 箭头由 `iconOrder` 推导。
 - 账单行间 hairline 3 处（groupedByDate/billCalendarView/MonthlyBillListView）必一起改：`ForEach(enumerated)`+`Rectangle().fill(AIATheme.hairline).frame(height:0.7).padding(.leading,62)`。
 - 深色 hairline 标准 dark `0x636366` + 宽度≥0.7pt（light `0xe6e9ec` 不动）。按字段分组列表相邻组间插 hairline 0.7pt。
+- **hairline vs iconInactive 分工（2026-07-26 踩坑）**：`AIATheme.hairline` light `0xe6e9ec` vs `fillSoft` light `0xeef1f4` 色差仅 ~6 级，**作"容器边框/控件分隔"在浅色下几乎不可见**。「**全行/全段分隔细线**」用 hairline（克制、深色对）；「**需可见但克制的容器描边/控件分隔**」（如 SegmentedPicker 外层描边 + 页签间分隔）改用 `AIATheme.iconInactive`（light `0xc9ced3`、dark `0x5a5a5e`，双模式色差都 ~38-46 级清晰）。
+- **HStack/VStack 内 Rectangle/Divider 控高/控宽必须用显式 `frame(width:height:)`**（2026-07-26 踩坑）：`Rectangle` 在父容器默认被拉满到「最高子项」尺寸，`.padding(.vertical/horizontal, ...)` 只缩**内部**内容、**不影响外部撑满**。要控高必须 `frame(width: 0.7, height: 18)` 这种显式指定。SegmentedPicker 竖线高度 ≈ 60% 容器高 = 18pt 是 iOS 标准克制比例。
 - 列表图标用语义色 SF Symbol 直显，避开 iOS 新版复杂 symbol（如 `sparkles.rectangle.portrait.fill` 渲染退化）。经典：`wand.and.stars`/`bell.badge.fill`/`viewfinder.circle`。
 
 ## 协作/用户/营养库
