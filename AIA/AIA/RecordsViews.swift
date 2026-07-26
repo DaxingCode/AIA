@@ -113,6 +113,7 @@ private enum MealFilter: String, CaseIterable {
 
 struct FoodListView: View {
     @Environment(\.modelContext) private var context
+    @Environment(\.colorScheme) private var colorScheme
     @Query(filter: #Predicate { !$0.syncDeleted }, sort: \FoodEntry.date, order: .reverse) private var foods: [FoodEntry]
     @Query(filter: #Predicate<WaterLog> { !$0.syncDeleted }) private var waterLogs: [WaterLog]
     @State private var meal: MealFilter = .lu
@@ -201,7 +202,7 @@ struct FoodListView: View {
                     .foregroundStyle(AIATheme.food)
                 Text("常吃食物 · 点一下快速记录 100g")
                     .font(AIATheme.Font.footnote.weight(.semibold))
-                    .foregroundStyle(AIATheme.ink)
+                    .foregroundStyle(Color.primary)
                 Spacer()
                 Text("左右滑动浏览")
                     .font(AIATheme.Font.micro)
@@ -223,20 +224,24 @@ struct FoodListView: View {
     }
 
     private func frequentFoodChip(_ name: String, highlighted: Bool) -> some View {
-        Button {
+        let isDark = colorScheme == .dark
+        let bg = isDark ? AIATheme.dietBG : AIATheme.food.opacity(highlighted ? 0.16 : 0.08)
+        let fg = isDark ? AIATheme.food : AIATheme.ink
+        let stroke = isDark
+            ? AIATheme.food.opacity(highlighted ? 0.7 : 0.35)
+            : AIATheme.food.opacity(highlighted ? 0.45 : 0.22)
+        let strokeW: CGFloat = (isDark && highlighted) ? 1 : 0.5
+        return Button {
             saveFrequentFood(name)
         } label: {
             Text(name)
                 .font(AIATheme.Font.footnote.weight(.medium))
-                .foregroundStyle(AIATheme.ink)
+                .foregroundStyle(fg)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .background(AIATheme.food.opacity(highlighted ? 0.16 : 0.08))
+                .background(bg)
                 .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .stroke(AIATheme.food.opacity(highlighted ? 0.45 : 0.22), lineWidth: 0.5)
-                )
+                .overlay(Capsule().stroke(stroke, lineWidth: strokeW))
         }
         .buttonStyle(.plain)
     }
