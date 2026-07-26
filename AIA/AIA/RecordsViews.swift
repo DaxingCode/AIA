@@ -2522,7 +2522,7 @@ struct ReminderListView: View {
         .padding(.vertical, 10)
         .padding(.leading, hasDoneCircle ? 44 : 12)
         .padding(.trailing, 12)
-        .background(AIATheme.surface).clipShape(RoundedRectangle(cornerRadius: 14))
+        .card(radius: AIATheme.rMD, shadow: false)
     }
 
     private func toggleDone(_ r: Reminder) {
