@@ -1496,14 +1496,8 @@ struct ChatView: View {
         var missingNutrition: [String] = []
         var cloudFilled: [String] = []
         for (name, weight, portion) in items {
-            var ref: FoodRef?
-            if let builtin = NutritionLibrary.shared.match(name) {
-                ref = builtin
-            } else if let meta = FoodMetaStore.lookup(name, in: context) {
-                ref = FoodRef(name: meta.displayName.isEmpty ? name : meta.displayName,
-                              kcal: meta.kcal, protein: meta.protein, carbs: meta.carbs, fat: meta.fat,
-                              fiber: meta.fiber, sugar: meta.sugar, sodium: meta.sodium)
-            } else {
+            var ref: FoodRef? = NutritionLibrary.shared.match(name, in: context)
+            if ref == nil {
                 // 本地库无 → 尝试云端查询营养（带超时，失败降级 0 占位）
                 if let cloudRef = await Self.queryFoodOrNil(name) {
                     // 云端结果存本地经验库，下次同名菜本地直出
@@ -1605,14 +1599,8 @@ struct ChatView: View {
         if nonFoodSignals.contains(trimmed.lowercased()) { return nil }
 
         // 尝试匹配本地营养库
-        let ref: FoodRef
-        if let local = NutritionLibrary.shared.match(trimmed) {
-            ref = local
-        } else if let meta = FoodMetaStore.lookup(trimmed, in: context) {
-            ref = FoodRef(name: meta.displayName.isEmpty ? trimmed : meta.displayName,
-                          kcal: meta.kcal, protein: meta.protein, carbs: meta.carbs, fat: meta.fat,
-                          fiber: meta.fiber, sugar: meta.sugar, sodium: meta.sodium)
-        } else {
+        var ref: FoodRef? = NutritionLibrary.shared.match(trimmed, in: context)
+        if ref == nil {
             // 本地无数据 → 联网查询
             guard let cloudRef = try? await RecognizeService.queryFood(name: trimmed) else { return nil }
             // 缓存到本地，下次直接命中
@@ -1622,6 +1610,7 @@ struct ChatView: View {
                                  source: "cloud", in: context)
             ref = cloudRef
         }
+        guard let ref else { return nil }
 
         let kcal = String(format: "%.0f", ref.kcal)
         let carb = String(format: "%.1f", ref.carbs)

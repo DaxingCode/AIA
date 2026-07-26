@@ -33,12 +33,16 @@ struct TellAIAIntent: AppIntent {
         }
         let context = container.mainContext
 
-        // 1. 云端解析一句话 → 结构化结果（bill / food / todo / health）
+        // 1. 本地快速解析优先（毫秒级、零网络）；识别不了再走云端 LLM
         let result: RecognitionResult
-        do {
-            result = try await RecognizeService.parseText(phrase).result
-        } catch {
-            return .result(dialog: "没连上，稍后再试？或者打开 App 手动记。")
+        if let localResult = LocalQuickParse.parse(phrase, in: context) {
+            result = localResult
+        } else {
+            do {
+                result = try await RecognizeService.parseText(phrase).result
+            } catch {
+                return .result(dialog: "没连上，稍后再试？或者打开 App 手动记。")
+            }
         }
 
         let types = result.types ?? []

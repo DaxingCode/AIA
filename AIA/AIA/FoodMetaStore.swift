@@ -81,4 +81,33 @@ enum FoodMetaStore {
             in: context
         )
     }
+
+    /// 首启 seed 用：把内置营养表的一行写入本地库（source:"builtin"）。
+    /// 若同归一化名已存在（含用户/云端沉淀的 cloud 条目）则跳过，不覆盖既有数据。
+    /// 写全 8 字段（区别于 upsert 仅写 4 字段），避免微营养素在 seed 时丢失。
+    static func seedIfAbsent(name: String, kcal: Double, protein: Double, carbs: Double,
+                             fat: Double, fiber: Double, sugar: Double, sodium: Double,
+                             in context: ModelContext) {
+        let key = FoodMeta.normalize(name)
+        guard !key.isEmpty else { return }
+        let descriptor = FetchDescriptor<FoodMeta>(predicate: #Predicate { $0.name == key })
+        if (try? context.fetch(descriptor))?.first != nil { return }
+        let meta = FoodMeta(name: name, displayName: name, kcal: kcal, protein: protein,
+                            carbs: carbs, fat: fat, fiber: fiber, sugar: sugar, sodium: sodium,
+                            source: "builtin", hitCount: 0, lastSeen: .distantPast)
+        context.insert(meta)
+    }
+
+    /// 匹配用：按归一化名查询，但**不递增 hitCount**（否则搜索会把内置词顶进「常吃」排序）。
+    static func peek(name: String, in context: ModelContext) -> FoodMeta? {
+        let key = FoodMeta.normalize(name)
+        guard !key.isEmpty else { return nil }
+        let descriptor = FetchDescriptor<FoodMeta>(predicate: #Predicate { $0.name == key })
+        return (try? context.fetch(descriptor))?.first
+    }
+
+    /// 子串扫描用：返回全部归一化名（含 builtin seed 与 cloud 沉淀）。
+    static func allNames(in context: ModelContext) -> [String] {
+        (try? context.fetch(FetchDescriptor<FoodMeta>()).map { $0.name }) ?? []
+    }
 }

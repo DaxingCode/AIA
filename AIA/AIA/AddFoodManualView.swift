@@ -22,18 +22,16 @@ struct FoodSearchResult: Identifiable, Hashable {
 
 /// 食物搜索核心逻辑（本地 + 联网兜底）。两边页面共用，避免代码重复。
 enum FoodSearcher {
-    private static let library = NutritionLibrary.shared
-
-    /// 本地搜：先 NutritionLibrary 命中（精确/别名/子串三级），再 FoodMeta 缓存命中。
+    /// 本地搜：先 NutritionLibrary 命中（精确/别名/子串三级，最终从 FoodMetaStore 取数），再 FoodMeta 缓存命中。
     /// 返回结果已按「归一化名称」去重，library 优先于 cache。
-    static func localSearch(_ query: String, foodMetas: [FoodMeta]) -> [FoodSearchResult] {
+    static func localSearch(_ query: String, foodMetas: [FoodMeta], in context: ModelContext) -> [FoodSearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return [] }
 
         var results: [FoodSearchResult] = []
 
         // ① NutritionLibrary 命中
-        if let ref = library.match(trimmed) {
+        if let ref = NutritionLibrary.shared.match(trimmed, in: context) {
             results.append(FoodSearchResult(
                 name: ref.name, kcal: ref.kcal, protein: ref.protein,
                 carbs: ref.carbs, fat: ref.fat, fiber: ref.fiber,
@@ -101,8 +99,6 @@ struct AddFoodManualView: View {
     @State private var searchTask: Task<Void, Never>? = nil   // 防抖 + 取消上一轮联网
 
     private let mealOptions = ["早餐", "午餐", "晚餐", "加餐"]
-
-    private let library = NutritionLibrary.shared
 
     /// 当前重量（至少 1g）
     private var weight: Double { max(Double(weightText) ?? 100, 1) }
@@ -488,7 +484,7 @@ struct AddFoodManualView: View {
         isCloudSearching = false
 
         // ① 本地搜（FoodSearcher 内部已合并 NutritionLibrary + FoodMeta 缓存）
-        let results = FoodSearcher.localSearch(trimmed, foodMetas: foodMetas)
+        let results = FoodSearcher.localSearch(trimmed, foodMetas: foodMetas, in: context)
         searchResults = results
         isSearching = false
 

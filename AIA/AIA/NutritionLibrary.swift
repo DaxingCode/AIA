@@ -4,6 +4,7 @@
 //       匹配不到时回退到模型估算值（绝不一识别就静默采用，用户可在确认页改重量）。
 // 数据单位：kcal 为千卡；protein/carbs/fat/fiber/sugar 为克（每 100g）；sodium 为毫克（每 100g）。
 import Foundation
+import SwiftData
 
 struct FoodRef {
     let name: String
@@ -14,6 +15,31 @@ struct FoodRef {
     var fiber: Double = 0       // 膳食纤维 g/100g（库内未填 → 0，云端 queryFood 会补齐）
     var sugar: Double = 0       // 糖 g/100g
     var sodium: Double = 0      // 钠 mg/100g
+
+    /// 从 FoodMetaStore 实体构造（单库单查询路径下，匹配智能保留、取数统一来自 FoodMetaStore）。
+    init(from meta: FoodMeta) {
+        self.name = meta.displayName.isEmpty ? meta.name : meta.displayName
+        self.kcal = meta.kcal
+        self.protein = meta.protein
+        self.carbs = meta.carbs
+        self.fat = meta.fat
+        self.fiber = meta.fiber
+        self.sugar = meta.sugar
+        self.sodium = meta.sodium
+    }
+
+    /// 内存内置表构造用（首启 seed 前的兜底表 / 极端未 seed 竞态）。
+    init(name: String, kcal: Double, protein: Double, carbs: Double, fat: Double,
+         fiber: Double = 0, sugar: Double = 0, sodium: Double = 0) {
+        self.name = name
+        self.kcal = kcal
+        self.protein = protein
+        self.carbs = carbs
+        self.fat = fat
+        self.fiber = fiber
+        self.sugar = sugar
+        self.sodium = sodium
+    }
 }
 
 struct NutritionLibrary {
@@ -213,24 +239,44 @@ struct NutritionLibrary {
         table = map
     }
 
-    /// 按食物名称匹配营养库。精确 > 子串（头名词优先）。
-    /// 中文复合食物多为「修饰语 + 头名词」结构，头名词通常在后，且才是营养主体
-    /// （如「猕猴桃酸奶」主体是酸奶而非猕猴桃、「香蕉牛奶」主体是牛奶）。
-    /// 因此子串匹配优先取在名称中**位置最靠后**的命中键；同位置时再取较长键（更具体）。
-    func match(_ name: String) -> FoodRef? {
+    /// 暴露内置表给首启 seed 使用（rows 仍为 private）。
+    var builtinEntries: [(name: String, kcal: Double, protein: Double, carbs: Double, fat: Double, fiber: Double, sugar: Double, sodium: Double)] {
+        rows.map { ($0.0, $0.1, $0.2, $0.3, $0.4, $0.5, $0.6, $0.7) }
+    }
+
+    /// 按食物名称匹配营养库。保留原有的别名/子串/调料护栏匹配智能，
+    /// 但统一从 FoodMetaStore（含首启内置 seed + 云端沉淀）取数，实现单库单查询路径。
+    func match(_ name: String, in context: ModelContext) -> FoodRef? {
         let key = normalize(name)
         guard !key.isEmpty else { return nil }
         // 1) 精确匹配（归一化后完全一致，最高优先级）
-        if let exact = table[key] { return exact }
+        if let meta = FoodMetaStore.peek(name: name, in: context) { return FoodRef(from: meta) }
         // 2) 别名归一：整名恰为某个异名时，直接映射到规范键（优先级高于子串，
         //    可修正「凤梨」含「梨」子串这类错配）。
-        if let canonical = aliases[key], let ref = table[canonical] { return ref }
-        // 3) 子串匹配：记录每个命中键在名称中的位置，靠后优先。
+        if let canonical = aliases[key], let meta = FoodMetaStore.peek(name: canonical, in: context) {
+            return FoodRef(from: meta)
+        }
+        // 3) 子串匹配：扫全库名（含 cloud 新增），位置最靠后优先。
+        let allNames = FoodMetaStore.allNames(in: context)
+        if let ref = searchSubstring(key: key, names: allNames,
+                                     lookup: { FoodMetaStore.peek(name: $0, in: context).map { FoodRef(from: $0) } }) {
+            return ref
+        }
+        // 安全网：若本地库尚未 seed（极端首次启动竞态），退回内存内置表，避免匹配全部失效。
+        if allNames.isEmpty {
+            return searchSubstring(key: key, names: Array(table.keys), lookup: { [table] tk in table[tk] })
+        }
+        return nil
+    }
+
+    /// 子串匹配核心：记录每个命中键在名称中的位置，靠后优先、同位置取更长（更具体）；
+    /// 并施加调料/做法前缀护栏。lookup 由调用方提供（store 路径 / 内存兜底路径）。
+    private func searchSubstring(key: String, names: [String], lookup: (String) -> FoodRef?) -> FoodRef? {
         var positioned: [(tk: String, lower: String.Index)] = []
-        for tk in table.keys {
+        for tk in names {
             if let r = key.range(of: tk) {
                 positioned.append((tk, r.lowerBound))   // 「猕猴桃酸奶」含 猕猴桃(0) / 酸奶(3)
-            } else if tk.contains(key) {
+            } else if tk.range(of: key) != nil {
                 // 名称是某键的子串（用户用更短叫法，如 "咖啡" 命中 "美式咖啡"），作兜底，位置记最前（低优先）
                 positioned.append((tk, key.startIndex))
             }
@@ -240,14 +286,14 @@ struct NutritionLibrary {
             if lhs.lower != rhs.lower { return lhs.lower > rhs.lower } // 靠后优先
             return lhs.tk.count > rhs.tk.count                          // 同位置取更长（更具体）
         }.first!
-        // 4) 调料前缀护栏：唯一命中的键是调料/做法词、且位于名称最前端、后面还有主体
-        //    （如「可乐鸡翅」只命中「可乐」），说明它只是修饰语而非营养主体，放弃匹配。
+        // 调料前缀护栏：唯一命中的键是调料/做法词、且位于名称最前端、后面还有主体
+        // （如「可乐鸡翅」只命中「可乐」），说明它只是修饰语而非营养主体，放弃匹配。
         if seasoningPrefixes.contains(best.tk),
            best.lower == key.startIndex,
            best.tk.count < key.count {
             return nil
         }
-        return table[best.tk]
+        return lookup(best.tk)
     }
 
     private func normalize(_ s: String) -> String {

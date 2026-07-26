@@ -710,7 +710,7 @@ struct EditFoodView: View {
         cloudErrorMessage = nil
         isCloudSearching = false
 
-        let results = FoodSearcher.localSearch(trimmed, foodMetas: foodMetas)
+        let results = FoodSearcher.localSearch(trimmed, foodMetas: foodMetas, in: context)
         searchResults = results
         isSearching = false
 

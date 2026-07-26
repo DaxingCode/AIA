@@ -910,7 +910,7 @@ struct ResultConfirmView: View {
             let name = firstFood.name
             if source == .local {
                 nutritionSource = name.isEmpty ? "" : "按包装标签识别"
-            } else if let ref = NutritionLibrary.shared.match(name) {
+            } else if let ref = NutritionLibrary.shared.match(name, in: context) {
                 editableFoods[0].caloriesPer100g = ref.kcal
                 editableFoods[0].proteinPer100g = ref.protein
                 editableFoods[0].carbsPer100g = ref.carbs
@@ -946,8 +946,7 @@ struct ResultConfirmView: View {
         let name = editableFoods[0].name
         guard !name.isEmpty else { return }
         // 二次确认本地仍未命中（避免 fillFromResult 已处理或用户已改食物名）
-        if NutritionLibrary.shared.match(name) != nil { return }
-        if FoodMetaStore.lookup(name, in: context) != nil { return }
+        if NutritionLibrary.shared.match(name, in: context) != nil { return }
         do {
             if let ref = try await RecognizeService.queryFood(name: name) {
                 FoodMetaStore.upsert(name: name, displayName: ref.name,

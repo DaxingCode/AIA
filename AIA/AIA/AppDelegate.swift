@@ -100,6 +100,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UIWindowSceneDelegate, UN
         // 通过静态变量取容器，避免 application delegate / scene delegate 实例不一致问题。
         let container = Self.sharedContainer
 
+        // 首启一次性把内置营养表灌进 FoodMetaStore（source:"builtin"），实现单库单查询路径。
+        // 已存在（含 cloud 沉淀）则跳过，不覆盖用户数据；UserDefaults 守卫保证仅执行一次。
+        if !UserDefaults.standard.bool(forKey: "foodMetaSeeded"), let container = container {
+            let ctx = ModelContext(container)
+            for e in NutritionLibrary.shared.builtinEntries {
+                FoodMetaStore.seedIfAbsent(name: e.name, kcal: e.kcal, protein: e.protein,
+                    carbs: e.carbs, fat: e.fat, fiber: e.fiber, sugar: e.sugar, sodium: e.sodium, in: ctx)
+            }
+            try? ctx.save()
+            UserDefaults.standard.set(true, forKey: "foodMetaSeeded")
+        }
+
         // 登录状态决定首屏：未登录显示 LoginView，已登录显示 ContentView。
         // 重装后 UserDefaults 已被清空，先尝试从 Keychain 静默恢复登录态；
         // 恢复成功则可直接进入主页并从云端拉回历史数据（实现「删除 App 重装后数据还在」）。

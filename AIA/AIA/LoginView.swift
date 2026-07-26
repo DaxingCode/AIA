@@ -164,38 +164,31 @@ struct LoginView: View {
     }
 
     private var agreementText: some View {
-        let normal = Font.system(size: 12, weight: .regular)
-        let highlighted = Font.system(size: 12, weight: .semibold)
+        let normal = AttributeContainer()
+            .font(Font.system(size: 12, weight: .regular))
+            .foregroundColor(AIATheme.muted)
+        let highlighted = AttributeContainer()
+            .font(Font.system(size: 12, weight: .semibold))
+            .foregroundColor(AIATheme.blue)
 
-        return (
-            Text("我已阅读并同意 ")
-                .font(normal)
-                .foregroundStyle(AIATheme.muted)
-            +
-            Text("《天翼账号认证服务条款》")
-                .font(highlighted)
-                .foregroundStyle(AIATheme.blue)
-            +
-            Text(" 和 ")
-                .font(normal)
-                .foregroundStyle(AIATheme.muted)
-            +
-            Text("《用户协议》")
-                .font(highlighted)
-                .foregroundStyle(AIATheme.blue)
-            +
-            Text("、")
-                .font(normal)
-                .foregroundStyle(AIATheme.muted)
-            +
-            Text("《隐私政策》")
-                .font(highlighted)
-                .foregroundStyle(AIATheme.blue)
-        )
-        .onTapGesture {
-            // 点击条款可跳转 Safari；这里只做提示
-            showAlertMessage("请在项目中配置服务条款/用户协议/隐私政策 URL")
+        var str = AttributedString()
+        func append(_ text: String, _ style: AttributeContainer) {
+            var run = AttributedString(text)
+            run.mergeAttributes(style)
+            str.append(run)
         }
+        append("我已阅读并同意 ", normal)
+        append("《天翼账号认证服务条款》", highlighted)
+        append(" 和 ", normal)
+        append("《用户协议》", highlighted)
+        append("、", normal)
+        append("《隐私政策》", highlighted)
+
+        return Text(str)
+            .onTapGesture {
+                // 点击条款可跳转 Safari；这里只做提示
+                showAlertMessage("请在项目中配置服务条款/用户协议/隐私政策 URL")
+            }
     }
 
     private func socialButton(icon: String, bg: Color, fg: Color, action: @escaping () -> Void) -> some View {
@@ -266,7 +259,7 @@ struct LoginView: View {
             let result = await WeChatAuthHelper.shared.requestLogin()
             await MainActor.run {
                 switch result {
-                case .success(let info):
+                case .success:
                     // 真实环境：把 code 发给后端，后端换取 unionid/openid 后再登录。
                     // 当前用 Keychain 内稳定的匿名 id（跨重装一致），避免一次性 code 当 userId
                     // 导致每次登录都开一个新云端空间、旧数据孤立。
