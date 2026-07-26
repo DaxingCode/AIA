@@ -1318,8 +1318,6 @@ struct BillListView: View {
                     summaryDonutCard(titleKey: "bill.thisMonth", bills: monthExpenseBills, mode: .month)
                 }
                 .padding(12)
-                .background(AIATheme.surface)
-                .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
 
                 // 第 2 页：本周账单 + 本年账单
                 HStack(spacing: 0) {
@@ -1328,8 +1326,6 @@ struct BillListView: View {
                     summaryDonutCard(titleKey: "bill.thisYear", bills: yearExpenseBills, mode: .year)
                 }
                 .padding(12)
-                .background(AIATheme.surface)
-                .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .frame(height: 160)
@@ -1452,6 +1448,8 @@ struct BillListView: View {
                     .card(radius: AIATheme.rMD)
 
                         summaryCarousel
+                            .padding(12)
+                            .card(radius: AIATheme.rMD)
                     }
 
                     if filter == .calendar {
@@ -1903,45 +1901,49 @@ struct BillListView: View {
                     let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .none
                     return f.string(from: selected)
                 }()
-                SectionTitle(text: String(format: NSLocalizedString("bill.calendar.selectedDateTitle", comment: ""), dayHeader))
-                let dayBills = bills(on: selected)
-                if dayBills.isEmpty {
-                    Text(LocalizedStringKey("bill.calendar.noBills")).font(AIATheme.Font.caption).foregroundStyle(AIATheme.sub)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 20)
-                } else {
-                    let expense = dayBills.filter { !$0.isIncome }.reduce(0) { $0 + $1.amount }
-                    let income = dayBills.filter { $0.isIncome }.reduce(0) { $0 + $1.amount }
-                    HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(String(format: NSLocalizedString("bill.calendar.expenseTotal", comment: ""), expense))
-                                .font(AIATheme.Font.caption.weight(.medium))
-                                .foregroundStyle(AIATheme.expense)
-                            Text(String(format: NSLocalizedString("bill.calendar.incomeTotal", comment: ""), income))
-                                .font(AIATheme.Font.caption.weight(.medium))
-                                .foregroundStyle(AIATheme.income)
+                VStack(alignment: .leading, spacing: 8) {
+                    SectionTitle(text: String(format: NSLocalizedString("bill.calendar.selectedDateTitle", comment: ""), dayHeader))
+                    let dayBills = bills(on: selected)
+                    if dayBills.isEmpty {
+                        Text(LocalizedStringKey("bill.calendar.noBills")).font(AIATheme.Font.caption).foregroundStyle(AIATheme.sub)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 20)
+                    } else {
+                        let expense = dayBills.filter { !$0.isIncome }.reduce(0) { $0 + $1.amount }
+                        let income = dayBills.filter { $0.isIncome }.reduce(0) { $0 + $1.amount }
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(String(format: NSLocalizedString("bill.calendar.expenseTotal", comment: ""), expense))
+                                    .font(AIATheme.Font.caption.weight(.medium))
+                                    .foregroundStyle(AIATheme.expense)
+                                Text(String(format: NSLocalizedString("bill.calendar.incomeTotal", comment: ""), income))
+                                    .font(AIATheme.Font.caption.weight(.medium))
+                                    .foregroundStyle(AIATheme.income)
+                            }
+                            Spacer()
                         }
-                        Spacer()
-                    }
-                    .padding(.bottom, 4)
+                        .padding(.bottom, 4)
 
-                    // 选中日期账单列表：行间 hairline 分隔（深色模式 0.7pt 物理宽度足够醒目）
-                    ForEach(Array(dayBills.enumerated()), id: \.element.persistentModelID) { idx, b in
-                        Button {
-                            editBill = b
-                        } label: {
-                            groupedBillRow(b)
-                        }
-                        .buttonStyle(.plain)
-                        // 行间分隔：让位 62pt（icon 42 + 间距 12 + 缓冲 8），最后一行不画
-                        if idx < dayBills.count - 1 {
-                            Rectangle()
-                                .fill(AIATheme.hairline)
-                                .frame(height: 0.7)
-                                .padding(.leading, 62)
+                        // 选中日期账单列表：行间 hairline 分隔（深色模式 0.7pt 物理宽度足够醒目）
+                        ForEach(Array(dayBills.enumerated()), id: \.element.persistentModelID) { idx, b in
+                            Button {
+                                editBill = b
+                            } label: {
+                                groupedBillRow(b)
+                            }
+                            .buttonStyle(.plain)
+                            // 行间分隔：让位 62pt（icon 42 + 间距 12 + 缓冲 8），最后一行不画
+                            if idx < dayBills.count - 1 {
+                                Rectangle()
+                                    .fill(AIATheme.hairline)
+                                    .frame(height: 0.7)
+                                    .padding(.leading, 62)
+                            }
                         }
                     }
                 }
+                .padding(12)
+                .card(radius: AIATheme.rMD, shadow: false)
             }
         }
     }
@@ -2382,20 +2384,24 @@ struct ReminderListView: View {
                     let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .none
                     return f.string(from: selected)
                 }()
-                SectionTitle(text: String(format: NSLocalizedString("todo.calendar.selectedDateTitle", comment: ""), dayHeader))
-                let dayTodos = todos(on: selected)
-                if dayTodos.isEmpty {
-                    Text(LocalizedStringKey("todo.calendar.noTasks")).font(AIATheme.Font.caption).foregroundStyle(AIATheme.sub)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 20)
-                } else {
-                    ForEach(dayTodos) { r in
-                        // 日历视图没有完成圆圈（hasDoneCircle: false），整张卡可点 → 触发 sheet
-                        todoRowContent(r, hasDoneCircle: false)
-                            .contentShape(RoundedRectangle(cornerRadius: 14))
-                            .onTapGesture { editTodo = r }
+                VStack(alignment: .leading, spacing: 8) {
+                    SectionTitle(text: String(format: NSLocalizedString("todo.calendar.selectedDateTitle", comment: ""), dayHeader))
+                    let dayTodos = todos(on: selected)
+                    if dayTodos.isEmpty {
+                        Text(LocalizedStringKey("todo.calendar.noTasks")).font(AIATheme.Font.caption).foregroundStyle(AIATheme.sub)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 20)
+                    } else {
+                        ForEach(dayTodos) { r in
+                            // 日历视图没有完成圆圈（hasDoneCircle: false），整张卡可点 → 触发 sheet
+                            todoRowContent(r, hasDoneCircle: false)
+                                .contentShape(RoundedRectangle(cornerRadius: 14))
+                                .onTapGesture { editTodo = r }
+                        }
                     }
                 }
+                .padding(12)
+                .card(radius: AIATheme.rMD, shadow: false)
             }
         }
     }
