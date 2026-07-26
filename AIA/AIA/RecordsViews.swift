@@ -463,6 +463,20 @@ struct FoodListView: View {
         scrollToFoodNonce += 1
     }
 
+    /// 餐次 SegmentedPicker 用的自定义 Binding：getter 返回 meal，setter 在 SegmentedPicker 写入新值时
+    /// （只在用户点击按钮时发生，SegmentedPicker 首次渲染只读不写）同步设置 meal 并递增 scrollToFoodNonce，
+    /// 触发 ScrollViewReader 下滚到食物条目。避免用 .onChange(of: meal) 引入的边界误触发
+    /// （首次渲染 / 状态恢复时可能误判为"变化"）。
+    private var mealBinding: Binding<MealFilter> {
+        Binding(
+            get: { self.meal },
+            set: { newValue in
+                self.meal = newValue
+                self.scrollToFoodNonce += 1
+            }
+        )
+    }
+
     /// 当前餐次的食物记录列表区（空态 / 列表）。
     /// 单独抽成计算属性，隔离类型检查复杂度——原 body 过大 + ScrollViewReader 包裹后
     /// 触发 "the compiler is unable to type-check this expression in reasonable time"；
@@ -737,7 +751,7 @@ struct FoodListView: View {
 
                         // Card4 · 当前餐次
                         VStack(alignment: .leading, spacing: 8) {
-                            SegmentedPicker(options: MealFilter.allCases.map { (value: $0, label: $0.label) }, selection: $meal)
+                            SegmentedPicker(options: MealFilter.allCases.map { (value: $0, label: $0.label) }, selection: mealBinding)
 
                             // 本餐热量汇总
                             HStack {
@@ -763,9 +777,6 @@ struct FoodListView: View {
                     withAnimation {
                         proxy.scrollTo("foodListTop", anchor: .top)
                     }
-                }
-                .onChange(of: meal) { _ in
-                    scrollToFoodNonce += 1
                 }
                 }
             }
