@@ -516,7 +516,11 @@ struct FoodListView: View {
                 switch dietTab {
                 case .records:
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 12) {
+                        // 用 LazyVStack 而非 VStack：VStack eager 渲染全部子项，
+                        // 当餐次 filter 切换或新 food 入库触发 content 重建时（EmptyStateView ↔ ForEach 互换），
+                        // SwiftUI 会在 content 尺寸剧烈变化时 scroll position 复位到 top（用户反馈的"点 tab / chip 跳回顶部"）。
+                        // LazyVStack 只渲染可见项，content 结构变化时 scroll position 保持稳定。
+                        LazyVStack(alignment: .leading, spacing: 12) {
                         // Card1 · 热量概览（日期 + 进度 + 净热量/TDEE/消耗 + 饮水）
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 8) {
@@ -676,7 +680,8 @@ struct FoodListView: View {
                             action: { showPicker = true },
                             footer: "点击底部拍照、相册上传食物照片\n或点击文字输入、语音输入\n也可使用AI快速记录哦"
                         )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        // EmptyStateView 内部已自带 .frame(maxWidth:.infinity, maxHeight:.infinity)（AIAIllustrations.swift:121），
+                        // 这里无需重复；移除冗余 modifier 避免叠层干扰 LazyVStack 的 layout pass。
                     } else {
                         ForEach(mealItems) { f in
                             SelectableRow(
