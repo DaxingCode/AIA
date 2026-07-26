@@ -260,12 +260,6 @@ struct SegmentedPicker<T: Hashable>: View {
         .padding(3)
         .background(AIATheme.fillSoft)
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
-        // 外层描边：用 iconInactive 而非 hairline（浅色模式可见性提升）+ 线宽 0.7→1.0
-        // 让整组页签边界在浅色模式下也清晰勾勒。
-        .overlay(
-            RoundedRectangle(cornerRadius: AIATheme.rMD)
-                .stroke(AIATheme.iconInactive, lineWidth: 1.0)
-        )
     }
 }
 
