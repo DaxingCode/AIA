@@ -393,7 +393,7 @@ struct FoodListView: View {
     }
 
     private var mealItems: [FoodEntry] {
-        selectedFoods.filter { $0.meal == meal.mealString }.sorted { $0.date > $1.date }
+        selectedFoods.filter { $0.meal == meal.mealString }.sorted { $0.syncUpdatedAt > $1.syncUpdatedAt }
     }
     private var mealTotal: Double {
         selectedFoods.filter { $0.meal == meal.mealString }.reduce(0) { $0 + $1.calories }
