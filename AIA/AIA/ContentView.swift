@@ -547,10 +547,10 @@ struct ContentView: View {
         return VStack(alignment: .leading, spacing: 8) {
             SectionTitle(text: "今日事项预览", trailing: "阿宝AI提醒")
             VStack(spacing: 8) {
-                rollingBubble(messages: dietMsgs, accent: AIATheme.food, active: rollSlot == 0)
-                rollingBubble(messages: healthMsgs, accent: AIATheme.health, active: rollSlot == 1)
-                rollingBubble(messages: billMsgs, accent: AIATheme.bill, active: rollSlot == 2)
-                rollingBubble(messages: todoMsgs, accent: AIATheme.todo, active: rollSlot == 3)
+                rollingBubble(messages: dietMsgs, accent: AIATheme.food, active: rollSlot == 0, route: .diet)
+                rollingBubble(messages: healthMsgs, accent: AIATheme.health, active: rollSlot == 1, route: .health)
+                rollingBubble(messages: billMsgs, accent: AIATheme.bill, active: rollSlot == 2, route: .bill)
+                rollingBubble(messages: todoMsgs, accent: AIATheme.todo, active: rollSlot == 3, route: .todo)
             }
             .onReceive(rollTimer) { _ in
                 rollSlot = (rollSlot + 1) % 4
@@ -559,14 +559,15 @@ struct ContentView: View {
     }
 
     /// 单条气泡：当 `active` 为真（由外层调度器轮流指派）且候选 >1 时，像转轴一样向上滚动切换到下一条；气泡框本身不动。
-    private func rollingBubble(messages: [String], accent: Color, active: Bool) -> some View {
-        RollingBubbleView(messages: messages, accent: accent, active: active)
+    private func rollingBubble(messages: [String], accent: Color, active: Bool, route: HomeRoute) -> some View {
+        RollingBubbleView(messages: messages, accent: accent, active: active, route: route)
     }
 
     private struct RollingBubbleView: View {
         let messages: [String]
         let accent: Color
         let active: Bool
+        let route: HomeRoute
         private let rowH: CGFloat = 18
         @State private var display = 0
         @State private var incoming = 0
@@ -596,6 +597,9 @@ struct ContentView: View {
                     .padding(.vertical, 10)
             }
             .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+            .onTapGesture {
+                NavigationRouter.shared.path.append(route)
+            }
             .onAppear { if active { roll() } }
             .onChange(of: active) { _, isActive in
                 if isActive { roll() }
