@@ -2388,12 +2388,9 @@ struct ReminderListView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 20)
                     } else {
-                        ForEach(dayTodos) { r in
-                            // 日历视图没有完成圆圈（hasDoneCircle: false），整张卡可点 → 触发 sheet
-                            todoRowContent(r, hasDoneCircle: false)
-                                .contentShape(RoundedRectangle(cornerRadius: 14))
-                                .onTapGesture { editTodo = r }
-                        }
+                    ForEach(dayTodos) { r in
+                        todoRow(r)
+                    }
                     }
                 }
             }
