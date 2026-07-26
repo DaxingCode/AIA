@@ -481,8 +481,8 @@ struct FoodListView: View {
     /// 单独抽成计算属性，隔离类型检查复杂度——原 body 过大 + ScrollViewReader 包裹后
     /// 触发 "the compiler is unable to type-check this expression in reasonable time"；
     /// 抽出后 body 与该属性各自独立类型检查即通过。
-    /// 该区在 body 中通过 `.id("foodListTop")` 标记，供点餐次 tab / 点 chip 后自动下滚到此处
-    /// （每条左侧 `Circle().fill(AIATheme.food)` 彩色圆点图标）。
+    /// 滚动锚点不在本区，而在 Card4（早/午/晚/加餐 标题栏所在卡）——点 tab/chip 后
+    /// 滚到 Card4 顶对齐屏幕顶，餐次标题栏保持可见，下方食物条目自然进入视野。
     @ViewBuilder
     private var mealItemsSection: some View {
         if mealItems.isEmpty {
@@ -765,12 +765,12 @@ struct FoodListView: View {
 
                             frequentFoodRegion
                         }
+                        .id("foodListTop")
                         .padding(12)
                         .card(radius: AIATheme.rMD)
                     }
 
                     mealItemsSection
-                        .id("foodListTop")
                 }
                 .padding()
                 .onChange(of: scrollToFoodNonce) { _ in
