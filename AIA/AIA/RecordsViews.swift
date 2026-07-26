@@ -404,13 +404,26 @@ struct FoodListView: View {
         selectedFoods.filter { $0.meal == meal.mealString }.reduce(0) { $0 + $1.calories }
     }
 
-    /// 常吃食物：从用户历史记录聚合所有记过的菜名（去重、按出现过次数倒序）；无历史则回退默认清单。
+    /// 常吃食物：前 10 个按吃过次数倒序（常吃 Top10），第 11 个起按最近一次进食时间倒序；无历史则回退默认清单。
     private static let defaultFrequentFoods = ["米饭", "鸡蛋", "牛奶", "苹果", "鸡胸肉", "面包", "面条", "牛肉", "西兰花", "香蕉"]
     private var frequentFoods: [String] {
         var counts: [String: Int] = [:]
-        for f in foods { counts[f.name, default: 0] += 1 }
-        let all = counts.sorted { $0.value > $1.value }.map { $0.key }
-        return all.isEmpty ? Self.defaultFrequentFoods : all
+        var latestDate: [String: Date] = [:]
+        for f in foods {
+            counts[f.name, default: 0] += 1
+            if let t = latestDate[f.name] {
+                if f.date > t { latestDate[f.name] = f.date }
+            } else {
+                latestDate[f.name] = f.date
+            }
+        }
+        let byCount = counts.sorted { $0.value > $1.value }
+        let top10 = byCount.prefix(10).map { $0.key }
+        let rest = byCount.dropFirst(10).sorted {
+            (latestDate[$0.key] ?? .distantPast) > (latestDate[$1.key] ?? .distantPast)
+        }.map { $0.key }
+        let combined = top10 + rest
+        return combined.isEmpty ? Self.defaultFrequentFoods : combined
     }
 
     /// 点「常吃食物」名称：按库内每100g营养 ×100g 入库当前餐次；无匹配则热量归零（用户可改）。
