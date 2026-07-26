@@ -1454,8 +1454,6 @@ struct BillListView: View {
 
                     if filter == .calendar {
                         billCalendarView
-                            .padding(12)
-                            .card(radius: AIATheme.rMD)
                     } else if filter == .month {
                         VStack(alignment: .leading, spacing: 8) {
                             // 月报 / 数据导出入口：按月导出 CSV、生成月报图片分享
@@ -1942,8 +1940,6 @@ struct BillListView: View {
                         }
                     }
                 }
-                .padding(12)
-                .card(radius: AIATheme.rMD, shadow: false)
             }
         }
     }
@@ -2400,8 +2396,6 @@ struct ReminderListView: View {
                         }
                     }
                 }
-                .padding(12)
-                .card(radius: AIATheme.rMD, shadow: false)
             }
         }
     }
