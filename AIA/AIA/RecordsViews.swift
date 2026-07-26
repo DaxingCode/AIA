@@ -2034,14 +2034,22 @@ struct ReminderListView: View {
         let grouped = Dictionary(grouping: list) { r -> Date? in
             r.due.map { cal.startOfDay(for: $0) }
         }
+        // 排序方向按当前 filter 区分：
+        //   - 未完成：日期升序（最早/快过期的在前——"先做快过期的"）
+        //   - 已完成：日期倒序（最近完成日期在前——用户视角"最近都完成了什么"）
+        let descending = filter == .finished
         return grouped.sorted { a, b in
             switch (a.key, b.key) {
             case (nil, nil): return false
             case (nil, _): return false
             case (_, nil): return true
-            case let (d1?, d2?): return d1 < d2
+            case let (d1?, d2?): return descending ? d1 > d2 : d1 < d2
             }
-        }.map { (date: $0.key, reminders: $0.value.sorted { ($0.due ?? .distantPast) < ($1.due ?? .distantPast) }) }
+        }.map { (date: $0.key, reminders: $0.value.sorted {
+            // 同组内：未完成升序（早 due 先）、已完成倒序（晚 due 后完成的在前）
+            let l = ($0.due ?? .distantPast), r = ($1.due ?? .distantPast)
+            return descending ? l > r : l < r
+        }) }
     }
     private func weekdayText(_ date: Date) -> String {
         switch Calendar.current.component(.weekday, from: date) {
