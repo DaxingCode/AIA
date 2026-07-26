@@ -192,6 +192,68 @@ struct FoodListView: View {
         )
     }
 
+    /// 「常吃食物」快速记录区：横向分页展示常用食物，点击名称一键入库当前餐次，左右滑动切换。
+    private var frequentFoodRegion: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 4) {
+                Image(systemName: "fork.knife")
+                    .font(AIATheme.Font.micro.weight(.semibold))
+                    .foregroundStyle(AIATheme.food)
+                Text("常吃食物 · 点一下快速记录")
+                    .font(AIATheme.Font.footnote.weight(.semibold))
+                    .foregroundStyle(AIATheme.ink)
+                Spacer()
+                Text("左右滑动切换")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+            }
+            .padding(.horizontal, 2)
+
+            TabView {
+                ForEach(Array(frequentFoods.enumerated()), id: \.element) { _, name in
+                    frequentFoodCard(name)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .always))
+            .frame(height: 64)
+        }
+        .padding(.top, 4)
+    }
+
+    private func frequentFoodCard(_ name: String) -> some View {
+        let ref = NutritionLibrary.shared.match(name)
+        return Button {
+            saveFrequentFood(name)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "plus.circle.fill")
+                    .foregroundStyle(AIATheme.food)
+                    .font(.system(size: 18))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name)
+                        .font(AIATheme.Font.subhead.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    if let ref {
+                        Text("\(Int(ref.kcal)) kcal / 100g")
+                            .font(AIATheme.Font.micro)
+                            .foregroundStyle(AIATheme.muted)
+                    }
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AIATheme.food.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+            .overlay(
+                RoundedRectangle(cornerRadius: AIATheme.rMD)
+                    .stroke(AIATheme.food.opacity(0.22), lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
     /// 「今日饮水」翻转卡本体：3D 翻牌 + 自动循环；尊重系统「减少动态效果」偏好。
     private struct WaterFlipCard: View {
         let totalML: Double
@@ -348,6 +410,45 @@ struct FoodListView: View {
     }
     private var mealTotal: Double {
         selectedFoods.filter { $0.meal == meal.mealString }.reduce(0) { $0 + $1.calories }
+    }
+
+    /// 常吃食物：从用户历史记录聚合最常吃的菜名（按出现次数排序）；无历史则回退默认清单。
+    private static let defaultFrequentFoods = ["米饭", "鸡蛋", "牛奶", "苹果", "鸡胸肉", "面包", "面条", "牛肉", "西兰花", "香蕉"]
+    private var frequentFoods: [String] {
+        var counts: [String: Int] = [:]
+        for f in foods { counts[f.name, default: 0] += 1 }
+        let top = counts.sorted { $0.value > $1.value }.prefix(10).map { $0.key }
+        return top.isEmpty ? Self.defaultFrequentFoods : Array(top)
+    }
+
+    /// 点「常吃食物」名称：按库内每100g营养 ×100g 入库当前餐次；无匹配则热量归零（用户可改）。
+    private func saveFrequentFood(_ name: String) {
+        let ref = NutritionLibrary.shared.match(name)
+        let weight = 100.0
+        let ratio = weight / 100.0
+        let entry = FoodEntry(
+            name: name,
+            calories: (ref?.kcal ?? 0) * ratio,
+            protein: (ref?.protein ?? 0) * ratio,
+            carbs: (ref?.carbs ?? 0) * ratio,
+            fat: (ref?.fat ?? 0) * ratio,
+            fiber: (ref?.fiber ?? 0) * ratio,
+            sugar: (ref?.sugar ?? 0) * ratio,
+            sodium: (ref?.sodium ?? 0) * ratio,
+            portion: "100g",
+            meal: meal.mealString,
+            date: selectedDate,
+            weightGram: weight,
+            baseCalories: ref?.kcal,
+            baseProtein: ref?.protein,
+            baseCarbs: ref?.carbs,
+            baseFat: ref?.fat,
+            baseFiber: ref?.fiber,
+            baseSugar: ref?.sugar,
+            baseSodium: ref?.sodium
+        )
+        context.insert(entry)   // SwiftData autosave 自动持久化，无需手动 save()
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
     private var dateTitleText: String {
@@ -547,6 +648,8 @@ struct FoodListView: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
                         .card(radius: AIATheme.rMD, shadow: false)
+
+                        frequentFoodRegion
                     }
 
                     if mealItems.isEmpty {
