@@ -235,10 +235,12 @@ struct SegmentedPicker<T: Hashable>: View {
                 // 浅色模式几乎不可见；iconInactive light 0xc9ced3 色差 ~38 级清晰可见。
                 // 深色模式两侧都有足够对比（iconInactive 0x5a5a5e vs fillSoft 0x2c2c2e ≈ 46 级）。
                 if i > 0 {
+                    // 显式 frame(width: 0.7, height: 18) 控高约 60% 容器高，HStack 默认垂直居中。
+                    // 不能用 padding(.vertical, ...) —— Rectangle 在 HStack 里默认被纵向拉满，
+                    // padding 只缩内部、外部仍贴顶贴底。
                     Rectangle()
                         .fill(AIATheme.iconInactive)
-                        .frame(width: 0.7)
-                        .padding(.vertical, 8)
+                        .frame(width: 0.7, height: 18)
                 }
                 Button { selection = opt.value } label: {
                     Text(opt.label)
