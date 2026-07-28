@@ -7,7 +7,11 @@ import UIKit
 
 private let mealOptions = ["早餐", "午餐", "晚餐", "加餐"]
 private let priorityOptions: [(value: String, label: String)] = [("high", "高"), ("medium", "中"), ("low", "低")]
-private let repeatOptions: [(value: String, label: String)] = [("none", "不重复"), ("daily", "每天"), ("weekly", "每周"), ("monthly", "每月")]
+private let repeatOptions: [(value: String, label: String)] = [
+    ("none", "不重复"), ("daily", "每天"), ("weekly", "每周"),
+    ("biweekly", "每2周"), ("monthly", "每月"), ("bimonthly", "每2个月"),
+    ("quarterly", "每3个月"), ("semiannual", "每6个月")
+]
 private let reminderOptions: [ReminderOption] = [.atTime, .before15, .before30, .before1Hour, .before1Day, .before1Week, .custom]
 
 // MARK: - 账单分类选项（保持与 BillCategoryHelpers 图标/颜色一致）
@@ -216,19 +220,19 @@ struct EditFoodView: View {
     // MARK: - 卡片
     private var nameCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Text("食物名称")
-                    .font(AIATheme.Font.micro)
+            // 与手动添加食物页一致：左侧放大镜 + "搜索食物库" 占位，提示可搜索本地/联网
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(AIATheme.Font.body)
                     .foregroundStyle(AIATheme.muted)
-                Spacer()
+                TextField("搜索食物库", text: $name)
+                    .font(AIATheme.Font.body)
+                    .foregroundStyle(.primary)
+                    .autocorrectionDisabled()
                 if isSearching {
                     ProgressView().scaleEffect(0.7)
                 }
             }
-            TextField("如 牛肉", text: $name)
-                .font(AIATheme.Font.headline)
-                .foregroundStyle(.primary)
-                .autocorrectionDisabled()
 
             if showSearchResults {
                 searchResultList
@@ -717,6 +721,8 @@ struct EditFoodView: View {
         }
 
         try? context.save()
+        // 编辑饮食记录后触发增量同步，让改动尽快推上云端，绑定后小程序可见
+        CloudSyncManager.shared.syncAfterLocalChange(context: context)
         dismiss()
     }
 
@@ -1187,6 +1193,8 @@ struct EditBillView: View {
             bill.syncDeleted = false
         }
         try? context.save()
+        // 编辑/新增账单后触发增量同步，让改动尽快推上云端，绑定后小程序可见
+        CloudSyncManager.shared.syncAfterLocalChange(context: context)
         dismiss()
     }
 }
@@ -1194,7 +1202,10 @@ struct EditBillView: View {
 // MARK: - 账单分类选择器
 struct BillCategoryPickerSheet: View {
     @Binding var selection: String
+    @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+
+    @State private var sortedCategories: [String] = billCategoryOptions
 
     private var displaySelection: String {
         selection.trimmingCharacters(in: .whitespaces).isEmpty ? "其他" : selection
@@ -1206,7 +1217,7 @@ struct BillCategoryPickerSheet: View {
                 AIATheme.fillSoft.ignoresSafeArea()
                 ScrollView {
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                        ForEach(billCategoryOptions, id: \.self) { cat in
+                        ForEach(sortedCategories, id: \.self) { cat in
                             categoryCell(cat)
                         }
                     }
@@ -1220,7 +1231,29 @@ struct BillCategoryPickerSheet: View {
                     Button("取消") { dismiss() }
                 }
             }
+            .onAppear(perform: sortCategoriesByUsage)
         }
+    }
+
+    /// 按用户实际使用次数排序：使用次数多的靠前；次数相同保持原固定顺序；"其他"始终垫底。
+    private func sortCategoriesByUsage() {
+        var counts: [String: Int] = [:]
+        if let bills = try? context.fetch(FetchDescriptor<Bill>(predicate: #Predicate { !$0.syncDeleted })) {
+            for b in bills {
+                counts[b.category, default: 0] += 1
+            }
+        }
+        let others = "其他"
+        let mainCategories = billCategoryOptions.filter { $0 != others }
+        let sortedMain = mainCategories.sorted { a, b in
+            let ca = counts[a, default: 0]
+            let cb = counts[b, default: 0]
+            if ca != cb { return ca > cb }
+            guard let ia = billCategoryOptions.firstIndex(of: a),
+                  let ib = billCategoryOptions.firstIndex(of: b) else { return false }
+            return ia < ib
+        }
+        sortedCategories = sortedMain + [others]
     }
 
     private func categoryCell(_ cat: String) -> some View {
@@ -1275,6 +1308,14 @@ struct EditTodoView: View {
     // 备注（关联 Reminder.syncId → ReminderNote，仅本地，参照 FoodNote 风格）
     @State private var noteText: String = ""
 
+    // 来源识别原图（Reminder.imageName），仅本地；在备注卡展示，与 EditBillView 同款
+    @State private var imageName: String?
+    @State private var showFullImage = false
+    @State private var showImageSourceDialog = false
+    @State private var showImagePicker = false
+    @State private var showCameraPicker = false
+    @State private var pickedImage: UIImage? = nil
+
     // 删除（参照 EditBillView 模式：先 dismiss，等 onDisappear 真正软删）
     @State private var showDeleteConfirm = false
     @State private var pendingDeleteID: PersistentIdentifier? = nil
@@ -1301,6 +1342,7 @@ struct EditTodoView: View {
         _priority = State(initialValue: reminder.priority)
         _repeatRule = State(initialValue: reminder.repeatRule)
         _done = State(initialValue: reminder.done)
+        _imageName = State(initialValue: reminder.imageName)
     }
 
     var body: some View {
@@ -1344,6 +1386,31 @@ struct EditTodoView: View {
         }
         .sheet(item: $editingCustom) { item in
             customTimeSheet(item: item)
+        }
+        .sheet(isPresented: $showImagePicker) {
+            ImagePicker(image: $pickedImage)
+        }
+        .fullScreenCover(isPresented: $showCameraPicker) {
+            CameraPicker(image: $pickedImage)
+        }
+        .fullScreenCover(isPresented: $showFullImage) {
+            if let img = LocalImageStore.load(imageName) {
+                FullImageView(image: img)
+            }
+        }
+        .confirmationDialog("添加图片", isPresented: $showImageSourceDialog, titleVisibility: .visible) {
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                Button("拍照") { showCameraPicker = true }
+            }
+            Button("从相册选择") { showImagePicker = true }
+            Button("取消", role: .cancel) {}
+        }
+        .onChange(of: pickedImage) { _, new in
+            guard let img = new else { return }
+            pickedImage = nil
+            if let name = LocalImageStore.save(img) {
+                imageName = name
+            }
         }
         .alert("删除待办", isPresented: $showDeleteConfirm) {
             Button("取消", role: .cancel) {}
@@ -1499,7 +1566,7 @@ struct EditTodoView: View {
         .card()
     }
 
-    // MARK: - 备注卡（仅文字，不带图片附件，参照 EditBillView 简洁模式 + FoodNote 1:1 关联风格）
+    // MARK: - 备注卡（文字 + 来源识别原图缩略图，与 EditBillView 同款）
     private var noteCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 5) {
@@ -1515,6 +1582,63 @@ struct EditTodoView: View {
                 .foregroundStyle(.primary)
                 .frame(minHeight: 60)
                 .scrollContentBackground(.hidden)
+            if let img = LocalImageStore.load(imageName) {
+                HStack(spacing: 12) {
+                    ZStack(alignment: .topTrailing) {
+                        Button {
+                            showFullImage = true
+                        } label: {
+                            Image(uiImage: img)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 64, height: 64)
+                                .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            imageName = nil
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(AIATheme.Font.body)
+                                .foregroundStyle(AIATheme.muted)
+                                .background(Circle().fill(AIATheme.surface))
+                        }
+                        .buttonStyle(.plain)
+                        .offset(x: 6, y: -6)
+                    }
+
+                    Button {
+                        showImageSourceDialog = true
+                    } label: {
+                        RoundedRectangle(cornerRadius: AIATheme.rSM)
+                            .stroke(AIATheme.hairline, lineWidth: 1)
+                            .frame(width: 64, height: 64)
+                            .overlay {
+                                Image(systemName: "plus")
+                                    .font(AIATheme.Font.headline.weight(.medium))
+                                    .foregroundStyle(AIATheme.muted)
+                            }
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+                }
+            } else {
+                Button {
+                    showImageSourceDialog = true
+                } label: {
+                    RoundedRectangle(cornerRadius: AIATheme.rSM)
+                        .stroke(AIATheme.hairline, lineWidth: 1)
+                        .frame(width: 64, height: 64)
+                        .overlay {
+                            Image(systemName: "plus")
+                                .font(AIATheme.Font.headline.weight(.medium))
+                                .foregroundStyle(AIATheme.muted)
+                        }
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(14)
         .card()
@@ -1695,6 +1819,7 @@ struct EditTodoView: View {
         reminder.priority = priority
         reminder.repeatRule = repeatRule
         reminder.done = done
+        reminder.imageName = imageName
         // 方案A：开关打开但用户未手动添加任何提醒节点时，自动补一个「准时」提醒，
         // 避免「设了截止时间却收不到任何提醒」的违和（用户预期=到点会响）。
         var effectiveAlerts = alertItems
@@ -1749,26 +1874,39 @@ struct EditHealthView: View {
     @State private var unit: String
     @State private var date: Date
 
+    // 备注（关联 HealthMetric.syncId → HealthNote，仅本地）
+    @State private var noteText: String = ""
+
+    // 来源识别原图（HealthMetric.imageName），仅本地；在备注卡展示，与 EditBillView 同款
+    @State private var imageName: String?
+    @State private var showFullImage = false
+    @State private var showImageSourceDialog = false
+    @State private var showImagePicker = false
+    @State private var showCameraPicker = false
+    @State private var pickedImage: UIImage? = nil
+
     init(metric: HealthMetric) {
         self.metric = metric
         _metricName = State(initialValue: metric.metric)
         _valueText = State(initialValue: metric.value)
         _unit = State(initialValue: metric.unit)
         _date = State(initialValue: metric.date)
+        _imageName = State(initialValue: metric.imageName)
     }
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("指标") {
-                    TextField("指标名称（如 体重）", text: $metricName)
-                    HStack {
-                        TextField("数值", text: $valueText).keyboardType(.decimalPad)
-                        Divider().frame(height: 24)
-                        TextField("单位", text: $unit).frame(width: 70)
+            ZStack {
+                AIATheme.fillSoft.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 16) {
+                        metricCard
+                        noteCard
                     }
-                    DatePicker("日期", selection: $date, displayedComponents: [.date, .hourAndMinute])
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                 }
+                .scrollDismissesKeyboard(.immediately)
             }
             .navigationTitle("编辑健康指标")
             .navigationBarTitleDisplayMode(.inline)
@@ -1777,10 +1915,162 @@ struct EditHealthView: View {
                     Button("取消") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }.fontWeight(.semibold)
+                    Button("保存") { save() }
+                        .font(AIATheme.Font.callout.weight(.semibold))
+                        .foregroundStyle(AIATheme.blue)
+                }
+            }
+            .sheet(isPresented: $showImagePicker) {
+                ImagePicker(image: $pickedImage)
+            }
+            .fullScreenCover(isPresented: $showCameraPicker) {
+                CameraPicker(image: $pickedImage)
+            }
+            .fullScreenCover(isPresented: $showFullImage) {
+                if let img = LocalImageStore.load(imageName) {
+                    FullImageView(image: img)
+                }
+            }
+            .confirmationDialog("添加图片", isPresented: $showImageSourceDialog, titleVisibility: .visible) {
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    Button("拍照") { showCameraPicker = true }
+                }
+                Button("从相册选择") { showImagePicker = true }
+                Button("取消", role: .cancel) {}
+            }
+            .onChange(of: pickedImage) { _, new in
+                guard let img = new else { return }
+                pickedImage = nil
+                if let name = LocalImageStore.save(img) {
+                    imageName = name
+                }
+            }
+            .onAppear {
+                // 懒加载备注：首次进入编辑页时按 syncId 取 HealthNote（1:1，参照 ReminderNote 模式）
+                let targetSyncId = metric.syncId
+                if let existing = try? context.fetch(FetchDescriptor<HealthNote>(
+                    predicate: #Predicate { $0.syncId == targetSyncId })).first {
+                    noteText = existing.note
                 }
             }
         }
+    }
+
+    private var metricCard: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("指标")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                TextField("指标名称（如 体重）", text: $metricName)
+                    .font(AIATheme.Font.body)
+                    .foregroundStyle(.primary)
+            }
+            .padding(14)
+            Divider().padding(.leading, 14)
+            HStack(spacing: 12) {
+                TextField("数值", text: $valueText)
+                    .keyboardType(.decimalPad)
+                    .font(AIATheme.Font.body)
+                    .foregroundStyle(.primary)
+                Divider().frame(height: 24)
+                TextField("单位", text: $unit)
+                    .frame(width: 70)
+                    .font(AIATheme.Font.body)
+                    .foregroundStyle(.primary)
+            }
+            .padding(14)
+            Divider().padding(.leading, 14)
+            HStack(spacing: 12) {
+                Text("日期")
+                    .font(AIATheme.Font.body)
+                    .foregroundStyle(.primary)
+                Spacer()
+                DatePicker("", selection: $date, displayedComponents: [.date, .hourAndMinute])
+                    .datePickerStyle(.compact)
+                    .labelsHidden()
+            }
+            .padding(14)
+        }
+        .card()
+    }
+
+    // MARK: - 备注卡（文字 + 来源识别原图缩略图，与 EditBillView/EditTodoView 同款）
+    private var noteCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 5) {
+                Image(systemName: "note.text")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                Text("备注")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+            }
+            TextEditor(text: $noteText)
+                .font(AIATheme.Font.body)
+                .foregroundStyle(.primary)
+                .frame(minHeight: 60)
+                .scrollContentBackground(.hidden)
+            if let img = LocalImageStore.load(imageName) {
+                HStack(spacing: 12) {
+                    ZStack(alignment: .topTrailing) {
+                        Button {
+                            showFullImage = true
+                        } label: {
+                            Image(uiImage: img)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 64, height: 64)
+                                .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            imageName = nil
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(AIATheme.Font.body)
+                                .foregroundStyle(AIATheme.muted)
+                                .background(Circle().fill(AIATheme.surface))
+                        }
+                        .buttonStyle(.plain)
+                        .offset(x: 6, y: -6)
+                    }
+
+                    Button {
+                        showImageSourceDialog = true
+                    } label: {
+                        RoundedRectangle(cornerRadius: AIATheme.rSM)
+                            .stroke(AIATheme.hairline, lineWidth: 1)
+                            .frame(width: 64, height: 64)
+                            .overlay {
+                                Image(systemName: "plus")
+                                    .font(AIATheme.Font.headline.weight(.medium))
+                                    .foregroundStyle(AIATheme.muted)
+                            }
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+                }
+            } else {
+                Button {
+                    showImageSourceDialog = true
+                } label: {
+                    RoundedRectangle(cornerRadius: AIATheme.rSM)
+                        .stroke(AIATheme.hairline, lineWidth: 1)
+                        .frame(width: 64, height: 64)
+                        .overlay {
+                            Image(systemName: "plus")
+                                .font(AIATheme.Font.headline.weight(.medium))
+                                .foregroundStyle(AIATheme.muted)
+                        }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+        .card()
     }
 
     private func save() {
@@ -1789,7 +2079,24 @@ struct EditHealthView: View {
         metric.value = valueText.trimmingCharacters(in: .whitespaces)
         metric.unit = unit.trimmingCharacters(in: .whitespaces)
         metric.date = date
+        metric.imageName = imageName
         metric.syncUpdatedAt = .now
+        try? context.save()
+
+        // 备注：按 syncId 关联 HealthNote；无内容则删除（若有），参照 ReminderNote 模式
+        let targetSyncId = metric.syncId
+        let existing = try? context.fetch(FetchDescriptor<HealthNote>(
+            predicate: #Predicate { $0.syncId == targetSyncId })).first
+        let noteEmpty = noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if noteEmpty {
+            if let existing { context.delete(existing) }
+        } else if let existing {
+            existing.note = noteText
+            existing.updatedAt = .now
+        } else {
+            let hn = HealthNote(syncId: metric.syncId, note: noteText)
+            context.insert(hn)
+        }
         try? context.save()
         dismiss()
     }

@@ -43,6 +43,8 @@
 "bill.monthly.expense" = "Expense";
 "bill.monthly.balance" = "Balance";
 "bill.details" = "Bill Details";
+"bill.searchMerchant" = "Search merchant, amount, category, date, note";
+"bill.searchEmpty" = "No bills matching “%@”";
 "bill.carousel.hint" = "Tap a ring for details / Swipe to see more";
 "bill.empty.title" = "No %@ bill records";
 "bill.empty.desc" = "Take a screenshot of a payment or receipt";
@@ -113,10 +115,10 @@
 
 // MARK: - Health module (HealthListView)
 "health.navTitle" = "Health";
-"health.ring.steps" = "Steps / 10,000";
-"health.ring.sleep" = "Sleep / 8h";
-"health.ring.energy" = "Energy / 500";
-"health.ring.exercise" = "Exercise / 30m";
+"health.ring.steps" = "Steps";
+"health.ring.sleep" = "Sleep";
+"health.ring.energy" = "TDEE";
+"health.ring.exercise" = "Exercise";
 "health.stat.weight" = "Weight";
 "health.stat.height" = "Height";
 "health.stat.restingHR" = "Resting HR";

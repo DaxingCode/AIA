@@ -7,6 +7,7 @@
 import Foundation
 import SwiftData
 import Combine
+import CryptoKit
 
 /// 一次同步的增量统计，供设置页「同步状态」卡片展示。
 struct SyncStats: Equatable {
@@ -34,10 +35,17 @@ final class CloudSyncManager: ObservableObject {
     /// 只访问 UserDefaults（线程安全）。
     static var userId: String {
         get {
+            // 1) 已绑定小程序：直接用小程序共享码（"wx_<openid>"）作为同步分区键，
+            //    使 App 与小程序落到 aia_records 的同一分区，实现数据互通。
+            if let bound = UserDefaults.standard.string(forKey: "aia_bound_user_id"), !bound.isEmpty {
+                return bound
+            }
+            // 2) 已登录：绑定到登录账号（aia.userId），实现「同账号登录 = 同一份云数据」。
             if UserDefaults.standard.bool(forKey: "aia.isLoggedIn"),
                let authId = UserDefaults.standard.string(forKey: "aia.userId"), !authId.isEmpty {
                 return authId
             }
+            // 3) 设备级随机账号，仅本机使用。
             if let saved = UserDefaults.standard.string(forKey: "aia_sync_user_id"), !saved.isEmpty {
                 return saved
             }
@@ -48,6 +56,48 @@ final class CloudSyncManager: ObservableObject {
         set {
             // 只覆写设备级 fallback 账号；登录状态下实际同步账号仍由 aia.userId 决定。
             UserDefaults.standard.set(newValue.isEmpty ? UUID().uuidString : newValue, forKey: "aia_sync_user_id")
+        }
+    }
+
+    /// 当前已绑定的小程序同步码（"wx_<openid>"）；未绑定为 nil。
+    static var boundMiniProgramCode: String? {
+        let v = UserDefaults.standard.string(forKey: "aia_bound_user_id")
+        return (v?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? v : nil
+    }
+
+    /// 轻量校验同步码格式：小程序 getOpenid 返回 "wx_<openid>"，一律以 "wx_" 开头且长度合理。
+    /// 仅本地格式校验，真正可用性由绑定后首次同步能否拉到数据来验证。
+    static func validateSharedCode(_ code: String) -> Bool {
+        let c = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        return c.hasPrefix("wx_") && c.count >= 12
+    }
+
+    /// 绑定小程序：把同步分区切到 sharedCode，与小程序 aia_records 同一分区合并。
+    /// 绑定后清空同步锚点并触发一次全量重同步（先推后拉，不要求 App 登录），
+    /// 本地历史数据按 syncId 幂等合并进小程序分区。
+    /// - Returns: 格式是否合法（合法即发起绑定；实际合并结果看 sync.status）。
+    @discardableResult
+    func bindMiniProgram(code: String, context: ModelContext) -> Bool {
+        let c = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.validateSharedCode(c) else { return false }
+        UserDefaults.standard.set(c, forKey: "aia_bound_user_id")
+        print("[sync] 绑定小程序 sharedCode=\(c)，重置 lastSyncAt 触发全量重同步")
+        lastSyncAt = nil
+        UserDefaults.standard.removeObject(forKey: "aia_last_sync")
+        Task { @MainActor in
+            await self.sync(context: context)
+        }
+        return true
+    }
+
+    /// 解绑小程序：清掉 aia_bound_user_id，回到登录态/设备级账号分区，并触发全量重同步拉回原分区数据。
+    func unbindMiniProgram(context: ModelContext) {
+        UserDefaults.standard.removeObject(forKey: "aia_bound_user_id")
+        print("[sync] 解绑小程序，重置 lastSyncAt 触发全量重同步")
+        lastSyncAt = nil
+        UserDefaults.standard.removeObject(forKey: "aia_last_sync")
+        Task { @MainActor in
+            await self.sync(context: context)
         }
     }
 
@@ -71,6 +121,18 @@ final class CloudSyncManager: ObservableObject {
     /// 昵称走 aia_records 的 type:"profile" 通道。云端 push 以 {id, userId} 唯一、pull 按 userId 过滤，
     /// 因此用固定 id 即可（同用户多次 push 都 upsert 同一条文档，不会每人新建一条）。
     private static let profileRecordId = UUID(uuidString: "9F2B4C7E-3A1D-4E8B-9C6F-2D5A8B1E0F33")!
+
+    /// 用户目标设置（目标热量/健康目标/饮食偏好/体重目标）走 aia_records type:"setting"。
+    /// doc id 由当前同步账号(userId) 派生确定性 UUID，确保同一用户（App 绑定后与小程序同分区）落到同一条文档，
+    /// 且不同用户互不冲突（避免全局固定 id 被 userId 冻结导致跨端 pull 不到）。
+    /// 算法须与小程序 saveData/loadData 的 settingDocId（MD5 of "wx_"+openid+":setting"）保持一致。
+    private static func settingRecordId(for userId: String) -> UUID {
+        let input = Data((userId + ":setting").utf8)
+        let digest = Insecure.MD5.hash(data: input)
+        let b = Array(digest)
+        return UUID(uuid: (b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+                           b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]))
+    }
 
     // MARK: - 自动同步触发（登录后 / 前后台 / 数据变更）
     private var changeSyncWorkItem: DispatchWorkItem?
@@ -165,15 +227,24 @@ final class CloudSyncManager: ObservableObject {
         print("[sync] push 准备上传 items 数量 = \(items.count)（增量 since=\(String(describing: since))），userId = \(Self.userId)")
         guard !items.isEmpty else { return (sent: 0, upserted: 0, localTotal: result.localTotal) }
 
-        let body: [String: Any] = [
-            "action": "push",
-            "userId": Self.userId,
-            "records": items
-        ]
-        let resp = try await postJSON(body)
-        let upserted = (resp["upserted"] as? NSNumber)?.intValue
-        print("[sync] push 云端返回 = \(resp)，解析 upserted = \(String(describing: upserted))")
-        return (sent: items.count, upserted: upserted ?? items.count, localTotal: result.localTotal)
+        // 分批发送：避免一次性 POST 超大请求体触发云函数 HTTP 触发的 413（请求体过大）。
+        // 每批 50 条独立请求，云端按 {id,userId} upsert 幂等，分批中途失败重发安全。
+        let batchSize = 50
+        var totalUpserted = 0
+        for batchStart in stride(from: 0, to: items.count, by: batchSize) {
+            let end = min(batchStart + batchSize, items.count)
+            let batch = Array(items[batchStart..<end])
+            let body: [String: Any] = [
+                "action": "push",
+                "userId": Self.userId,
+                "records": batch
+            ]
+            let resp = try await postJSON(body)
+            let upserted = (resp["upserted"] as? NSNumber)?.intValue ?? batch.count
+            totalUpserted += upserted
+            print("[sync] push 分批上传 [\(batchStart)..<\(end)] 云端返回 upserted=\(upserted)")
+        }
+        return (sent: items.count, upserted: totalUpserted, localTotal: result.localTotal)
     }
 
     /// 只上传「上次同步后有变动」的记录（syncUpdatedAt > since），把 push 从全量上传改为增量上传，
@@ -352,6 +423,23 @@ final class CloudSyncManager: ObservableObject {
                               payload: ["nickname": nick]))
         }
 
+        // 用户目标设置（setting）：仅在本地修改过（userSettingUpdatedAt 超过增量边界）时上传，
+        // 走 aia_records type:"setting" 通道，与小程序 userSettings 同格式，绑定后自动合并。
+        let settingUpdated = UserDefaults.standard.double(forKey: "userSettingUpdatedAt")
+        if settingUpdated > sinceTime {
+            let payload: [String: Any] = [
+                "targetCalories": UserDefaults.standard.double(forKey: "aia.calorieGoalOverride"),
+                "healthGoal": UserDefaults.standard.string(forKey: "aia.healthGoal") ?? "",
+                "dietPreference": UserDefaults.standard.string(forKey: "aia.dietPreference") ?? "",
+                "weightGoal": UserDefaults.standard.double(forKey: "aia.weightGoalKg")
+            ]
+            items.append(item(id: Self.settingRecordId(for: Self.userId),
+                              type: "setting",
+                              updatedAt: Date(timeIntervalSince1970: settingUpdated),
+                              deleted: false,
+                              payload: payload))
+        }
+
         print("[sync] push 本地共 \(totalFetched) 条，增量筛选后上传 \(items.count) 条（跳过未变更 \(totalFetched - items.count) 条）")
         return (items: items, localTotal: totalFetched)
     }
@@ -411,6 +499,8 @@ final class CloudSyncManager: ObservableObject {
                 merged += applyRecurring(context: context, id: id, remoteDate: remoteDate, deleted: deleted, payload: payload)
             case "profile":
                 merged += applyProfile(remoteDate: remoteDate, payload: payload)
+            case "setting":
+                merged += applySetting(remoteDate: remoteDate, payload: payload)
             default:
                 break
             }
@@ -553,6 +643,8 @@ final class CloudSyncManager: ObservableObject {
                               baseFat: payload["baseFat"] as? Double,
                               syncId: id, syncUpdatedAt: remoteDate)
             context.insert(f)
+            // 来源标记：从小程序分区 pull 进来的饮食记录（绑定后分区=小程序），标记为「小程序」。
+            context.insert(FoodSource(foodSyncId: id, origin: "miniprogram"))
             return 1
         }
     }
@@ -670,6 +762,32 @@ final class CloudSyncManager: ObservableObject {
         return 1
     }
 
+    // MARK: - 用户目标设置（setting）
+    /// 把云端设置写回本地 UserDefaults。仅当云端更新时间晚于本地时才覆盖（后写胜出），
+    /// 避免把本次刚拉到的旧值又写回、或覆盖本地更新的编辑。
+    private func applySetting(remoteDate: Date, payload: [String: Any]) -> Int {
+        let localUpdated = UserDefaults.standard.double(forKey: "userSettingUpdatedAt")
+        guard remoteDate.timeIntervalSince1970 > localUpdated else { return 0 }
+        // 目标热量：>0 视为自定义并写入；0/未设置标记为自动（不覆盖本地 override 数值）。
+        if let tc = payload["targetCalories"] as? Double, tc > 0 {
+            UserDefaults.standard.set(tc, forKey: "aia.calorieGoalOverride")
+            UserDefaults.standard.set(true, forKey: "aia.calorieGoalIsCustom")
+        } else if payload["targetCalories"] is Double {
+            UserDefaults.standard.set(false, forKey: "aia.calorieGoalIsCustom")
+        }
+        if let hg = payload["healthGoal"] as? String, !hg.isEmpty {
+            UserDefaults.standard.set(hg, forKey: "aia.healthGoal")
+        }
+        if let dp = payload["dietPreference"] as? String, !dp.isEmpty {
+            UserDefaults.standard.set(dp, forKey: "aia.dietPreference")
+        }
+        if let wg = payload["weightGoal"] as? Double {
+            UserDefaults.standard.set(wg, forKey: "aia.weightGoalKg")
+        }
+        UserDefaults.standard.set(remoteDate.timeIntervalSince1970, forKey: "userSettingUpdatedAt")
+        return 1
+    }
+
     private func applyChat(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
         if let existing = (try? context.fetch(FetchDescriptor<ChatMessage>(predicate: #Predicate { $0.syncId == id })))?.first {
             if deleted { context.delete(existing); return 1 }
@@ -735,7 +853,7 @@ final class CloudSyncManager: ObservableObject {
         var req = URLRequest(url: Self.syncEndpoint)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.timeoutInterval = 30
+        req.timeoutInterval = 60
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: req)

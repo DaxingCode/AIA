@@ -100,7 +100,7 @@ import SwiftData
     var title: String
     var due: Date?              // 截止时间
     var remindAt: Date?         // 本地通知提醒时间（保留兼容旧数据；新数据优先使用 remindTimes）
-    var repeatRule: String      // none / daily / weekly / monthly
+    var repeatRule: String      // none / daily / weekly / biweekly / monthly / bimonthly / quarterly / semiannual
     var priority: String        // high / medium / low
     var done: Bool
 
@@ -369,5 +369,41 @@ import SwiftData
         self.syncId = syncId
         self.note = note
         self.updatedAt = updatedAt
+    }
+}
+
+// 健康指标备注（仅本地，不参与云同步）
+// 关联 HealthMetric.syncId（1:1）；同一条健康记录最多一条备注。
+// 字段：备注文字。原图缩略图直接读取 HealthMetric.imageName，不重复存储。
+// 设计取舍：独立 @Model 而非直接加 `HealthMetric.note` 字段——与 ReminderNote/FoodNote
+//          风格一致，仅本地存储（不上云），不污染 HealthMetric 的云同步 payload。
+@Model final class HealthNote {
+    /// 关联 HealthMetric.syncId（1:1）
+    var syncId: UUID
+    /// 备注文字
+    var note: String
+    /// 最近一次编辑时间
+    var updatedAt: Date
+
+    init(syncId: UUID, note: String = "", updatedAt: Date = Date()) {
+        self.syncId = syncId
+        self.note = note
+        self.updatedAt = updatedAt
+    }
+}
+
+// MARK: - 饮食记录来源标记（仅本地，不参与云同步）
+/// 跨端绑定小程序后，从小程序分区 pull 进来的饮食记录，在此表 1:1 标记 origin="miniprogram"，
+/// 供饮食列表/详情显示「好好吃饭小程序」来源。App 本机创建的饮食记录无对应 FoodSource，即不显示来源。
+/// 1:1 关联 FoodEntry.syncId。仅本地展示用途，不进入云同步 payload。
+@Model final class FoodSource {
+    /// 关联 FoodEntry.syncId（1:1）
+    @Attribute(.unique) var foodSyncId: UUID
+    /// 来源标记："miniprogram" = 小程序添加
+    var origin: String
+
+    init(foodSyncId: UUID, origin: String) {
+        self.foodSyncId = foodSyncId
+        self.origin = origin
     }
 }

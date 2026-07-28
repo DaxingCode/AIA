@@ -33,9 +33,57 @@ struct TellAIAIntent: AppIntent {
         }
         let context = container.mainContext
 
+        // 饮水快捷解析（零网络，与聊天共用 WaterIntakeParser）。
+        let waterParsed = WaterIntakeParser.parse(phrase)
+        // 本地快析（只算一次）：纯饮水句据此判断是否「纯水」从而直接记水退出。
+        let localResult = LocalQuickParse.parse(phrase, in: context)
+
+        // 纯饮水句：WaterIntakeParser 命中 且 本地快析无任何账单/食物/待办/健康类型
+        // → 直接记水并退出，不劳云端，行为最稳（消除「喝了100毫升水」被云端误记成账单）。
+        if let (ml, display) = waterParsed, localResult == nil {
+            if WaterIntakeParser.checkDuplicateAndRegister(phrase, type: "water") {
+                return .result(dialog: "这杯水我刚记过啦～")
+            }
+            let meal = WaterIntakeParser.mealFromText(phrase) ?? RecognitionSaver.defaultMeal(for: .now)
+            let entry = FoodEntry(
+                name: "饮用水",
+                calories: 0, protein: 0, carbs: 0, fat: 0,
+                fiber: 0, sugar: 0, sodium: 0,
+                waterIntake: ml,
+                portion: display,
+                meal: meal,
+                imageName: nil
+            )
+            context.insert(entry)
+            try? context.save()
+            CloudSyncManager.shared.syncAfterLocalChange(context: context)
+            return .result(dialog: "已记录：饮水 \(Int(ml)) 毫升")
+        }
+
+        // 复合句里的水（如「喝了水，午饭35元」）：记水但不提前退出，下面与账单一起返回。
+        var waterSummary: String?
+        if let (ml, display) = waterParsed, localResult != nil {
+            if !WaterIntakeParser.checkDuplicateAndRegister(phrase, type: "water") {
+                let meal = WaterIntakeParser.mealFromText(phrase) ?? RecognitionSaver.defaultMeal(for: .now)
+                let entry = FoodEntry(
+                    name: "饮用水",
+                    calories: 0, protein: 0, carbs: 0, fat: 0,
+                    fiber: 0, sugar: 0, sodium: 0,
+                    waterIntake: ml,
+                    portion: display,
+                    meal: meal,
+                    imageName: nil
+                )
+                context.insert(entry)
+                try? context.save()
+                CloudSyncManager.shared.syncAfterLocalChange(context: context)
+                waterSummary = "饮水 \(Int(ml)) 毫升"
+            }
+        }
+
         // 1. 本地快速解析优先（毫秒级、零网络）；识别不了再走云端 LLM
         let result: RecognitionResult
-        if let localResult = LocalQuickParse.parse(phrase, in: context) {
+        if let localResult {
             result = localResult
         } else {
             do {
@@ -48,6 +96,9 @@ struct TellAIAIntent: AppIntent {
         let types = result.types ?? []
         guard !types.isEmpty, !types.contains("none") else {
             // 用户可能只说了模块名（如「记账、记饮食、记待办」），没有具体内容可记
+            if let ws = waterSummary {
+                return .result(dialog: "已记录：\(ws)")
+            }
             let hints = Self.moduleHints(in: phrase)
             if !hints.isEmpty {
                 return .result(dialog: "想记\(hints.joined(separator: "、"))？打开阿宝，用语音或截图就能记啦。")
@@ -59,13 +110,17 @@ struct TellAIAIntent: AppIntent {
         let session = RecognitionSaver.autoSave(result: result, rawText: phrase, image: nil, context: context)
 
         // 3. 食物热量同步到 HealthKit（无权限时内部自动跳过，不崩）
-        if let food = session.food {
-            HealthManager.shared.saveCaloriesConsumed(food.calories, date: .now)
+        if session.foodCaloriesTotal > 0 {
+            HealthManager.shared.saveCaloriesConsumed(session.foodCaloriesTotal, date: .now)
         }
 
         let summary = RecognitionSaver.summary(of: result)
         // 显式保存，确保数据在 Intent 返回前已刷入磁盘，避免 autosave 竞态
         try? context.save()
+
+        if let ws = waterSummary {
+            return .result(dialog: "已记录：\(summary) · \(ws)")
+        }
         return .result(dialog: "已记录：\(summary)")
     }
 

@@ -116,6 +116,11 @@ struct FoodListView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Query(filter: #Predicate { !$0.syncDeleted }, sort: \FoodEntry.date, order: .reverse) private var foods: [FoodEntry]
     @Query(filter: #Predicate<WaterLog> { !$0.syncDeleted }) private var waterLogs: [WaterLog]
+    /// 饮食记录来源标记（小程序 pull 进来的记录标记 origin="miniprogram"），用于列表展示「好好吃饭小程序」。
+    @Query private var foodSources: [FoodSource]
+    private var originBySyncId: [UUID: String] {
+        Dictionary(uniqueKeysWithValues: foodSources.map { ($0.foodSyncId, $0.origin) })
+    }
     @State private var meal: MealFilter = .lu
     @State private var selectedDate: Date = Date()
     @State private var showDatePicker: Bool = false
@@ -158,7 +163,29 @@ struct FoodListView: View {
 
     private var selectedFoods: [FoodEntry] { foods.filter { Calendar.current.isDate($0.date, inSameDayAs: selectedDate) } }
     private var selectedCalories: Double { selectedFoods.reduce(0) { $0 + $1.calories } }
-    private var tdee: Double { 1730 + health.activeEnergyToday }
+    // TDEE 实际达成 = 静息能量 + 活动能量（来自 HealthKit）；
+    // 无真实数据时回落到 TDEE 目标值（BMR × 活动系数），保证饮食页目标不为 0。
+    @AppStorage("aia.heightCm") private var heightCmDiet: Double = 0
+    @AppStorage("aia.weightKg") private var weightKgDiet: Double = 0
+    @AppStorage("aia.age") private var ageDiet: Int = 30
+    @AppStorage("aia.bioSex") private var bioSexDiet: Int = 1   // 1 = 男, 0 = 女
+    @AppStorage("aia.activityLevel") private var activityLevelDiet: Int = 1
+    private var tdeeGoalFallback: Double {
+        (mifflinBMR(weightKg: weightKgDiet, heightCm: heightCmDiet, age: ageDiet, isMale: bioSexDiet == 1) ?? 0)
+            * activityMultiplier(activityLevelDiet)
+    }
+    private var tdee: Double {
+        let actual = health.restingEnergyToday + health.activeEnergyToday
+        return actual > 0 ? actual : tdeeGoalFallback
+    }
+    /// 与首页健康卡片 / 今日预览 / 健康管理页 TDEE 圆环同源：
+    /// 已接入 HealthKit 且读到数据 → 静息+活动能量；未接入 → 手动补录活动热量。
+    /// 注意：本页「TDEE」列（tdee）显示的是目标值（actual 为 0 时回落到目标），
+    /// 而「今日消耗」列应显示实际达成，故用 tdeeCurrentValue 与那三处对齐。
+    private var usesHealthKit: Bool { health.authorized && health.isAvailable && health.hasHealthKitData }
+    private var tdeeCurrentValue: Double {
+        usesHealthKit ? health.restingEnergyToday + health.activeEnergyToday : Double(ManualHealthStore.shared.activeCalories(for: Date()))
+    }
     private var goal: Double { goalIsCustom ? goalOverride : tdee }
     private var net: Double { selectedCalories - tdee }
 
@@ -174,9 +201,9 @@ struct FoodListView: View {
             .filter { Calendar.current.isDate($0.date, inSameDayAs: selectedDate) }
             .reduce(0) { $0 + $1.amount }
     }
-    /// 今日饮水（ml）= FoodEntry.waterIntake（聊天/拍照）+ WaterLog（tap 手加）。
+    /// 今日饮水（ml）= 仅统计手动加水（WaterLog）。与小程序口径统一：食物自带水分（汤/水果）作为营养明细展示，不计入饮水总量。
     private var waterIntakeToday: Double {
-        selectedFoods.reduce(0) { $0 + $1.waterIntake } + manualWaterToday
+        manualWaterToday
     }
 
     /// 点 +100ml：建一条 WaterLog + 触觉反馈；SwiftData @Query 自动刷新 UI。
@@ -186,6 +213,8 @@ struct FoodListView: View {
         let log = WaterLog(date: selectedDate, amount: 100)
         context.insert(log)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        // 手动加水后触发增量同步，绑定后小程序可见
+        CloudSyncManager.shared.syncAfterLocalChange(context: context)
     }
 
     /// 「饮水」卡片：自动在「正面（饮水量 + ml）」与「背面（点击 +100ml）」间循环翻转；
@@ -415,7 +444,11 @@ struct FoodListView: View {
                 latestDate[f.name] = f.date
             }
         }
-        let byCount = counts.sorted { $0.value > $1.value }
+        let byCount = counts.sorted {
+            if $0.value != $1.value { return $0.value > $1.value }
+            // 次数相同：按名称首字母（中文拼音 / 英文）稳定排序，避免循环切换位置
+            return $0.key.localizedStandardCompare($1.key) == .orderedAscending
+        }
         let top10 = byCount.prefix(10).map { $0.key }
         let rest = byCount.dropFirst(10).sorted {
             (latestDate[$0.key] ?? .distantPast) > (latestDate[$1.key] ?? .distantPast)
@@ -452,6 +485,8 @@ struct FoodListView: View {
         )
         context.insert(entry)   // SwiftData autosave 自动持久化，无需手动 save()
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        // 手动新增饮食记录后触发增量同步，尽快推上云端，绑定后小程序可见
+        CloudSyncManager.shared.syncAfterLocalChange(context: context)
         // 入库成功后触发自动下滚，让新记录（彩色圆点图标）进入视野
         scrollToFoodNonce += 1
     }
@@ -510,7 +545,15 @@ struct FoodListView: View {
                                 let sourceText = (f.imageName?.isEmpty == false)
                                     ? NSLocalizedString("food.recognized", comment: "")
                                     : NSLocalizedString("food.by_chat", comment: "")
-                                Text([f.portion, sourceText].compactMap { $0.isEmpty ? nil : $0 }.joined(separator: " · "))
+                                // 重量（小程序记录常见，App 记录可选）：weightGram>0 时展示
+                                let weightText = f.weightGram.flatMap { $0 > 0 ? "\(Int($0))g" : nil }
+                                // 来源：小程序 pull 进来的记录标记「好好吃饭小程序」
+                                let originLabel = (originBySyncId[f.syncId] == "miniprogram")
+                                    ? "好好吃饭小程序"
+                                    : nil
+                                Text([f.portion, weightText, originLabel, sourceText]
+                                    .compactMap { $0?.isEmpty == true ? nil : $0 }
+                                    .joined(separator: " · "))
                                     .font(AIATheme.Font.micro)
                                     .foregroundStyle(AIATheme.muted)
                             }
@@ -693,9 +736,9 @@ struct FoodListView: View {
                                     .fill(AIATheme.hairline)
                                     .frame(width: 0.5, height: 32)
 
-                                // 今日消耗（活动能量，ink 色中性）
+                                // 今日消耗（与首页健康卡片 / 今日预览 / TDEE 圆环同源：resting+active，无 HealthKit 时走手动活动热量）
                                 VStack(spacing: 2) {
-                                    Text("\(Int(health.activeEnergyToday))")
+                                    Text("\(Int(tdeeCurrentValue))")
                                         .font(AIATheme.Font.title3.weight(.semibold))
                                         .foregroundStyle(AIATheme.ink)
                                     Text(NSLocalizedString("food.burned", comment: "") + " kcal")
@@ -936,6 +979,9 @@ struct FoodListView: View {
                         goalIsCustom = true
                         goalOverride = editedGoal
                         showGoalEditor = false
+                        // 记录修改时间并触发增量同步：随后经 aia_records(type:"setting") 上云，绑定后小程序可见。
+                        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "userSettingUpdatedAt")
+                        CloudSyncManager.shared.syncAfterLocalChange(context: context)
                     } label: {
                         Text("保存")
                             .font(AIATheme.Font.body.weight(.semibold))
@@ -950,6 +996,9 @@ struct FoodListView: View {
                     Button {
                         goalIsCustom = false
                         showGoalEditor = false
+                        // 恢复自动同样视为一次设置变更，触发同步，让小程序也回到自动。
+                        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "userSettingUpdatedAt")
+                        CloudSyncManager.shared.syncAfterLocalChange(context: context)
                     } label: {
                         Text("恢复自动（TDEE \(Int(tdee)) kcal）")
                             .font(AIATheme.Font.body.weight(.medium))
@@ -1013,7 +1062,92 @@ struct HealthListView: View {
     @Query(filter: #Predicate { !$0.syncDeleted }, sort: \HealthMetric.date, order: .reverse) private var healths: [HealthMetric]
     @StateObject private var health = HealthManager.shared
 
-    // MARK: 多选删除
+    // 健康目标（本地 @AppStorage，与饮食 aia.calorieGoalOverride 同策略，不云同步）
+    @AppStorage("aia.heightCm") private var heightCm: Double = 0
+    @AppStorage("aia.weightKg") private var weightKg: Double = 0
+    @AppStorage("aia.age") private var age: Int = 30
+    @AppStorage("aia.bioSex") private var bioSex: Int = 1   // 1 = 男, 0 = 女
+    @AppStorage("aia.activityLevel") private var activityLevel: Int = 1
+    @AppStorage("aia.stepGoal") private var stepGoal: Int = 10000
+    @AppStorage("aia.sleepGoalHours") private var sleepGoalHours: Double = 8
+    @AppStorage("aia.exerciseGoalMin") private var exerciseGoalMin: Double = 30
+    @AppStorage("aia.targetHeightCm") private var targetHeightCm: Double = 0
+    @AppStorage("aia.weightGoalKg") private var weightGoalKg: Double = 65
+
+    // 今日达成数（手动录入，HealthKit 未接入时回退到这里，按日期隔离存储在 ManualHealthStore）。
+
+    // MARK: 圆环数据来源
+    // 已接入 HealthKit 且真正读到过非零数据 → 自动同步 HealthKit 当日数据，禁止手动修改；
+    // 未接入 HealthKit（模拟器/免费账号/被拒绝/无 entitlement）→ 回退到手动录入增量，点击圆环 +N。
+    private var usesHealthKit: Bool { health.authorized && health.isAvailable && health.hasHealthKitData }
+
+    private var stepsCurrentValue: Int {
+        usesHealthKit ? Int(health.stepsToday) : ManualHealthStore.shared.steps(for: Date())
+    }
+    private var sleepCurrentValue: Double {
+        let stored = healths.first(where: { $0.metric.contains("睡眠") }).flatMap { Double($0.value) } ?? 0
+        return usesHealthKit ? stored : stored + ManualHealthStore.shared.sleepHours(for: Date())
+    }
+    private var exerciseCurrentValue: Double {
+        usesHealthKit ? health.exerciseTimeToday : health.exerciseTimeToday + Double(ManualHealthStore.shared.exerciseMinutes(for: Date()))
+    }
+    /// TDEE 实际达成 = 静息能量 + 活动能量。
+    /// 已接入 HealthKit 且读到数据 → 自动同步；
+    /// 未接入 → 回退到手动录入的活动热量（点击圆环 +100 kcal）。
+    private var tdeeCurrentValue: Double {
+        usesHealthKit
+            ? health.restingEnergyToday + health.activeEnergyToday
+            : Double(ManualHealthStore.shared.activeCalories(for: Date()))
+    }
+
+    /// 能量圆环目标 = 每日总消耗 TDEE（BMR × 活动系数），与健康目标页 TDEE 数值同步。
+    private var tdeeGoal: Double {
+        (mifflinBMR(weightKg: weightKg, heightCm: heightCm, age: age, isMale: bioSex == 1) ?? 0)
+            * activityMultiplier(activityLevel)
+    }
+    /// 目标 BMI = 目标体重 / 目标身高²；任一未填返回 nil。
+    private var targetBmi: Double? {
+        guard targetHeightCm > 0, weightGoalKg > 0 else { return nil }
+        let m = targetHeightCm / 100
+        return weightGoalKg / (m * m)
+    }
+
+    /// 点击圆环自增：步数 +1000 / 睡眠 +1h / 运动 +10min，并触发轻触震动。
+    /// HealthKit 已接入时禁止手动修改，直接返回。
+    private func incrementMetric(_ kind: HealthMetricKind) {
+        guard !usesHealthKit else { return }
+        switch kind {
+        case .steps: ManualHealthStore.shared.addSteps(1000, for: Date())
+        case .sleep: ManualHealthStore.shared.addSleepHours(1, for: Date())
+        case .exercise: ManualHealthStore.shared.addExerciseMinutes(10, for: Date())
+        case .tdee: ManualHealthStore.shared.addActiveCalories(100, for: Date())
+        }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+    private func bumpText(_ kind: HealthMetricKind) -> String {
+        switch kind {
+        case .steps: return "+1000 步"
+        case .sleep: return "+1 小时"
+        case .exercise: return "+10 分钟"
+        case .tdee: return "+100 kcal"
+        }
+    }
+
+    // 身高/体重/BMI 优先用用户档案（@AppStorage），未设置则回退到健康记录。
+    private var weightDisplay: String {
+        weightKg > 0 ? String(format: "%.1fkg", weightKg) : stat("体重")
+    }
+    private var heightDisplay: String {
+        heightCm > 0 ? String(format: "%.0fcm", heightCm) : stat("身高")
+    }
+    private var bmiDisplay: String {
+        guard heightCm > 0, weightKg > 0 else { return stat("BMI") }
+        let m = heightCm / 100
+        return String(format: "%.1f", weightKg / (m * m))
+    }
+
+    // MARK: 编辑 + 多选删除
+    @State private var editHealth: HealthMetric? = nil
     @State private var multiSelectMode = false
     @State private var selectedIDs = Set<PersistentIdentifier>()
     @State private var showDeleteConfirm = false
@@ -1023,11 +1157,6 @@ struct HealthListView: View {
     }
     private func stat(_ key: String) -> String {
         healths.first(where: { $0.metric.contains(key) }).map { "\($0.value)\($0.unit)" } ?? "—"
-    }
-    private var weightTrend: [ChartPoint] {
-        healths.filter { $0.metric.contains("体重") || $0.metric.lowercased().contains("weight") }
-            .sorted { $0.date < $1.date }
-            .map { ChartPoint(label: dayFmt.string(from: $0.date), value: Double($0.value) ?? 0) }
     }
     private var weekSteps: [ChartPoint] {
         let cal = Calendar.current
@@ -1048,49 +1177,105 @@ struct HealthListView: View {
                     // Card A · 今日概览（圆环 + 关键指标）
                     VStack(alignment: .leading, spacing: 12) {
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                            RingView(value: "\(health.stepsToday)", caption: NSLocalizedString("health.ring.steps", comment: ""),
-                                     progress: Double(health.stepsToday) / 10000, color: AIATheme.health,
-                                     size: 74, lineWidth: 7)
-                            RingView(value: sleepHours > 0 ? String(format: "%.1f", sleepHours) : "—",
-                                     caption: NSLocalizedString("health.ring.sleep", comment: ""),
-                                     progress: sleepHours / 8, color: AIATheme.health,
-                                     size: 74, lineWidth: 7)
-                            RingView(value: health.activeEnergyToday > 0 ? "\(Int(health.activeEnergyToday))" : "—",
-                                     caption: NSLocalizedString("health.ring.energy", comment: ""),
-                                     progress: health.activeEnergyToday / 500, color: AIATheme.health,
-                                     size: 74, lineWidth: 7)
-                            RingView(value: health.exerciseTimeToday > 0 ? "\(Int(health.exerciseTimeToday))" : "—",
-                                     caption: NSLocalizedString("health.ring.exercise", comment: ""),
-                                     progress: health.exerciseTimeToday / 30, color: AIATheme.health,
-                                     size: 74, lineWidth: 7)
+                            HealthRingButton(
+                                kind: .steps,
+                                value: stepsCurrentValue > 0 ? "\(stepsCurrentValue)" : "—",
+                                caption: NSLocalizedString("health.ring.steps", comment: ""),
+                                secondary: stepGoal > 0 ? "目标 \(stepGoal)" : nil,
+                                progress: stepGoal > 0 ? min(Double(stepsCurrentValue) / Double(stepGoal), 1) : 0,
+                                onTap: { incrementMetric(.steps) },
+                                bumpText: bumpText(.steps),
+                                enabled: !usesHealthKit
+                            )
+
+                            HealthRingButton(
+                                kind: .sleep,
+                                value: sleepCurrentValue > 0 ? String(format: "%.1f", sleepCurrentValue) : "—",
+                                caption: NSLocalizedString("health.ring.sleep", comment: ""),
+                                secondary: sleepGoalHours > 0 ? "目标 \(Int(sleepGoalHours))h" : nil,
+                                progress: sleepGoalHours > 0 ? min(sleepCurrentValue / sleepGoalHours, 1) : 0,
+                                onTap: { incrementMetric(.sleep) },
+                                bumpText: bumpText(.sleep),
+                                enabled: !usesHealthKit
+                            )
+
+                            HealthRingButton(
+                                kind: .exercise,
+                                value: exerciseCurrentValue > 0 ? "\(Int(exerciseCurrentValue))" : "—",
+                                caption: NSLocalizedString("health.ring.exercise", comment: ""),
+                                secondary: exerciseGoalMin > 0 ? "目标 \(Int(exerciseGoalMin))min" : nil,
+                                progress: exerciseGoalMin > 0 ? min(exerciseCurrentValue / exerciseGoalMin, 1) : 0,
+                                onTap: { incrementMetric(.exercise) },
+                                bumpText: bumpText(.exercise),
+                                enabled: !usesHealthKit
+                            )
+
+                            HealthRingButton(
+                                kind: .tdee,
+                                value: tdeeCurrentValue > 0 ? "\(Int(tdeeCurrentValue))" : "—",
+                                caption: NSLocalizedString("health.ring.energy", comment: ""),
+                                secondary: tdeeGoal > 0 ? "目标 \(Int(tdeeGoal))" : nil,
+                                progress: tdeeGoal > 0 ? min(tdeeCurrentValue / tdeeGoal, 1) : 0,
+                                onTap: { incrementMetric(.tdee) },
+                                bumpText: bumpText(.tdee),
+                                enabled: !usesHealthKit
+                            )
                         }
 
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                            NavigationLink { WeightTrendView() } label: {
-                                StatCard(value: stat("体重"), caption: NSLocalizedString("health.stat.weight", comment: ""))
+                            NavigationLink { BodyDataView() } label: {
+                                StatCard(value: weightDisplay, caption: NSLocalizedString("health.stat.weight", comment: ""))
                             }
                             .buttonStyle(.plain)
-                            StatCard(value: stat("身高"), caption: NSLocalizedString("health.stat.height", comment: ""))
+                            NavigationLink { BodyDataView() } label: {
+                                StatCard(value: heightDisplay, caption: NSLocalizedString("health.stat.height", comment: ""))
+                            }
+                            .buttonStyle(.plain)
+                            NavigationLink { BodyDataView() } label: {
+                                StatCard(value: bmiDisplay, caption: NSLocalizedString("health.stat.bmi", comment: ""))
+                            }
+                            .buttonStyle(.plain)
                             StatCard(value: stat("心率"), caption: NSLocalizedString("health.stat.restingHR", comment: ""))
-                            StatCard(value: stat("BMI"), caption: NSLocalizedString("health.stat.bmi", comment: ""))
                         }
                     }
                     .padding(12)
                     .card(radius: AIATheme.rMD)
 
-                    // Card B · 体重趋势
-                    VStack(alignment: .leading, spacing: 8) {
-                        SectionTitle(text: NSLocalizedString("health.weightTrend", comment: ""))
-                        if weightTrend.isEmpty {
-                            Text(NSLocalizedString("health.noWeight", comment: "")).font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
-                        } else {
-                            Chart(weightTrend) { p in
-                                LineMark(x: .value(NSLocalizedString("chart.day", comment: ""), p.label), y: .value(NSLocalizedString("chart.kg", comment: ""), p.value))
-                                    .foregroundStyle(AIATheme.health).interpolationMethod(.monotone)
-                                PointMark(x: .value(NSLocalizedString("chart.day", comment: ""), p.label), y: .value(NSLocalizedString("chart.kg", comment: ""), p.value))
-                                    .foregroundStyle(AIATheme.health)
+                    // Card · 健康目标（点击进入可编辑）
+                    NavigationLink { HealthGoalsView() } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "target")
+                                .font(AIATheme.Font.title3)
+                                .foregroundStyle(AIATheme.health)
+                                .frame(width: 34, height: 34)
+                                .background(AIATheme.healthBG)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("健康目标").font(AIATheme.Font.footnote.weight(.medium))
+                                Text("体重 \(weightGoalKg > 0 ? String(format: "%.1f", weightGoalKg) : "—")kg · BMI \(targetBmi.map { String(format: "%.1f", $0) } ?? "—") · 运动 \(Int(exerciseGoalMin))min")
+                                    .font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
                             }
-                            .frame(height: 80)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(AIATheme.Font.caption).foregroundStyle(AIATheme.muted)
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        // 让整条横条（包含 padding 空白区）都可点击
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .card(radius: AIATheme.rMD)
+
+                    // Card B · 近 7 日步数（由「本周步数」上移至此，替代原体重趋势模块位置）
+                    VStack(alignment: .leading, spacing: 8) {
+                        if !healths.isEmpty {
+                            SectionTitle(text: NSLocalizedString("health.weekSteps", comment: ""))
+                            Chart(weekSteps) { p in
+                                BarMark(x: .value(NSLocalizedString("chart.day", comment: ""), p.label), y: .value(NSLocalizedString("chart.step", comment: ""), p.value))
+                                    .foregroundStyle(AIATheme.health.opacity(0.7))
+                            }
+                            .frame(height: 70)
                             .chartYAxis(.hidden).chartXAxis(.hidden)
                         }
                     }
@@ -1103,21 +1288,6 @@ struct HealthListView: View {
                         CardRow(icon: "🌙", iconBG: AIATheme.surfaceSecondary, title: String(format: NSLocalizedString("health.sleep.deep", comment: ""), 1.8), subtitle: String(format: NSLocalizedString("health.sleep.deepSub", comment: ""), 25), value: "25%")
                         CardRow(icon: "💤", iconBG: AIATheme.surfaceSecondary, title: String(format: NSLocalizedString("health.sleep.light", comment: ""), 4.2), subtitle: NSLocalizedString("common.none", comment: ""), value: "58%")
                         CardRow(icon: "⚡", iconBG: AIATheme.surfaceSecondary, title: String(format: NSLocalizedString("health.sleep.rem", comment: ""), 1.2), subtitle: NSLocalizedString("health.sleep.remSub", comment: ""), value: "17%")
-                    }
-                    .padding(12)
-                    .card(radius: AIATheme.rMD)
-
-                    // Card D · 本周步数
-                    VStack(alignment: .leading, spacing: 8) {
-                        if !healths.isEmpty {
-                            SectionTitle(text: NSLocalizedString("health.weekSteps", comment: ""))
-                            Chart(weekSteps) { p in
-                                BarMark(x: .value(NSLocalizedString("chart.day", comment: ""), p.label), y: .value(NSLocalizedString("chart.step", comment: ""), p.value))
-                                    .foregroundStyle(AIATheme.health.opacity(0.7))
-                            }
-                            .frame(height: 70)
-                            .chartYAxis(.hidden).chartXAxis(.hidden)
-                        }
                     }
                     .padding(12)
                     .card(radius: AIATheme.rMD)
@@ -1135,26 +1305,23 @@ struct HealthListView: View {
                             SelectableRow(
                                 isSelecting: multiSelectMode,
                                 isSelected: selectedIDs.contains(h.persistentModelID),
-                                onTap: {},
+                                onTap: { editHealth = h },
                                 onLongPress: { enterHealthMultiSelect(h.persistentModelID) },
                                 onToggle: { toggleHealthSelection(h.persistentModelID) },
                                 onDelete: { SafeDelete.health(h, in: context) }
                             ) {
-                                NavigationLink(value: HomeRoute.healthDetail(h)) {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: "heart.circle").foregroundStyle(AIATheme.health)
-                                            .frame(width: 26)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(h.metric).font(AIATheme.Font.footnote.weight(.medium))
-                                            Text(AppFormat.dateTime.string(from: h.date)).font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
-                                        }
-                                        Spacer()
-                                        Text("\(h.value)\(h.unit)").font(AIATheme.Font.footnote.weight(.medium))
+                                HStack(spacing: 12) {
+                                    Image(systemName: "heart.circle").foregroundStyle(AIATheme.health)
+                                        .frame(width: 26)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(h.metric).font(AIATheme.Font.footnote.weight(.medium))
+                                        Text(AppFormat.dateTime.string(from: h.date)).font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
                                     }
-                                    .padding(.vertical, 10).padding(.horizontal, 12)
-                                    .background(AIATheme.surface).clipShape(RoundedRectangle(cornerRadius: 14))
+                                    Spacer()
+                                    Text("\(h.value)\(h.unit)").font(AIATheme.Font.footnote.weight(.medium))
                                 }
-                                .buttonStyle(.plain)
+                                .padding(.vertical, 10).padding(.horizontal, 12)
+                                .background(AIATheme.surface).clipShape(RoundedRectangle(cornerRadius: 14))
                             }
                         }
                     }
@@ -1192,6 +1359,9 @@ struct HealthListView: View {
             }
         }
         .animation(.easeInOut(duration: 0.22), value: multiSelectMode)
+        .sheet(item: $editHealth) { h in
+            EditHealthView(metric: h)
+        }
         .alert(NSLocalizedString("common.confirmDelete", comment: ""), isPresented: $showDeleteConfirm) {
             Button(NSLocalizedString("common.cancel", comment: ""), role: .cancel) { }
             Button(NSLocalizedString("common.delete", comment: ""), role: .destructive) {
@@ -1266,6 +1436,11 @@ struct BillListView: View {
     @State private var selectedIDs = Set<PersistentIdentifier>()
     @State private var showDeleteConfirm = false
 
+    // MARK: 商户搜索筛选（仅「全部」标签的账单详情列表）
+    @State private var merchantQuery: String = ""
+    @FocusState private var merchantSearchFocused: Bool
+    @State private var billScrollPosition = ScrollPosition()
+
     private var todayBills: [Bill] {
         bills.filter { Calendar.current.isDateInToday($0.time) }
     }
@@ -1330,9 +1505,43 @@ struct BillListView: View {
         case .all, .month, .calendar: return monthBills
         }
     }
+    /// 商户搜索筛选后的账单列表（跨月搜索）：
+    /// - 搜索词为空 → 沿用当前「全部」标签的本月账单（filtered），保持原有行为；
+    /// - 搜索词非空 → 在全部历史账单中，按以下字段（不区分大小写）匹配：
+    ///   商户、分类、备注（字符串包含）；金额（数值相等，容差 0.005，或格式化字符串包含）；
+    ///   消费日期、消费时间（按当前区域格式化后包含）。
+    private static let searchDateFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        f.locale = Locale.current
+        return f
+    }()
+    private static let searchTimeFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .none
+        f.timeStyle = .short
+        f.locale = Locale.current
+        return f
+    }()
+    private var merchantFilteredBills: [Bill] {
+        let q = merchantQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return filtered }
+        let qAmount = Double(q)
+        return bills.filter { bill in
+            if bill.merchant.localizedCaseInsensitiveContains(q) { return true }
+            if bill.category.localizedCaseInsensitiveContains(q) { return true }
+            if bill.note.localizedCaseInsensitiveContains(q) { return true }
+            if let qAmount, abs(bill.amount - qAmount) < 0.005 { return true }
+            if String(format: "%.2f", bill.amount).localizedCaseInsensitiveContains(q) { return true }
+            if Self.searchDateFmt.string(from: bill.time).localizedCaseInsensitiveContains(q) { return true }
+            if Self.searchTimeFmt.string(from: bill.time).localizedCaseInsensitiveContains(q) { return true }
+            return false
+        }
+    }
     private var groupedByDate: [(date: Date, bills: [Bill])] {
         let cal = Calendar.current
-        let grouped = Dictionary(grouping: filtered) { cal.startOfDay(for: $0.time) }
+        let grouped = Dictionary(grouping: merchantFilteredBills) { cal.startOfDay(for: $0.time) }
         return grouped.sorted { $0.key > $1.key }
             .map { (date: $0.key, bills: $0.value.sorted { $0.time > $1.time }) }
     }
@@ -1494,6 +1703,45 @@ struct BillListView: View {
                             .card(radius: AIATheme.rMD)
                     }
 
+                    // 商户搜索框：仅「全部」标签可见，作用于账单详情列表（跨月搜索），置于账单列表区域顶部
+                    if filter == .all {
+                        HStack(spacing: 10) {
+                            Image(systemName: "magnifyingglass")
+                                .font(AIATheme.Font.callout)
+                                .foregroundStyle(AIATheme.sub)
+                            ZStack(alignment: .leading) {
+                                if merchantQuery.isEmpty {
+                                    Text(NSLocalizedString("bill.searchMerchant", comment: ""))
+                                        .font(AIATheme.Font.body)
+                                        .foregroundStyle(AIATheme.sub)
+                                        .allowsHitTesting(false)
+                                }
+                                TextField("", text: $merchantQuery)
+                                    .font(AIATheme.Font.body)
+                                    .foregroundStyle(.primary)
+                                    .focused($merchantSearchFocused)
+                                    .textInputAutocapitalization(.never)
+                                    .frame(maxWidth: .infinity)
+                            }
+                            if !merchantQuery.isEmpty {
+                                Button {
+                                    merchantQuery = ""
+                                    merchantSearchFocused = false
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(AIATheme.Font.title3)
+                                        .foregroundStyle(AIATheme.sub)
+                                }
+                            }
+                        }
+                        .padding(12)
+                        .background(AIATheme.surface)
+                        .overlay(RoundedRectangle(cornerRadius: AIATheme.rSM).stroke(AIATheme.hairline, lineWidth: 1).allowsHitTesting(false))
+                        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+                        .padding(.bottom, 8)
+                        .id("billDetailTop")
+                    }
+
                     if filter == .calendar {
                         billCalendarView
                     } else if filter == .month {
@@ -1556,18 +1804,31 @@ struct BillListView: View {
                             )
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
-                    } else if filtered.isEmpty {
-                        EmptyStateView(
-                            kind: .bill,
-                            title: "",
-                            message: "",
-                            actionTitle: "查看自动记账教程",
-                            action: { NavigationRouter.shared.path.append(.autoSetup) },
-                            footer: "点击底部拍照、相册上传小票、账单\n或点击文字输入、语音输入\n也可使用AI快速记账哦"
-                        )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if merchantFilteredBills.isEmpty {
+                        if !merchantQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            // 搜索无结果：展示按商户名搜索的空态
+                            VStack(spacing: 12) {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.system(size: 40))
+                                    .foregroundStyle(AIATheme.muted)
+                                Text(String(format: NSLocalizedString("bill.searchEmpty", comment: ""), merchantQuery))
+                                    .font(AIATheme.Font.subhead)
+                                    .foregroundStyle(AIATheme.muted)
+                                    .multilineTextAlignment(.center)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else {
+                            EmptyStateView(
+                                kind: .bill,
+                                title: "",
+                                message: "",
+                                actionTitle: "查看自动记账教程",
+                                action: { NavigationRouter.shared.path.append(.autoSetup) },
+                                footer: "点击底部拍照、相册上传小票、账单\n或点击文字输入、语音输入\n也可使用AI快速记账哦"
+                            )
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
                     } else {
-                        SectionTitle(text: NSLocalizedString("bill.details", comment: ""))
                         // 直接遍历元素（不再用 ForEach(0..<count) + groupedByDate[i] 下标）：
                         // groupedByDate 派生自 @Query，导航 onAppear 的 RecurringBillManager.generateDue
                         // 插入账单/提醒时数组长度会变化，两次求值不一致会导致 groupedByDate[i] 越界闪退。
@@ -1615,6 +1876,18 @@ struct BillListView: View {
                 AIPrompt(text: "阿宝帮总结这个月的消费情况", pointsTo: nil),
                 AIPrompt(text: "点相册上传，自动记账", pointsTo: .album)
             ], entrySource: "bill")
+        }
+        .scrollPosition($billScrollPosition)
+        .onChange(of: merchantSearchFocused) { _, focused in
+            if focused {
+                // 等键盘布局完成后再滚动，确保搜索框稳定停在列表区域最顶部，
+                // 不被系统「最小滚动露出输入框」的键盘避让逻辑抵消。
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        billScrollPosition.scrollTo(id: "billDetailTop", anchor: .top)
+                    }
+                }
+            }
         }
         .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("tab.bill"))
@@ -1732,6 +2005,10 @@ struct BillListView: View {
             }
             .background(Color(.systemGroupedBackground))
             .presentationDetents([.height(340)])
+        }
+        // 点击空白处收起商户搜索键盘（点击 TextField / 按钮等可交互控件不会触发）
+        .onTapGesture {
+            merchantSearchFocused = false
         }
         // 点击账单记录直接弹出「编辑账单」页（EditBillView 自带 NavigationStack，作为 sheet 呈现最契合其设计）
         .sheet(item: $editBill) { b in
@@ -2636,8 +2913,16 @@ struct ReminderListView: View {
             return cal.date(byAdding: .day, value: 1, to: due)
         case "weekly":
             return cal.date(byAdding: .weekOfYear, value: 1, to: due)
+        case "biweekly":
+            return cal.date(byAdding: .weekOfYear, value: 2, to: due)
         case "monthly":
             return cal.date(byAdding: .month, value: 1, to: due)
+        case "bimonthly":
+            return cal.date(byAdding: .month, value: 2, to: due)
+        case "quarterly":
+            return cal.date(byAdding: .month, value: 3, to: due)
+        case "semiannual":
+            return cal.date(byAdding: .month, value: 6, to: due)
         default:
             return nil
         }
@@ -2658,10 +2943,14 @@ private struct DietPreferencesView: View {
     private var topFoods: [DietFoodRank] {
         let nonWaterFoods = foods.filter { $0.name != "饮用水" }
         let counts = Dictionary(grouping: nonWaterFoods, by: \.name).mapValues { $0.count }
-        return counts.sorted { $0.value > $1.value }
-            .prefix(5)
-            .enumerated()
-            .map { idx, kv in DietFoodRank(rank: idx + 1, name: kv.key, count: kv.value) }
+        return counts.sorted {
+            if $0.value != $1.value { return $0.value > $1.value }
+            // 次数相同：按名称首字母（中文拼音 / 英文）稳定排序，避免每次数据变动循环切换位置
+            return $0.key.localizedStandardCompare($1.key) == .orderedAscending
+        }
+        .prefix(5)
+        .enumerated()
+        .map { idx, kv in DietFoodRank(rank: idx + 1, name: kv.key, count: kv.value) }
     }
 
     /// 记录来源：imageName 非空 = AI 识别；空 = 手动输入（含文字/语音/编辑）
@@ -2901,8 +3190,8 @@ private struct DietAnalysisView: View {
             (acc.cal + f.calories, acc.p + f.protein, acc.c + f.carbs, acc.f + f.fat,
              acc.fiber + f.fiber, acc.sugar + f.sugar, acc.sodium + f.sodium, acc.water + f.waterIntake)
         }
-        // 饮水：FoodEntry.waterIntake + WaterLog（手动 tap 加的水）
-        let waterSum = sum.water + periodManualWater
+        // 饮水口径统一：仅统计手动加水（WaterLog），不含食物自带水分，与小程序对齐。
+        let waterSum = periodManualWater
         let d = Double(dayCount)
         return [
             ("热量(kcal)",  String(format: "%.0f", sum.cal / d), AIATheme.food),
@@ -3041,3 +3330,74 @@ private struct WaterCardButtonStyle: ButtonStyle {
             .animation(.spring(response: 0.28, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }
+
+// MARK: - 健康圆环点击自增按钮（与「饮水 +100ml」同交互逻辑）
+//
+// 复用 `WaterCardButtonStyle` 实现按压下沉 0.94 + spring 回弹；点击 → onTap 自增 + 轻触震动，
+// 同时上浮一个「+N 单位」飘字（仿饮水卡 FloatBadge，圆环在 Grid 内，飘字向上溢出不被裁切）。
+// 用 `HealthMetricKind` 区分三环（与 HealthMetric @Model 命名区分，避免冲突）。
+
+enum HealthMetricKind { case steps, sleep, exercise, tdee }
+
+private struct HealthRingButton: View {
+    let kind: HealthMetricKind
+    let value: String
+    let caption: String
+    var secondary: String? = nil      // 目标值副行（与健康目标页同步）
+    let progress: Double
+    var onTap: () -> Void
+    let bumpText: String
+    var enabled: Bool = true
+
+    @State private var floats: [RingFloatBadge] = []
+
+    var body: some View {
+        Button {
+            onTap()
+            floats.append(RingFloatBadge())
+        } label: {
+            RingView(value: value, caption: caption, secondary: secondary, progress: progress,
+                     color: AIATheme.health, size: 74, lineWidth: 7)
+        }
+        .disabled(!enabled)
+        .buttonStyle(WaterCardButtonStyle())
+        .overlay(
+            ZStack {
+                ForEach(floats) { badge in
+                    RingFloatBadgeView(text: bumpText, badge: badge) {
+                        floats.removeAll { $0.id == badge.id }
+                    }
+                }
+            }
+        )
+    }
+}
+
+/// 点击圆环后上浮的「+N 单位」标记（仿 FloatBadge，支持传入文案）
+private struct RingFloatBadge: Identifiable {
+    let id = UUID()
+}
+
+private struct RingFloatBadgeView: View {
+    let text: String
+    let badge: RingFloatBadge
+    var onDone: () -> Void
+    @State private var animate = false
+
+    var body: some View {
+        Text(text)
+            .font(AIATheme.Font.micro.weight(.semibold))
+            .foregroundStyle(AIATheme.health)
+            .offset(y: animate ? -46 : 0)
+            .opacity(animate ? 0 : 1)
+            .onAppear {
+                withAnimation(.easeOut(duration: 0.85)) {
+                    animate = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                    onDone()
+                }
+            }
+    }
+}
+

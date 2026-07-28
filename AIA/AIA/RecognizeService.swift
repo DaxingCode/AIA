@@ -492,10 +492,16 @@ struct RecognizeService {
         // 本地正则也无法可靠区分「带价格的培训通知」与「真账单」。这类一律不让本地声称账单，
         // 直接返回 nil 交云端（文本模型 / 视觉模型，云端均明确归 todo）处理。
         // 注意：不叠加 !hasBillSignal 判断——只要像事件/通知就交给云端，避免本地误判。
+        // 反向信号：事件/通知/医疗预约/培训/会议/招募等截图，即使里面夹带金额（如报名费 ¥18），
+        // 本地正则也无法可靠区分「带价格的培训通知」与「真账单」。这类一律不让本地声称账单，
+        // 直接返回 nil 交云端（文本模型 / 视觉模型，云端均明确归 todo/health）处理。
+        // 注意：不叠加 !hasBillSignal 判断——只要像事件/通知/体检预约就交给云端，避免本地误判。
         let eventSignals = [
             "培训", "训练营", "招募", "报名", "上课", "课程", "讲座", "会议", "开会",
             "活动时间", "培训时间", "上课时间", "地点", "会议室", "教室", "群聊", "微信群",
-            "通知", "公告", "海报", "邀请函", "日程", "议程", "参训", "招募令", "活动报名"
+            "通知", "公告", "海报", "邀请函", "日程", "议程", "参训", "招募令", "活动报名",
+            "体检", "体检预约", "美年", "空腹", "血糖", "检查", "检验", "报告", "医院", "挂号",
+            "江南", "分院", "不能吃早餐", "注意事项"
         ]
         let hasEventSignal = eventSignals.contains { trimmed.localizedCaseInsensitiveContains($0) }
         if hasEventSignal { return nil }
@@ -1206,9 +1212,13 @@ struct RecognizeService {
 
             // ③-1 视觉模型返回 none / 空账单，但本地 OCR 明显能拆出账单时，用本地结果补救。
             // 典型情况：支付消息列表、账单详情等截图因构图/质量被模型误判为 none。
+            // 注意：仅当云端明确返回 none/空，或云端明确说是 bill 却未给出金额时，才用本地账单补救；
+            // 云端已识别为 todo/food/health 时，绝不能用本地金额硬造账单覆盖。
             let types = vision.result.types ?? []
             let hasBill = vision.result.billList.contains { $0.amount != nil }
-            if (types.contains("none") || types.isEmpty || !hasBill), !cleanText.isEmpty {
+            let isNoneOrEmpty = types.contains("none") || types.isEmpty
+            let saidBillButNoAmount = types.contains("bill") && !hasBill
+            if (isNoneOrEmpty || saidBillButNoAmount), !cleanText.isEmpty {
                 if let localMulti = localParseMultiBillsIfNeeded(text: cleanText, in: context) {
                     print("[识别] 视觉模型返回 none，本地多账单拆条补救命中，source=local")
                     return (localMulti, cleanText, .local)

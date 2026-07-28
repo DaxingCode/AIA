@@ -297,6 +297,7 @@ struct Pill: View {
 struct RingView: View {
     let value: String
     let caption: String
+    var secondary: String? = nil      // 可选副数值（如「目标 1730」）
     var progress: Double = 0          // 0..1
     var color: Color = AIATheme.blue
     var size: CGFloat = 84
@@ -312,6 +313,9 @@ struct RingView: View {
                 .rotationEffect(.degrees(-90))
             VStack(spacing: 2) {
                 Text(value).font(AIATheme.Font.body.weight(.medium))
+                if let secondary {
+                    Text(secondary).font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
+                }
                 Text(caption).font(AIATheme.Font.micro).foregroundStyle(AIATheme.muted)
             }
         }
@@ -652,6 +656,8 @@ struct RecognizingOverlay: View {
 }
 
 /// 公共识别入口：任意视图拿到 UIImage 后调用，统一走「识别中 → 结果确认页」流程。
+/// 按「图片自动识别」设置分流：需要弹出 → 结果确认页；静默保存 → 关 cover + toast 引导；
+/// 全关（丢弃）→ 关 cover + toast 提示可去设置调整（相机/相册是用户主动识别，静默无反馈会像坏了）。
 func runImageRecognition(image: UIImage,
                          context: ModelContext,
                          coverItem: Binding<CameraCoverItem?>,
@@ -665,8 +671,17 @@ func runImageRecognition(image: UIImage,
             let res = output.result
             let rawText = output.rawText
             await MainActor.run {
-                let present = RecognitionSaver.preparePresent(result: res, rawText: rawText, image: image, context: context, source: output.source)
-                coverItem.wrappedValue = .present(present)
+                let outcome = RecognitionSaver.processRecognition(result: res, rawText: rawText, image: image, context: context, source: output.source)
+                switch outcome {
+                case .present(let present):
+                    coverItem.wrappedValue = .present(present)
+                case .silentlySaved(let savedTypes):
+                    coverItem.wrappedValue = nil
+                    ToastCenter.shared.show(ImageAutoRecogSettings.silentSaveToast(savedTypes: savedTypes))
+                case .nothing:
+                    coverItem.wrappedValue = nil
+                    ToastCenter.shared.show("识别完成，但按当前设置未保存，可在「设置 → 图片自动识别」中调整")
+                }
             }
         } catch let decoding as DecodingError {
             await MainActor.run {

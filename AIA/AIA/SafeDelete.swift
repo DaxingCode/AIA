@@ -48,8 +48,13 @@ enum SafeDelete {
     }
 
     static func food(_ f: FoodEntry, in context: ModelContext) {
+        let targetSyncId = f.syncId
         DispatchQueue.main.async {
             LocalImageStore.delete(f.imageName)
+            // 清理来源标记，避免 FoodSource 残留挂空。
+            if let fs = (try? context.fetch(FetchDescriptor<FoodSource>(predicate: #Predicate { $0.foodSyncId == targetSyncId })))?.first {
+                context.delete(fs)
+            }
             f.syncDeleted = true
             f.syncUpdatedAt = Date()
         }

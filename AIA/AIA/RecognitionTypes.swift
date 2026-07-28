@@ -8,8 +8,34 @@ struct RecognitionResult: Codable, Sendable {
     let bill: BillPayload?              // 兼容旧云函数：单条账单（已废弃，统一改用 bills）
     let bills: [BillPayload]?           // 一图/一消息多账单：每条独立记录标题/日期/时间/金额
     let food: FoodPayload?
+    let foods: [FoodPayload]?          // 一句话多条饮食（Siri/聊天本地快析）
     let todo: TodoPayload?
+    let todos: [TodoPayload]?          // 一句话多条待办
     let health: HealthPayload?
+    let healths: [HealthPayload]?      // 一句话多条健康指标
+
+    /// 显式成员初始化器：所有字段带默认值（types 除外），保证含 foods/todos/healths 的调用点都能编译。
+    init(types: [String]?,
+         confidence: Double? = nil,
+         bill: BillPayload? = nil,
+         bills: [BillPayload]? = nil,
+         food: FoodPayload? = nil,
+         foods: [FoodPayload]? = nil,
+         todo: TodoPayload? = nil,
+         todos: [TodoPayload]? = nil,
+         health: HealthPayload? = nil,
+         healths: [HealthPayload]? = nil) {
+        self.types = types
+        self.confidence = confidence
+        self.bill = bill
+        self.bills = bills
+        self.food = food
+        self.foods = foods
+        self.todo = todo
+        self.todos = todos
+        self.health = health
+        self.healths = healths
+    }
 }
 
 struct BillPayload: Codable, Sendable {
@@ -174,6 +200,27 @@ extension RecognitionResult {
     var billList: [BillPayload] {
         if let arr = bills, !arr.isEmpty { return arr }
         if let single = bill { return [single] }
+        return []
+    }
+
+    /// 统一食物列表：优先用新的 foods 数组；兼容旧版单条 food。
+    var foodList: [FoodPayload] {
+        if let arr = foods, !arr.isEmpty { return arr }
+        if let single = food { return [single] }
+        return []
+    }
+
+    /// 统一待办列表：优先用新的 todos 数组；兼容旧版单条 todo。
+    var todoList: [TodoPayload] {
+        if let arr = todos, !arr.isEmpty { return arr }
+        if let single = todo { return [single] }
+        return []
+    }
+
+    /// 统一健康指标列表：优先用新的 healths 数组；兼容旧版单条 health。
+    var healthList: [HealthPayload] {
+        if let arr = healths, !arr.isEmpty { return arr }
+        if let single = health { return [single] }
         return []
     }
 }

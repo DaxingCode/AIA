@@ -1,0 +1,9 @@
+{
+  "name": "migrate-water",
+  "version": "1.0.0",
+  "description": "一次性迁移历史 water_records 到统一集合 aia_records（type=water）",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}

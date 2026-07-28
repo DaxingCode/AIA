@@ -1,9 +1,9 @@
 // ResultConfirmView.swift
-// 识别结果确认页。两种来源：
-//  - 正常流程（2026-07-22 起）：识别完成**不入库**，用户点右上角「保存」才调 autoSave 写入。
-//    本页只做「查看 / 覆盖修改」，点「保存」更新已存记录，点「返回」已存结果不变。
-//  - 重复流程：识别结果图片命中历史指纹时**仍自动入库**，本页顶部显示「似乎已记录过」警告，
-//    告知用户可能与已有记录重复；记录已入库，用户可直接编辑/保留，或在对应列表里删除。
+// 识别结果确认页。三种来源（由 RecognitionPresent 区分）：
+//  - 已自动入库（账单/待办，2026-07-26 起）：识别完成即调 autoSave 写入，existingSession 非空；
+//    本页照常弹出，用户改字段后点「保存」直接覆盖，点「返回」则保留已存的账单/待办。
+//  - 重复流程：图片命中历史指纹时仍**未入库**，本页顶部显示「似乎已记录过」警告，点「保存」才真正写入。
+//  - 普通流程（食物/健康）：识别完成**不入库**，用户点「保存」才调 autoSave 写入，existingSession 为空。
 // UI 采用卡片化布局，与首页/设置页设计系统一致。
 import SwiftUI
 import SwiftData
@@ -986,16 +986,16 @@ struct ResultConfirmView: View {
             session = MainActor.assumeIsolated {
                 let s = RecognitionSaver.autoSave(result: result, rawText: rawText, image: sourceImage, context: ctx)
                 // 如果用户通过新鲜识别点保存，登记指纹供后续去重
-                if let img = sourceImage, let hash = ImageHasher.aHash(img) {
+                if let img = sourceImage, let fp = ImageHasher.fingerprint(img) {
                     // 命中重复（duplicate 非空）时不上报新指纹 —— 原指纹已在初次保存时登记
                     if duplicate == nil {
-                        DuplicateStore.add(DuplicateEntry(hash: hash, recognizedAt: .now,
+                        DuplicateStore.add(DuplicateEntry(hashD: fp.hash, ratio: fp.ratio, recognizedAt: .now,
                                                           types: (result.types ?? []).joined(separator: ","),
                                                           summary: RecognitionSaver.summary(of: result)))
                     }
                 }
                 if let d = duplicate {
-                    DuplicateStore.add(DuplicateEntry(hash: d.hash, recognizedAt: .now,
+                    DuplicateStore.add(DuplicateEntry(hashD: d.hash, ratio: d.ratio, recognizedAt: .now,
                                                       types: types.joined(separator: ","),
                                                       summary: RecognitionSaver.summary(of: result)))
                 }
@@ -1014,6 +1014,18 @@ struct ResultConfirmView: View {
                     b.time = eb.date
                     b.isIncome = RecognitionSaver.isIncomeCategory(eb.category)
                     b.imageName = session.imageName
+                } else {
+                    // 类别未预存（该类别「自动保存」=关，混合识别时确认页仍展示）：点保存此刻才建账单。
+                    // 与 autoSave 同口径：仅金额缺失才跳过；空商户兜底类别名。
+                    guard let amt = Double(eb.amount) else { continue }
+                    let income = RecognitionSaver.isIncomeCategory(eb.category)
+                    let merchant = eb.merchant.isEmpty ? (eb.category.isEmpty ? "账单" : eb.category) : eb.merchant
+                    let b = Bill(merchant: merchant, amount: amt, category: eb.category,
+                                 time: eb.date, isIncome: income, imageName: session.imageName)
+                    context.insert(b)
+                    if !eb.merchant.isEmpty {
+                        MerchantMetaStore.upsert(merchant: eb.merchant, category: eb.category, isIncome: income, in: context)
+                    }
                 }
             }
             // 用户删掉的错认账单：从库里一并删除
@@ -1022,11 +1034,20 @@ struct ResultConfirmView: View {
             }
             session.bills = session.bills.enumerated().filter { keptOrig.contains($0.offset) }.map { $0.element }
         }
-        if types.contains("todo"), let r = session.todo {
-            r.title = todoTitle
-            r.due = todoDueDate
-            DefaultReminderSettings.shared.apply(to: r)   // 重算提醒时间点
-            ReminderNotificationManager.schedule(r)        // 覆盖旧通知（按 syncId）
+        if types.contains("todo") {
+            if let r = session.todo {
+                r.title = todoTitle
+                r.due = todoDueDate
+                DefaultReminderSettings.shared.apply(to: r)   // 重算提醒时间点
+                ReminderNotificationManager.schedule(r)        // 覆盖旧通知（按 syncId）
+            } else if !todoTitle.trimmingCharacters(in: .whitespaces).isEmpty {
+                // 类别未预存：点保存此刻才建待办
+                let r = Reminder(title: todoTitle, due: todoDueDate, imageName: session.imageName)
+                DefaultReminderSettings.shared.apply(to: r)
+                context.insert(r)
+                ReminderNotificationManager.schedule(r)
+                session.todo = r
+            }
         }
         if types.contains("food") {
             if editableFoods.count == 1, let f = session.food {
@@ -1053,8 +1074,48 @@ struct ResultConfirmView: View {
                 f.baseSodium = editableFoods[0].sodiumPer100g
                 f.imageName = session.imageName
                 HealthManager.shared.saveCaloriesConsumed(f.calories, date: .now)
+                // 预存了多条但用户删到只剩一条：多余的预存记录软删（不删图，正文条目还在引用）
+                for extra in session.foods.dropFirst() {
+                    extra.syncDeleted = true
+                    extra.syncUpdatedAt = Date()
+                }
+                session.foods = [f]
+            } else if editableFoods.count == 1 {
+                // 类别未预存（「自动保存」=关）：点保存此刻才建食物记录
+                let ef = editableFoods[0]
+                let weight = Double(ef.weightGram) ?? 100
+                let ratio = weight / 100
+                let entry = FoodEntry(name: ef.name,
+                                      calories: ef.caloriesPer100g * ratio,
+                                      protein: ef.proteinPer100g * ratio,
+                                      carbs: ef.carbsPer100g * ratio,
+                                      fat: ef.fatPer100g * ratio,
+                                      fiber: ef.fiberPer100g * ratio,
+                                      sugar: ef.sugarPer100g * ratio,
+                                      sodium: ef.sodiumPer100g * ratio,
+                                      portion: "\(Int(weight))克", meal: ef.meal,
+                                      weightGram: weight,
+                                      baseCalories: ef.caloriesPer100g,
+                                      baseProtein: ef.proteinPer100g,
+                                      baseCarbs: ef.carbsPer100g,
+                                      baseFat: ef.fatPer100g,
+                                      baseFiber: ef.fiberPer100g,
+                                      baseSugar: ef.sugarPer100g,
+                                      baseSodium: ef.sodiumPer100g,
+                                      imageName: session.imageName)
+                context.insert(entry)
+                session.food = entry
+                session.foods = [entry]
+                HealthManager.shared.saveCaloriesConsumed(entry.calories, date: .now)
             } else if editableFoods.count > 1 {
-                // 多食物：每食物独立建 FoodEntry（session.food 保留最后一条，不做编辑）
+                // 多食物：以用户确认后的列表为准。若该类别曾预存（自动保存=开），
+                // 先把预存整组软删（不删图），再重建，避免 autoSave + 此处双写导致重复记录。
+                for f in session.foods {
+                    f.syncDeleted = true
+                    f.syncUpdatedAt = Date()
+                }
+                session.foods = []
+                session.food = nil
                 for f in editableFoods {
                     let weight = Double(f.weightGram) ?? 100
                     let ratio = weight / 100
@@ -1081,21 +1142,34 @@ struct ResultConfirmView: View {
                 }
             }
         }
-        if types.contains("health"), let h = session.health {
-            h.metric = healthMetric
-            h.value = healthValue
-            h.unit = result.health?.unit ?? ""
-            let v = Double(healthValue) ?? 0
-            if healthMetric.contains("体重") || healthMetric.lowercased().contains("weight") {
-                HealthManager.shared.saveWeight(v)
-            } else if healthMetric.contains("身高") || healthMetric.lowercased().contains("height") {
-                HealthManager.shared.saveHeight(v)
-            } else if healthMetric.contains("心率") || healthMetric.lowercased().contains("heart") {
-                HealthManager.shared.saveHeartRate(v)
+        if types.contains("health") {
+            var target = session.health
+            if target == nil, !healthMetric.trimmingCharacters(in: .whitespaces).isEmpty {
+                // 类别未预存（「自动保存」=关）：点保存此刻才建健康记录
+                let metric = HealthMetric(metric: healthMetric, value: healthValue,
+                                          unit: result.health?.unit ?? "", imageName: session.imageName)
+                context.insert(metric)
+                session.health = metric
+                target = metric
+            }
+            if let h = target {
+                h.metric = healthMetric
+                h.value = healthValue
+                h.unit = result.health?.unit ?? ""
+                let v = Double(healthValue) ?? 0
+                if healthMetric.contains("体重") || healthMetric.lowercased().contains("weight") {
+                    HealthManager.shared.saveWeight(v)
+                } else if healthMetric.contains("身高") || healthMetric.lowercased().contains("height") {
+                    HealthManager.shared.saveHeight(v)
+                } else if healthMetric.contains("心率") || healthMetric.lowercased().contains("heart") {
+                    HealthManager.shared.saveHeartRate(v)
+                }
             }
         }
 
         try? ctx.save()
+        // 用户覆盖修改后，触发防抖同步，确保改动（含账单/待办自动入库后的编辑）尽快推上云端
+        CloudSyncManager.shared.syncAfterLocalChange(context: ctx)
 
         // 纠错回流：仅当用户改动过识别结果才上报（相同则不报），让识别越用越懂用户习惯
         if let payload = correctionPayloads(),

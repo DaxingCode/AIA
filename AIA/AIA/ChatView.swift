@@ -1225,22 +1225,24 @@ struct ChatView: View {
         let hasVerb = lower.contains("增加") || lower.contains("添加") || lower.contains("创建") || lower.contains("新建") || lower.contains("设置") || lower.contains("记") || lower.contains("帮我") || lower.contains("提醒")
         guard hasObject && hasVerb else { return nil }
 
-        guard let (title, due) = parseTodoCreate(text) else { return nil }
-        // 防重复：短时间内重复发送同一句话不重复入库
-        if ChatView.checkDuplicateAndRegister(text, type: "todo") {
-            return "这个提醒你刚记过啦，我就不重复记了～"
+        // 一句话多条：按连词切分后逐条建待办
+        let segments = IntentTextUtils.splitByConjunction(text)
+        var created: [Reminder] = []
+        for seg in segments {
+            guard let (title, due) = parseTodoCreate(seg) else { continue }
+            if WaterIntakeParser.checkDuplicateAndRegister(seg, type: "todo") { continue }
+            if DataDeduplicator.isDuplicateReminder(title: title, context: context) { continue }
+            let r = Reminder(title: title, due: due, imageName: nil)
+            DefaultReminderSettings.shared.apply(to: r)
+            context.insert(r)
+            ReminderNotificationManager.schedule(r)
+            created.append(r)
         }
-        // 内容级去重：检查 24h 内是否有同标题待办
-        if DataDeduplicator.isDuplicateReminder(title: title, context: context) {
-            return "这个提醒你刚记过啦，我就不重复记了～"
-        }
-        let r = Reminder(title: title, due: due, imageName: nil)
-        DefaultReminderSettings.shared.apply(to: r)
-        context.insert(r)
-        ReminderNotificationManager.schedule(r)
+        guard !created.isEmpty else { return nil }
         try? context.save()
         let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
-        return "\(opener)：⏰ 已添加待办「\(title)」，我会在 \(formatShortDateTime(due)) 提醒你。"
+        let lines = created.map { "⏰ 已添加待办「\($0.title)」，我会在 \(formatShortDateTime($0.due ?? Date())) 提醒你。" }
+        return "\(opener)：\n" + lines.joined(separator: "\n")
     }
 
     /// 判断文本是否为明显**进食意图**（用于走记录流程）。需要包含进食动词或餐次上下文。
@@ -1311,7 +1313,7 @@ struct ChatView: View {
     }
 
     /// 命中最近一次相同内容 → 返回 true（调用方不应再入库）；否则登记并返回 false。
-    private static func checkDuplicateAndRegister(_ text: String, type: String) -> Bool {
+    static func checkDuplicateAndRegister(_ text: String, type: String) -> Bool {
         let now = Date()
         recentCreations.removeAll { now.timeIntervalSince($0.at) > dedupWindow }
         let key = chatDedupKey(text, type: type)
@@ -1336,25 +1338,16 @@ struct ChatView: View {
     private func createBillLocally(from text: String) -> String? {
         let lower = text.lowercased()
         // 必须先有金额，否则不是本地可解析的账单（纯饮食/问句等交给其它分支）
-        guard let amount = extractAmount(text) else { return nil }
+        guard extractAmount(text) != nil else { return nil }
 
-        // 先判 update 意图（如「把星巴克的账单改成40元」），命中走 update 路径，
-        // 避免错误地再建一笔而不是修改原账单。
+        // 先判 update 意图（如「把星巴克的账单改成40元」），命中走 update 路径
         if ChatView.hasExplicitUpdateIntent(lower) {
-            if let upd = updateBillLocally(from: text, newAmount: amount) {
+            if let upd = updateBillLocally(from: text, newAmount: extractAmount(text)!) {
                 return upd
             }
-            // 找不到目标（没有同名账单） → 回退为新建，但先清洗掉「把字句 + 改成」噪声，
-            // 防止 merchant 被污染成"把星巴克改成"等。
         }
 
         let incomeKeywords = ["工资","薪资","薪水","收入","报销","退款","返现","奖金","分红","利息","红包","补贴","收款","进账","提成","劳务费","兼职"]
-        // 本地建账单的触发条件：
-        // 1) 显式账单关键词（记一笔/花了/付了…）；
-        // 2) 食物+金额（如「午饭吃了碗牛肉面32块」），用户既说了吃什么又给了金额，明确是一笔花费。
-        //    金额需带货币单位（元/块/￥/¥），以排除「1500大卡」这类把热量当金额误建账单的情况。
-        // 3) 收入关键词 + 金额（如「工资12000」「报销了500块」），本地常漏判为支出或交给 AI。
-        // 纯饮食（如「喝了一杯奶茶」）因无金额已在上面返回 nil，仍走 food 路径，不会误建账单。
         let billKw = ["记一笔", "记账", "花了", "花掉", "付了", "付给", "买了", "消费", "支出", "账单", "花销", "开销", "扫码付"]
         let hasExplicitBill = billKw.contains(where: { lower.contains($0) })
         let hasMoneyUnit = lower.contains("元") || lower.contains("块") || lower.contains("￥") || lower.contains("¥")
@@ -1362,72 +1355,64 @@ struct ChatView: View {
         let isIncomeWithAmount = incomeKeywords.contains(where: { lower.contains($0) })
         guard hasExplicitBill || isFoodWithAmount || isIncomeWithAmount else { return nil }
 
-        // 商户名：去掉金额数字及单位、去掉记账关键词、命令前缀、去掉时间/饮食动词与语气助词后剩下的文本
-        var merchant = text
-        // 去掉命令动词前缀（记/记录/添加/增加/创建/新建/设置/录入/保存/帮我/给我…），
-        // 避免「记星巴克35」被当成商户「记星巴克」；与饮食/待办/云端共用 commandVerbPrefixes。
+        // 一句话多条：按连词切分后逐条建账单
+        let segments = IntentTextUtils.splitByConjunction(text)
+        var created: [(merchant: String, amount: Double, isIncome: Bool)] = []
+        for seg in segments {
+            guard let fields = buildBill(from: seg) else { continue }
+            if WaterIntakeParser.checkDuplicateAndRegister(seg, type: "bill") { continue }
+            if DataDeduplicator.isDuplicateBill(merchant: fields.merchant, amount: fields.amount, time: .now, context: context) { continue }
+            let bill = Bill(merchant: fields.merchant, amount: fields.amount, category: fields.category,
+                            time: .now, isIncome: fields.isIncome, imageName: nil)
+            context.insert(bill)
+            created.append((fields.merchant, fields.amount, fields.isIncome))
+        }
+        guard !created.isEmpty else { return nil }
+        try? context.save()
+        CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
+        let lines = created.map { (m, a, inc) in
+            let icon = inc ? "💰" : "🧾"
+            return "\(icon) 已添加\(inc ? "收入" : "支出")「\(m)」\(String(format: "%.2f", a))"
+        }
+        return "\(opener)：\n" + lines.joined(separator: "\n")
+    }
+
+    /// 从单个子句解析出一笔账单的字段（商户/金额/分类/收支），供一句话多条账单复用。
+    private func buildBill(from seg: String) -> (merchant: String, amount: Double, category: String, isIncome: Bool)? {
+        guard let amount = extractAmount(seg) else { return nil }
+        let lower = seg.lowercased()
+        var merchant = seg
         merchant = ChatView.stripCommandVerbPrefix(merchant)
-        // 去掉「花」作花费动词且后接金额（如「汉堡花10元」），放在金额提取前，避免残留成商户名；
-        // 用占位符保护爆米花等含「花」菜品（stripSpendPhrase 已做保护）。
         merchant = ChatView.stripSpendPhrase(merchant)
-        // 去掉金额（支持千分位逗号/中文逗号）及可选货币单位
         merchant = merchant.replacingOccurrences(of: #"\d{1,3}(?:[,\，]\d{3})+(?:\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?|\d+(?:\.\d+)?\s*(元|块|元钱|块钱|￥|¥)?"#,
                                                  with: "", options: .regularExpression)
-        // 清掉残留的货币符号（¥40 这类符号在金额前，上面的正则清不掉，必须单独删）
         merchant = merchant.replacingOccurrences(of: #"[¥￥\$]"#, with: "", options: .regularExpression)
+        let billKw = ["记一笔", "记账", "花了", "花掉", "付了", "付给", "买了", "消费", "支出", "账单", "花销", "开销", "扫码付"]
         for kw in billKw { merchant = merchant.replacingOccurrences(of: kw, with: "") }
-        // 把字句噪声（用户说「把 X 改成/改为/变成/调成/调为 Y」时，「把」「改成」等不应进商户名）。
-        let baWords = ["改成", "改为", "变成", "调成", "调为", "调整为", "改成", "设为", "设置为"]
+        let baWords = ["改成", "改为", "变成", "调成", "调为", "调整为", "设为", "设置为"]
         for kw in baWords { merchant = merchant.replacingOccurrences(of: kw, with: "") }
-        // 多字词（时间/饮食动词/食物量词）用分组 Alternation；务必放在单字语气助词之前或与之并列
-        // 注意：**餐次词（早餐/午餐/...）不再 strip**，因为「记一笔早餐 10 元」用户可能就是只给了餐次，
-        // 把餐次 strip 掉会落空→ fallback 到「其他消费」是错 UX；餐次本身可作商户+归餐饮。
         merchant = merchant.replacingOccurrences(of: #"(今晚|今天|明天|早上|上午|中午|下午|晚上|刚才|吃了|喝了|喝|吃|买|碗|杯|个|盘|份|根|片|串|块|勺)"#,
                                                  with: "", options: .regularExpression)
-        // 单字语气助词 + 把字句的「把」字
         merchant = merchant.replacingOccurrences(of: #"[的了在给和去个吧啊呢哦嘛把]"#,
                                                  with: "", options: .regularExpression)
-        // 去掉残留的数字与标点，得到干净商户名
         merchant = merchant.replacingOccurrences(of: #"[\d,\.，。、\s]+"#,
                                                  with: "", options: .regularExpression)
         merchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
-        // 清洗后若为空，回退到"其他消费"；**餐次词（早餐/午餐/夜宵/...）保留作为商户**，
-        // 下方 category 流程会用 mealCategoryHint 把它归到「餐饮」。
         if merchant.isEmpty { merchant = "其他消费" }
 
-        // 收入关键词识别（工资/报销/退款等），本地记账场景云端常漏判为支出；
-        // incomeKeywords 已在函数开头定义并用于触发条件。
+        let incomeKeywords = ["工资","薪资","薪水","收入","报销","退款","返现","奖金","分红","利息","红包","补贴","收款","进账","提成","劳务费","兼职"]
         let isIncomeText = incomeKeywords.contains { lower.contains($0) || merchant.contains($0) }
-        // DB 优先：本地经验库命中则直接用其分类，跳过 AI
         var (cat, metaIncome) = MerchantMetaStore.lookup(merchant, in: context) ?? ("其他", false)
-        // 经验库未命中时，再用关键词提示兜底：餐次词（晚餐/夜宵/午饭…）应归「餐饮」而非「其他」。
-        // 注意：merchant 清洗后可能是"其他消费"，但原始 text 仍含"晚餐"等餐次词，故同时传入 text 判断。
-        if cat == "其他", let hint = RecognizeService.mealCategoryHint(merchant + " " + text) {
+        if cat == "其他", let hint = RecognizeService.mealCategoryHint(merchant + " " + seg) {
             cat = hint
         }
         let isIncome = isIncomeText || metaIncome
-        // 收入类：清洗后商户名若仍是泛化词（收入/进账/收款/入账）或空，统一显示为「其他收入」更自然；
-        // 具体收入类型（工资/报销/退款…）保持原样，不外覆。
         if isIncome, ["收入", "进账", "收款", "入账"].contains(merchant) || merchant.isEmpty {
             merchant = "其他收入"
         }
         let category = (isIncome && cat == "其他") ? "收入" : cat
-        // 防重复：短时间内重复发送同一句话不重复入库
-        if ChatView.checkDuplicateAndRegister(text, type: "bill") {
-            return "这笔记过啦，我就不重复记了～"
-        }
-        // 内容级去重：检查 24h 内是否有同商户 + 同金额
-        if DataDeduplicator.isDuplicateBill(merchant: merchant, amount: amount, time: .now, context: context) {
-            return "这笔记过啦，我就不重复记了～"
-        }
-        let bill = Bill(merchant: merchant, amount: amount, category: category,
-                        time: .now, isIncome: isIncome, imageName: nil)
-        context.insert(bill)
-        try? context.save()
-        CloudSyncManager.shared.syncAfterLocalChange(context: context)
-        let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
-        let icon = isIncome ? "💰" : "🧾"
-        return "\(opener)：\(icon) 已添加\(isIncome ? "收入" : "支出")「\(merchant)」\(String(format: "%.2f", amount))"
+        return (merchant, amount, category, isIncome)
     }
 
     /// 本地修改账单金额（处理「把星巴克的账单改成40元」「改一下：星巴克→40」）。
@@ -1457,8 +1442,8 @@ struct ChatView: View {
         bill.amount = newAmount
         bill.syncUpdatedAt = Date()
         try? context.save()
-        ChatView.clearDedupKey("\(bill.merchant)\(String(format: "%.2f", oldAmount))", type: "bill")
-        ChatView.clearDedupKey("\(bill.merchant)\(String(format: "%.2f", newAmount))", type: "bill")
+        WaterIntakeParser.clearDedupKey("\(bill.merchant)\(String(format: "%.2f", oldAmount))", type: "bill")
+        WaterIntakeParser.clearDedupKey("\(bill.merchant)\(String(format: "%.2f", newAmount))", type: "bill")
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
         let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
         return "\(opener)：🔄 已把「\(bill.merchant)」从 ¥\(String(format: "%.2f", oldAmount)) 改成 ¥\(String(format: "%.2f", newAmount))"
@@ -1487,7 +1472,7 @@ struct ChatView: View {
            ChatView.hasExplicitCompleteIntent(text) {
             return nil
         }
-        let meal = ChatView.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
+        let meal = WaterIntakeParser.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
         let items = ChatView.parseFoodItems(from: text)
         guard !items.isEmpty else { return nil }
 
@@ -1563,7 +1548,7 @@ struct ChatView: View {
         }
 
         // 防重复：以整句话做 key（短期窗口）
-        if ChatView.checkDuplicateAndRegister(text, type: "food") {
+        if WaterIntakeParser.checkDuplicateAndRegister(text, type: "food") {
             return "这顿你刚记过啦，我就不重复记了～"
         }
         // 内容级去重：检查 24h 内是否有同名 + 同份量记录
@@ -1641,7 +1626,7 @@ struct ChatView: View {
     /// 仍把食物名+份量落库，热量记为 0 并提示用户稍后补全，避免被静默丢弃。
     /// 典型场景：云端 provider 配置缺失导致纯文字被发到视觉模型、识别成 none —— 食物绝不能因此消失。
     private func createFoodLocallyFallback(from text: String) -> String? {
-        let meal = ChatView.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
+        let meal = WaterIntakeParser.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
         let items = ChatView.parseFoodItems(from: text)
         guard !items.isEmpty else { return nil }
 
@@ -1667,7 +1652,7 @@ struct ChatView: View {
     /// 用户点击"确认记录"后才创建 FoodEntry；查询失败则仅提示，保留账单。
     /// 支持一句话里多个食物：每个食物独立一张确认卡片。
     private func sendFoodConfirmCard(text: String) async {
-        let meal = ChatView.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
+        let meal = WaterIntakeParser.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
         let items = ChatView.parseFoodItems(from: text)
         guard !items.isEmpty else { return }
 
@@ -1750,11 +1735,11 @@ struct ChatView: View {
     /// 聊天记录饮水量：直接创建一条 FoodEntry，仅 waterIntake 有值，营养全 0。
     /// 走 `parseWaterIntake` 解析；返回消息（成功确认/失败提示）。
     private func createWaterIntake(from text: String) -> String? {
-        guard let (ml, display) = ChatView.parseWaterIntake(text) else { return nil }
-        let meal = ChatView.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
+        guard let (ml, display) = WaterIntakeParser.parse(text) else { return nil }
+        let meal = WaterIntakeParser.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
 
         // 防重复
-        if ChatView.checkDuplicateAndRegister(text, type: "water") {
+        if WaterIntakeParser.checkDuplicateAndRegister(text, type: "water") {
             return "这杯水我刚记过啦～"
         }
 
@@ -1777,7 +1762,7 @@ struct ChatView: View {
     /// 聊天记录食物入口：本地营养库未命中时，走云端专项食物营养查询；仍失败则兜底通用识别。
     /// 支持一句话里多个食物，逐项查询并分别建 FoodEntry。
     private func createFoodFromCloud(text: String, recentMessages: [[String: String]]) async -> String {
-        let meal = ChatView.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
+        let meal = WaterIntakeParser.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
         let items = ChatView.parseFoodItems(from: text)
         guard !items.isEmpty else { return localReply(for: text) }
 
@@ -1863,7 +1848,7 @@ struct ChatView: View {
     /// - 覆盖裸写法：「花」直接接金额，如「汉堡花10元」「晚餐汉堡花32块」
     /// - 用纯字母占位符保护「爆米花/花菜/花生/花卷/花蛤/花螺/红花」等本身含「花」的真实食物/菜品名，
     ///   防止被误当花费动词清掉（占位符不含数字，避免被金额/标点清理误删）。
-    private static func stripSpendPhrase(_ text: String) -> String {
+    static func stripSpendPhrase(_ text: String) -> String {
         let protectedFoods = ["爆米花", "花菜", "花生", "花卷", "花蛤", "花螺", "红花"]
         let placeholders = ["ZFA", "ZFB", "ZFC", "ZFD", "ZFE", "ZFF", "ZFG"]
         var t = text
@@ -1890,7 +1875,7 @@ struct ChatView: View {
     /// 必须放在份量提取前，否则「块」等货币/量词会被当成重量单位吃掉，导致食物名残留成「汉堡花」。
     /// 仅删「花 + 金额」这一短语（不动其它数字），以保留「1个汉堡」里的数量供份量估算使用。
     /// 用纯字母占位符保护爆米花/花菜/花生/花卷/花蛤/花螺/红花等本身含「花」的真实食物名。
-    private static func stripBareHuaAmount(_ text: String) -> String {
+    static func stripBareHuaAmount(_ text: String) -> String {
         let protectedFoods = ["爆米花", "花菜", "花生", "花卷", "花蛤", "花螺", "红花"]
         let placeholders = ["ZFA", "ZFB", "ZFC", "ZFD", "ZFE", "ZFF", "ZFG"]
         var t = text
@@ -1909,7 +1894,7 @@ struct ChatView: View {
     /// 所有"写记录"类命令动词前缀（记/记录/添加/增加/创建/新建/设置/录入/保存/帮我/给我…）。
     /// 食物名 / 账单商户 / 待办标题 / 云端 create_* 共用同一份，避免换种说法又漏。
     /// 必须按长度降序：否则「帮我记一笔」会被「记」截成「帮我一笔」。
-    private static let commandVerbPrefixes: [String] = [
+    static let commandVerbPrefixes: [String] = [
         // 记 / 记录
         "帮我记一笔", "给我记一笔", "帮我记录一笔", "给我记录一笔",
         "帮我记一下", "给我记一下", "帮我记个", "给我记个", "帮我记下来", "给我记下来",
@@ -1933,13 +1918,13 @@ struct ChatView: View {
     ]
 
     /// 剥离命令动词前缀后，紧接的量词（一个/一条…）也应去掉，避免「帮我添加一个买菜提醒」残留成「一个买菜提醒」。
-    private static let commandMeasureWords: [String] = [
+    static let commandMeasureWords: [String] = [
         "一个", "一条", "一项", "一件", "这台", "这部", "这张", "这把", "那只", "那个", "这个"
     ]
 
     /// 剥离写入类命令动词前缀（只剥前缀，不全局删除，避免名字里正常的「记/添加」被误删）。
     /// 循环剥离：处理「帮我记一下」这类组合，直到不再命中前缀为止。
-    private static func stripCommandVerbPrefix(_ text: String) -> String {
+    static func stripCommandVerbPrefix(_ text: String) -> String {
         var t = text
         var changed = true
         while changed {
@@ -1958,7 +1943,7 @@ struct ChatView: View {
         return t
     }
 
-    private static func parseFoodNameAndWeight(_ text: String) -> (name: String, weight: Double, portion: String)? {
+    static func parseFoodNameAndWeight(_ text: String) -> (name: String, weight: Double, portion: String)? {
         var t = text
         // 剥离写入类命令动词前缀（记/记录/添加/…），避免「记午餐吃了饺子200克」残留成「记饺子」
         t = ChatView.stripCommandVerbPrefix(t)
@@ -2051,7 +2036,7 @@ struct ChatView: View {
     /// 从文本中拆出多个食物项。
     /// 优先按「数量+单位」切分；没有量词时退回整句解析，或按常见连词/标点切分。
     /// 示例：「早餐吃了两个鸡蛋一碗燕麦粥」→ [(鸡蛋, 100, "2个"), (燕麦粥, 300, "1碗")]
-    private static func parseFoodItems(from text: String) -> [(name: String, weight: Double, portion: String)] {
+    static func parseFoodItems(from text: String) -> [(name: String, weight: Double, portion: String)] {
         let unitWeights: [(String, Double)] = [
             ("碗", 300), ("杯", 250), ("瓶", 500), ("罐", 330),
             ("个", 50), ("片", 30), ("份", 200), ("块", 50),
@@ -2104,64 +2089,6 @@ struct ChatView: View {
             }
         }
         return items
-    }
-
-    /// 解析文本中的饮水量。返回 (amount_ml, displayText)。
-    /// 命中条件：含「水」+ 含喝类动词（喝/饮/灌） + 不含其他真实食物词。
-    /// 单位映射：升/L→1000、毫升/ml→1、杯→250、瓶→500、壶→1000、碗→300。
-    /// 示例：
-    ///   "喝了 1 升水"    → (1000, "1升水")
-    ///   "喝了 500ml 水"  → (500,  "500ml水")
-    ///   "喝了两杯水"     → (500,  "2杯水")
-    ///   "喝了 1.5 升水"  → (1500, "1.5升水")
-    ///   "喝水"           → (250,  "1杯水")
-    private static func parseWaterIntake(_ text: String) -> (ml: Double, display: String)? {
-        // 必须含「水」+ 喝类动词
-        let hasWater = text.contains("水") || text.contains("汤") // 汤也走这条罕见 case
-        let hasDrinkVerb = text.contains("喝") || text.contains("饮") || text.contains("灌")
-        guard hasWater, hasDrinkVerb else { return nil }
-
-        // 排除「汤/糖水」以外的「其他真实食物」：含蛋/饭/面/菜/肉/鱼/鸡/奶/粥/麦/汤 等就当复合饮食场景，不走水路径
-        let foodKeywords = ["蛋", "饭", "面", "菜", "肉", "鱼", "鸡", "鸭", "牛", "羊", "猪", "奶",
-                            "粥", "麦", "汤", "果", "豆", "瓜", "薯", "汤圆", "面包", "饼", "燕"]
-        for kw in foodKeywords where text.contains(kw) {
-            // "水" 在末尾时允许（如 "喝了 1 碗汤 1 杯水"），否则整句有食物就走食物路径
-            // 这里保守处理：含食物词就直接放弃水路径，避免「喝了 1 碗燕麦粥 1 杯水」漏记食物
-            return nil
-        }
-
-        // 单位 → 毫升映射（按常见容量排序，确保长的先匹配，避免「ml」被「m」截胡）
-        let units: [(String, Double)] = [
-            ("毫升", 1), ("mL", 1), ("ML", 1), ("ml", 1),
-            ("升", 1000), ("L", 1000), ("l", 1000),
-            ("杯", 250),
-            ("瓶", 500),
-            ("壶", 1000),
-            ("碗", 300),
-        ]
-
-        let ns = text as NSString
-        // 1) 优先匹配「数量+单位」组合
-        for (unit, mlPerUnit) in units {
-            let escaped = NSRegularExpression.escapedPattern(for: unit)
-            let pattern = "([\\d.]+|[一二两三四五六七八九十百千]+)\\s*\(escaped)"
-            if let regex = try? NSRegularExpression(pattern: pattern),
-               let m = regex.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)) {
-                let numStr = ns.substring(with: m.range(at: 1))
-                let count: Double
-                if let n = parseChineseNumber(numStr) { count = Double(n) }
-                else if let d = Double(numStr) { count = d }
-                else { count = 1 }
-                return (count * mlPerUnit, "\(numStr)\(unit)水")
-            }
-        }
-
-        // 2) 没数量+单位：单纯「喝水」「饮水」「灌水」 → 默认 1 杯（250ml）
-        if text.contains("喝水") || text.contains("饮水") || text.contains("灌水") {
-            return (250, "1杯水")
-        }
-
-        return nil
     }
 
     /// 从文本提取金额数字（如 35 / 12.5 / 10,000 / 1,234.56）。
@@ -2345,7 +2272,7 @@ struct ChatView: View {
     }
 
     /// 把中文数字（如「二」「十二」「两」）转成 Int；阿拉伯数字直接返回。
-    private static func parseChineseNumber(_ string: String) -> Int? {
+    static func parseChineseNumber(_ string: String) -> Int? {
         if let n = Int(string) { return n }
         let digits: [Character: Int] = [
             "零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
@@ -2756,7 +2683,7 @@ struct ChatView: View {
         let label = bill.merchant.isEmpty ? "账单" : "「\(bill.merchant)」账单"
         let amountStr = String(format: "%.2f", bill.amount)
         // 同步清掉该账单对应的 dedup key（用最近一条用户文本无法直接定位，用「商户+金额」反查的 key）
-        ChatView.clearDedupKey("\(bill.merchant)\(amountStr)", type: "bill")
+        WaterIntakeParser.clearDedupKey("\(bill.merchant)\(amountStr)", type: "bill")
         context.delete(bill)
         try? context.save()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
@@ -2773,8 +2700,8 @@ struct ChatView: View {
         desc.fetchLimit = 1
         guard let foods = try? context.fetch(desc), let food = foods.first else { return nil }
         let name = food.name.isEmpty ? "食物" : "「\(food.name)」"
-        ChatView.clearDedupKey(food.name, type: "food")
-        ChatView.clearDedupKey(food.name, type: "water")
+        WaterIntakeParser.clearDedupKey(food.name, type: "food")
+        WaterIntakeParser.clearDedupKey(food.name, type: "water")
         context.delete(food)
         try? context.save()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
@@ -2791,7 +2718,7 @@ struct ChatView: View {
         desc.fetchLimit = 1
         guard let todos = try? context.fetch(desc), let todo = todos.first else { return nil }
         let title = todo.title.isEmpty ? "提醒" : "「\(todo.title)」"
-        ChatView.clearDedupKey(todo.title, type: "todo")
+        WaterIntakeParser.clearDedupKey(todo.title, type: "todo")
         ReminderNotificationManager.cancel(todo)
         context.delete(todo)
         try? context.save()
@@ -2816,7 +2743,7 @@ struct ChatView: View {
         if let m = modelMeal, !m.isEmpty {
             return ChatView.normalizeMeal(m)
         }
-        return ChatView.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
+        return WaterIntakeParser.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
     }
 
     private static func normalizeMeal(_ meal: String) -> String {
@@ -2825,15 +2752,6 @@ struct ChatView: View {
         if m.contains("午") { return "午餐" }
         if m.contains("晚") || m.contains("夜") { return "晚餐" }
         return "加餐"
-    }
-
-    private static func mealFromText(_ text: String) -> String? {
-        let lowered = text.lowercased()
-        if lowered.contains("早餐") || lowered.contains("早饭") || lowered.contains("早上") || lowered.contains("今早") { return "早餐" }
-        if lowered.contains("午餐") || lowered.contains("午饭") || lowered.contains("中午") || lowered.contains("正午") { return "午餐" }
-        if lowered.contains("晚餐") || lowered.contains("晚饭") || lowered.contains("晚上") || lowered.contains("今晚") || lowered.contains("夜宵") { return "晚餐" }
-        if lowered.contains("加餐") || lowered.contains("点心") || lowered.contains("零食") { return "加餐" }
-        return nil
     }
 
     // MARK: - 平滑滚动到底部

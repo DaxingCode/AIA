@@ -33,11 +33,13 @@ struct SettingsView: View {
             VStack(spacing: 16) {
                 myAccountEntry
                 appearanceCard
+                homeLayoutEntry
                 tierCard
                 autoSyncSettingsCard
                 agentCard
                 modelProviderCard
                 screenshotAutoCard
+                imageAutoRecogCard
                 reminderCard
                 testNotifyCard
                 guideCard
@@ -82,9 +84,12 @@ struct SettingsView: View {
                     Circle()
                         .fill(LinearGradient.techAccent.opacity(0.15))
                         .frame(width: 56, height: 56)
-                    Text(String(userNickname.prefix(1)))
-                        .font(AIATheme.Font.largeTitle.weight(.semibold))
-                        .foregroundStyle(AIATheme.blue)
+                    // 默认展示阿宝头像，与首页/我的账号页一致
+                    Image("AIAvatar")
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 56, height: 56)
+                        .clipShape(Circle())
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text(userNickname.isEmpty ? "阿宝的朋友" : userNickname)
@@ -133,6 +138,28 @@ struct SettingsView: View {
                 .lineSpacing(2)
         }
         .padding(14)
+        .card()
+    }
+
+    // MARK: - 首页布局（模块排序 / 显示隐藏）
+    private var homeLayoutEntry: some View {
+        NavigationLink {
+            HomeLayoutSettingsView()
+        } label: {
+            HStack {
+                Label("首页布局", systemImage: "square.grid.2x2")
+                    .font(AIATheme.Font.callout.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(AIATheme.Font.caption.weight(.semibold))
+                    .foregroundStyle(AIATheme.muted)
+                    .padding(.leading, 4)
+            }
+            .padding(14)
+            .background(AIATheme.surface)
+        }
+        .buttonStyle(.plain)
         .card()
     }
 
@@ -319,6 +346,34 @@ struct SettingsView: View {
                 .lineSpacing(2)
         }
         .padding(14)
+        .card()
+    }
+
+    // MARK: - 图片自动识别（按类别 自动保存 / 自动弹出）
+    private var imageAutoRecogCard: some View {
+        VStack(spacing: 0) {
+            NavigationLink {
+                ImageAutoRecogSettingsView()
+            } label: {
+                HStack {
+                    Label("图片自动识别", systemImage: "photo.badge.checkmark")
+                        .font(AIATheme.Font.callout.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Text("自动保存 · 弹出确认页")
+                        .font(AIATheme.Font.footnote)
+                        .foregroundStyle(AIATheme.muted)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.right")
+                        .font(AIATheme.Font.caption.weight(.semibold))
+                        .foregroundStyle(AIATheme.muted)
+                        .padding(.leading, 4)
+                }
+                .padding(14)
+                .background(AIATheme.surface)
+            }
+            .buttonStyle(.plain)
+        }
         .card()
     }
 

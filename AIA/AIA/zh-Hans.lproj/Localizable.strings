@@ -43,6 +43,8 @@
 "bill.monthly.expense" = "支出";
 "bill.monthly.balance" = "结余";
 "bill.details" = "账单详情";
+"bill.searchMerchant" = "搜索商户、金额、分类、日期、备注";
+"bill.searchEmpty" = "未找到匹配“%@”的账单";
 "bill.carousel.hint" = "点击圆环查看详情 / 左右滑动查看更多";
 "bill.empty.title" = "没有%@账单记录";
 "bill.empty.desc" = "截一张付款 / 消费截屏";
@@ -113,10 +115,10 @@
 
 // MARK: - 健康模块 (HealthListView)
 "health.navTitle" = "健康管理";
-"health.ring.steps" = "步 / 10,000";
-"health.ring.sleep" = "睡眠 / 8h";
-"health.ring.energy" = "能量 / 500";
-"health.ring.exercise" = "运动 / 30m";
+"health.ring.steps" = "步";
+"health.ring.sleep" = "睡眠";
+"health.ring.energy" = "TDEE";
+"health.ring.exercise" = "运动";
 "health.stat.weight" = "体重";
 "health.stat.height" = "身高";
 "health.stat.restingHR" = "静息心率";

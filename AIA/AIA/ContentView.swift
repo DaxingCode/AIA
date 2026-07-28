@@ -11,10 +11,11 @@
 import SwiftUI
 import SwiftData
 import Combine
+import UniformTypeIdentifiers
 
 /// 首页可跳转的目的地。统一枚举 → 单个 navigationDestination，规避多 destination 冲突。
 enum HomeRoute: Hashable {
-    case diet, health, bill, billTools, todo, todoTools, chat, chatVoice, settings, autoSetup
+    case diet, health, bill, billTools, todo, todoTools, chat, chatVoice, settings, autoSetup, myAccount
     // 详情/编辑页：用 associated value 携带记录引用，让 .navigationDestination(for: HomeRoute.self) 统一处理
     // 所有 push 目标。**严禁**用 SelectableCard 的闭包式 destination 嵌入本路径——会触发
     // SwiftUI.AnyNavigationPath.Error.comparisonTypeMismatch try! 强解崩溃（2026-07-24 踩坑）。
@@ -33,6 +34,13 @@ struct ContentView: View {
     @StateObject private var health = HealthManager.shared
     @ObservedObject private var quickAction = QuickActionRouter.shared
     @ObservedObject private var router = NavigationRouter.shared
+    @ObservedObject private var layout = HomeLayoutStore.shared
+    @State private var isEditing = false
+    @State private var draggingModule: HomeModule? = nil
+    /// 长按进入编辑态的瞬间时间戳：长按松手会连带触发宫格 Button 的 tap，借此在 0.5s 内吞掉这次跳转，避免"进了编辑又跳页"。
+    @State private var longPressEnteredEditAt: Date? = nil
+    /// 右上角工具栏是否展开：默认收起，仅露「展开」触发按钮；点开露出「首页编辑」+「设置」。
+    @State private var toolbarExpanded = false
 
     @AppStorage("userNickname") private var userNickname = "阿宝的朋友"
     @AppStorage("aia.calorieGoalOverride") private var calorieGoalOverride: Double = 0
@@ -70,7 +78,41 @@ struct ContentView: View {
 
     // 目标常量（与记录页保持一致）
     private var calorieGoal: Double { calorieGoalIsCustom ? calorieGoalOverride : tdee }
-    private let stepGoal: Int = 10000
+    @AppStorage("aia.stepGoal") private var stepGoal: Int = 10000
+    /// TDEE 同源键（与健康目标页、饮食记录页一致）。
+    @AppStorage("aia.heightCm") private var heightCm: Double = 0
+    @AppStorage("aia.weightKg") private var weightKg: Double = 0
+    @AppStorage("aia.age") private var age: Int = 30
+    @AppStorage("aia.bioSex") private var bioSex: Int = 1   // 1 = 男, 0 = 女
+    @AppStorage("aia.activityLevel") private var activityLevel: Int = 1
+    /// 与健康管理页一致：已接入 HealthKit 且真正读到过非零数据时才用真实数据，
+    /// 否则回退到本地手动录入（防止授权弹窗被点拒绝/无 entitlement 时显示全 0）。
+    private var usesHealthKit: Bool { health.authorized && health.isAvailable && health.hasHealthKitData }
+    private var homeSteps: Int { usesHealthKit ? Int(health.stepsToday) : ManualHealthStore.shared.steps(for: Date()) }
+    private var homeExerciseMin: Double {
+        usesHealthKit ? health.exerciseTimeToday : health.exerciseTimeToday + Double(ManualHealthStore.shared.exerciseMinutes(for: Date()))
+    }
+    /// 与健康管理页 TDEE 圆环同源：已接入 HealthKit 且读到数据 → 静息+活动能量；
+    /// 未接入 → 手动补录的活动热量。保证首页健康卡片/今日预览/管理页圆环三处一致。
+    private var homeEnergyBurned: Double {
+        usesHealthKit ? health.restingEnergyToday + health.activeEnergyToday : Double(ManualHealthStore.shared.activeCalories(for: Date()))
+    }
+    /// 健康气泡消息：与首页健康卡片 / 健康管理页「今日概览」完全同源——
+    /// 步数走 homeSteps（含手动回落）、目标走 @AppStorage stepGoal、运动时长走 homeExerciseMin（含手动回落）、
+    /// 能量消耗走 homeEnergyBurned（与 TDEE 圆环同源）、静息心率 key 与页面 StatCard 一致（"心率"）。
+    /// 不再直读 raw health.stepsToday/exerciseTimeToday，也不再硬编码 10000 目标。
+    private var healthBubbleMessages: [String] {
+        let stat = { (key: String) -> String in
+            healths.first(where: { $0.metric.contains(key) }).map { "\($0.value)\($0.unit)" } ?? "—"
+        }
+        let energyText = homeEnergyBurned > 0 ? "\(Int(homeEnergyBurned)) kcal" : "—"
+        return [
+            "健康管理 · 今日步数 \(homeSteps)，距目标还差 \(max(0, stepGoal - homeSteps))",
+            "健康管理 · 运动时长 \(Int(homeExerciseMin)) min",
+            "健康管理 · 能量消耗 \(energyText)",
+            "健康管理 · 静息心率 \(stat("心率"))"
+        ]
+    }
     @AppStorage("aia.monthlyBudget") private var monthlyBudget: Double = 5000
 
     // 外观模式：浅色 / 深色 / 跟随系统（设置页可改；与系统浅深自适应主题联动）
@@ -87,8 +129,11 @@ struct ContentView: View {
                         header
                             .padding(.bottom, 8)
                         syncHeaderIndicator
-                        tilesGrid
-                        aiSummarySection
+                        if isEditing {
+                            homeModulesEditView
+                        } else {
+                            homeModulesView
+                        }
                     }
                     .padding(.horizontal, 12)
                     .padding(.top, 0)
@@ -100,10 +145,68 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { router.path.append(.settings) } label: {
-                        Image(systemName: "gearshape")
-                            .font(AIATheme.Font.body.weight(.medium))
+                    // 按钮始终存在，用 frame 宽度 + opacity + scale 做"卷帘"式展开/收起。
+                    // 不用 if+transition：toolbar 容器对 transition 支持差，会瞬间闪现不走动画。
+                    HStack(spacing: 0) {
+                        // 首页编辑 / 完成：图标 + 文字，最直观；编辑态不再旋转（文字配旋转会歪，且铅笔转 90° 像 bug）
+                        Button {
+                            // 进入编辑模式时给中等震动反馈；退出不震
+                            if !isEditing {
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            }
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                                isEditing.toggle()
+                                draggingModule = nil
+                            }
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: isEditing ? "checkmark.circle.fill" : "pencil.circle")
+                                    .font(AIATheme.Font.body.weight(.medium))
+                                    .contentTransition(.symbolEffect(.replace))
+                                Text(isEditing ? "完成" : "编辑")
+                                    .font(AIATheme.Font.body.weight(.medium))
+                            }
+                        }
+                        .frame(width: toolbarExpanded ? 66 : 0)
+                        .opacity(toolbarExpanded ? 1 : 0)
+                        .scaleEffect(toolbarExpanded ? 1 : 0.4, anchor: .trailing)
+                        .padding(.trailing, toolbarExpanded ? 14 : 0)
+                        .allowsHitTesting(toolbarExpanded)
+
+                        // 设置
+                        Button { router.path.append(.settings) } label: {
+                            Image(systemName: "gearshape")
+                                .font(AIATheme.Font.body.weight(.medium))
+                                .rotationEffect(.degrees(toolbarExpanded ? -90 : 0))  // 打开往左滚，关闭往右滚
+                        }
+                        .frame(width: toolbarExpanded ? 30 : 0)
+                        .opacity(toolbarExpanded ? 1 : 0)
+                        .scaleEffect(toolbarExpanded ? 1 : 0.4, anchor: .trailing)
+                        .padding(.trailing, toolbarExpanded ? 14 : 0)
+                        .allowsHitTesting(toolbarExpanded)
+
+                        // 展开 / 收起触发器
+                        Button {
+                            // 展开工具栏时给轻微震动反馈；收起不震
+                            if !toolbarExpanded {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            }
+                            withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) {
+                                toolbarExpanded.toggle()
+                                // 收起时若在编辑态，一并退出，避免隐藏「完成」按钮后卡在编辑态
+                                if !toolbarExpanded && isEditing {
+                                    isEditing = false
+                                    draggingModule = nil
+                                }
+                            }
+                        } label: {
+                            Image(systemName: toolbarExpanded ? "xmark.circle" : "ellipsis.circle")
+                                .font(AIATheme.Font.body.weight(.medium))
+                                .contentTransition(.symbolEffect(.replace))
+                                .rotationEffect(.degrees(toolbarExpanded ? 90 : 0))
+                        }
                     }
+                    .clipped()
                 }
             }
             .navigationDestination(for: HomeRoute.self) { route in
@@ -119,6 +222,7 @@ struct ContentView: View {
                     case .chatVoice:    ChatView(autostartVoice: true, entrySource: "voice")
                     case .settings:     SettingsView()
                     case .autoSetup:    AutoRecognitionSetupView()
+                    case .myAccount:    MyAccountView()
                     case .healthDetail(let m):
                         HealthDetailView(metric: m)
                     }
@@ -242,29 +346,43 @@ struct ContentView: View {
                 onboardingDone = true
             }
         }
+        // 全局轻量 toast（静默保存提示等）：挂在 NavigationStack 上，push 进来的页面也能看到。
+        // 静默路径不弹 fullScreenCover，不会被 cover 遮挡。
+        .overlay(alignment: .top) { GlobalToastOverlay() }
         // 外观模式开关：system → 不覆盖（跟随系统）；light/dark → 强制浅/深。
         // 挂在 NavigationStack 上即可覆盖整个窗口（含 push 进来的设置页、sheet、fullScreenCover）。
         .preferredColorScheme(appearanceColorScheme)
     }
 
     /// 检查后台识别留下的待确认结果（截图无感识别链路）：
-    /// 走 preparePresent —— 只做重复检测、不入库；确认页点保存才写入。
-    /// 由用户决定编辑/保留/删除；未命中指纹则正常入库。两者都弹确认页供覆盖修改。
+    /// 走 processRecognition —— 按「图片自动识别」设置（按类别 自动保存/自动弹出）分流：
+    /// - .present：弹确认页（预存类别可覆盖修改，未预存类别点「存入」才写库）；
+    /// - .silentlySaved：已静默入库 → 清 pending + 顶部 toast 引导去对应页面修改（原生「识别完成」通知不受影响）；
+    /// - .nothing：按设置丢弃 → 仅清 pending。
     @MainActor
     private func checkScreenshotPending() {
         guard !isCheckingScreenshotPending, pendingPresent == nil else { return }
         guard let p = ScreenshotStore.loadPending() else { return }
         isCheckingScreenshotPending = true
         let img = ScreenshotStore.loadPendingImage()
-        let present = RecognitionSaver.preparePresent(result: p.result, rawText: p.rawText,
-                                                            image: img, context: context,
-                                                            source: p.source ?? .cloud)
+        let outcome = RecognitionSaver.processRecognition(result: p.result, rawText: p.rawText,
+                                                          image: img, context: context,
+                                                          source: p.source ?? .cloud)
         isCheckingScreenshotPending = false
-        // 推迟到下一个 runloop 呈现 cover，避免 SwiftUI 环境（NavigationStack/ModelContext）未完全就绪时
-        // 全屏 cover 闪烁/自动关闭再弹出。同一 runloop 中的后续 checkScreenshotPending 会被 isCheckingScreenshotPending 拦截。
-        DispatchQueue.main.async { [present] in
-            guard pendingPresent == nil else { return }
-            pendingPresent = present
+        switch outcome {
+        case .present(let present):
+            // 推迟到下一个 runloop 呈现 cover，避免 SwiftUI 环境（NavigationStack/ModelContext）未完全就绪时
+            // 全屏 cover 闪烁/自动关闭再弹出。同一 runloop 中的后续 checkScreenshotPending 会被 isCheckingScreenshotPending 拦截。
+            DispatchQueue.main.async { [present] in
+                guard pendingPresent == nil else { return }
+                pendingPresent = present
+            }
+        case .silentlySaved(let savedTypes):
+            // 数据已入库：立即清 pending，避免点通知回 App 时再弹确认页
+            ScreenshotStore.clearPending()
+            ToastCenter.shared.show(ImageAutoRecogSettings.silentSaveToast(savedTypes: savedTypes))
+        case .nothing:
+            ScreenshotStore.clearPending()
         }
     }
 
@@ -307,7 +425,7 @@ struct ContentView: View {
     /// 阿宝头像：app icon (AIAvatar) 圆形裁剪 + 呼吸脉冲动画（2.5s 循环胀缩）
     private var abaoAvatar: some View {
         Button {
-            // 未来：跳转阿宝聊天页
+            router.path.append(.myAccount)
         } label: {
             Image("AIAvatar")
                 .resizable()
@@ -350,20 +468,278 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - 四宫格（2 列）
-    private var tilesGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-            animatedTile(0, tile: dietTile)
-            animatedTile(1, tile: healthTile)
-            animatedTile(2, tile: billTile)
-            animatedTile(3, tile: todoTile)
+    // MARK: - 可配置首页渲染（分段渲染器 + 编辑态）
+    private var gridColumns: [GridItem] {
+        [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+    }
+
+    /// 把模块序列按 layout 切成连续段：连续 gridCard 合一段、fullRow 自成一段。
+    private func chunkModules(_ modules: [HomeModule]) -> [(HomeModuleLayout, [HomeModule])] {
+        var result: [(HomeModuleLayout, [HomeModule])] = []
+        var i = 0
+        while i < modules.count {
+            let layout = modules[i].layout
+            var seg: [HomeModule] = [modules[i]]
+            var j = i + 1
+            while j < modules.count && modules[j].layout == layout {
+                seg.append(modules[j]); j += 1
+            }
+            result.append((layout, seg))
+            i = j
         }
-        .task {
-            // 立即进入可见态：杀后台冷启动时不再让人为延迟让用户等 0.8s
-            animateTiles = true
+        return result
+    }
+
+    @ViewBuilder
+    private func tileView(for m: HomeModule) -> some View {
+        switch m {
+        case .diet:      dietTile
+        case .health:    healthTile
+        case .bill:      billTile
+        case .todo:      todoTile
+        case .aiSummary: EmptyView()
         }
-        .onDisappear {
-            animateTiles = false
+    }
+
+    @ViewBuilder
+    private func fullRowView(for m: HomeModule) -> some View {
+        switch m {
+        case .aiSummary: aiSummarySection
+        default:         EmptyView()
+        }
+    }
+
+    /// 长按任意模块进入编辑态。maximumDistance:10 限制位移，避免滚动时误触（与 SelectableRow 一致的成熟做法）。
+    private var longPressToEnterEdit: some Gesture {
+        LongPressGesture(minimumDuration: 0.5, maximumDistance: 10)
+            .onEnded { _ in
+                guard !isEditing else { return }
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                // 记下此刻：松手时宫格 Button 的 tap 会随之触发，0.5s 内的这次跳转需吞掉
+                longPressEnteredEditAt = Date()
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    isEditing = true
+                    toolbarExpanded = true   // 展开工具栏，让「完成」按钮可见，用户能退出编辑态
+                    draggingModule = nil
+                }
+            }
+    }
+
+    /// 正常态：按 order 分段渲染，连续 gridCard 合进一个 LazyVGrid，遇 fullRow 先渲网格再渲整行。
+    private var homeModulesView: some View {
+        let visible = layout.visibleModules()
+        let chunks = chunkModules(visible)
+        return Group {
+            if visible.isEmpty {
+                emptyModulesPlaceholder
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(Array(chunks.enumerated()), id: \.offset) { _, chunk in
+                        if chunk.0 == .gridCard {
+                            LazyVGrid(columns: gridColumns, spacing: 12) {
+                                ForEach(Array(chunk.1.enumerated()), id: \.element) { gi, m in
+                                    animatedTile(gi, tile: tileView(for: m))
+                                        .simultaneousGesture(longPressToEnterEdit)
+                                }
+                            }
+                            .task { animateTiles = true }
+                        } else {
+                            ForEach(chunk.1, id: \.self) { m in
+                                fullRowView(for: m)
+                                    .simultaneousGesture(longPressToEnterEdit)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .onDisappear { animateTiles = false }
+    }
+
+    /// 编辑态：按与正常态相同的分段逻辑渲染——连续 gridCard 进一个 2 列 LazyVGrid，fullRow（事项预览）直接在 VStack 里全宽渲染（不进 grid、不依赖 gridCellColumns，规避与 .onDrag/.onDrop 手势容器冲突），支持拖拽重排 + 隐藏 + 添加。
+    private var homeModulesEditView: some View {
+        let visible = layout.visibleModules()
+        let chunks = chunkModules(visible)
+        return Group {
+            if visible.isEmpty {
+                emptyModulesPlaceholder
+            } else {
+                VStack(spacing: 12) {
+                    ForEach(Array(chunks.enumerated()), id: \.offset) { _, chunk in
+                        if chunk.0 == .gridCard {
+                            LazyVGrid(columns: gridColumns, spacing: 12) {
+                                ForEach(chunk.1, id: \.self) { m in
+                                    moduleEditCard(for: m)
+                                        .onDrag {
+                                            draggingModule = m
+                                            return NSItemProvider(item: nil, typeIdentifier: UTType.item.identifier)
+                                        }
+                                        .onDrop(of: [UTType.item.identifier],
+                                                delegate: ModuleDropDelegate(item: m,
+                                                                             dragging: $draggingModule,
+                                                                             layout: layout))
+                                }
+                            }
+                        } else {
+                            ForEach(chunk.1, id: \.self) { m in
+                                moduleEditCard(for: m)
+                                    .onDrag {
+                                        draggingModule = m
+                                        return NSItemProvider(item: nil, typeIdentifier: UTType.item.identifier)
+                                    }
+                                    .onDrop(of: [UTType.item.identifier],
+                                            delegate: ModuleDropDelegate(item: m,
+                                                                         dragging: $draggingModule,
+                                                                         layout: layout))
+                            }
+                        }
+                    }
+                    addModuleBar
+                }
+            }
+        }
+    }
+
+    /// 编辑态拖拽：进入目标模块区域即实时重排（B 平滑让位），松手仅清状态。
+    private struct ModuleDropDelegate: DropDelegate {
+        let item: HomeModule
+        @Binding var dragging: HomeModule?
+        let layout: HomeLayoutStore
+
+        /// 进入目标格子即实时重排，并加弹簧动画 → B 平滑让位
+        func dropEntered(info: DropInfo) {
+            guard let dragged = dragging, dragged != item else { return }
+            // 每次换位给一次 selection 轻点反馈，贴合系统重排手感
+            UISelectionFeedbackGenerator().selectionChanged()
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                layout.relocate(dragged, relativeTo: item)
+            }
+        }
+
+        func dropUpdated(info: DropInfo) -> DropProposal? {
+            DropProposal(operation: .move)
+        }
+
+        /// 松手：清空拖拽态（此时顺序已被 dropEntered 定好）
+        func performDrop(info: DropInfo) -> Bool {
+            dragging = nil
+            return true
+        }
+    }
+
+    @ViewBuilder
+    private func moduleEditCard(for m: HomeModule) -> some View {
+        ZStack(alignment: .topLeading) {
+            tileOrRowContent(for: m)
+            // 编辑态吞掉原卡片的点击跳转（原 tile 是 Button），但 − 按钮盖在上方仍可点
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture {}
+                .allowsHitTesting(true)
+            minusButton(for: m)
+        }
+        .frame(maxWidth: .infinity)
+        .modifier(ShakeModifier(active: true))
+    }
+
+    @ViewBuilder
+    private func tileOrRowContent(for m: HomeModule) -> some View {
+        switch m {
+        case .aiSummary: aiSummarySection
+        default:         tileView(for: m)
+        }
+    }
+
+
+
+    private func minusButton(for m: HomeModule) -> some View {
+        Button {
+            // 移除模块时给轻震动反馈
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                layout.setHidden(m, true)
+            }
+        } label: {
+            Image(systemName: "minus.circle.fill")
+                .font(.title2)
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(.white, AIATheme.expense)
+        }
+        .buttonStyle(.plain)
+        .frame(width: 28, height: 28)
+        .padding(6)
+        .offset(x: -6, y: -6)
+    }
+
+    private var emptyModulesPlaceholder: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "square.stack.3d.up.slash")
+                .font(.largeTitle)
+                .foregroundStyle(AIATheme.muted)
+            Text("暂无可显示模块")
+                .font(AIATheme.Font.callout.weight(.medium))
+                .foregroundStyle(AIATheme.sub)
+            Text("点下方「添加模块」恢复，或在设置 → 首页布局中恢复默认。")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+                .multilineTextAlignment(.center)
+                .lineSpacing(2)
+            addModuleBar
+        }
+        .frame(maxWidth: .infinity)
+        .padding(24)
+        .background(AIATheme.surface.opacity(0.6))
+        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rLG))
+    }
+
+    private var addModuleBar: some View {
+        let hiddenOnes = HomeModule.allCases.filter { layout.isHidden($0) }
+        return VStack(alignment: .leading, spacing: 8) {
+            if hiddenOnes.isEmpty {
+                Text("所有模块均已显示")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+            } else {
+                Text("已隐藏模块（点按恢复）")
+                    .font(AIATheme.Font.micro.weight(.medium))
+                    .foregroundStyle(AIATheme.muted)
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    ForEach(hiddenOnes) { m in
+                        Button {
+                            // 新增（恢复）模块时给轻震动反馈
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                                layout.setHidden(m, false)
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "plus.circle.fill").foregroundStyle(m.accent)
+                                Text(m.title)
+                            }
+                            .font(AIATheme.Font.caption)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity)
+                            .background(m.accent.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    /// 编辑态抖动效果
+    private struct ShakeModifier: ViewModifier {
+        var active: Bool
+        @State private var on = false
+        func body(content: Content) -> some View {
+            content
+                .rotationEffect(.degrees(active ? (on ? 0.8 : -0.8) : 0))
+                .animation(active ? .easeInOut(duration: 0.16).repeatForever(autoreverses: true) : .default, value: on)
+                .onAppear { if active { on = true } }
+                .onChange(of: active) { _, v in on = v }
         }
     }
 
@@ -414,19 +790,36 @@ struct ContentView: View {
         .lineLimit(1)
     }
 
+    // MARK: 昨晚睡眠（替代原宫格的「静息心率」项）
+    @AppStorage("aia.sleepGoalHours") private var sleepGoalHours: Double = 8
+    /// 昨晚睡眠 = 最近一条睡眠记录（HealthKit 同步）+ 未接入时的手动增量，与记录页同源。
+    private var sleepLastNight: Double {
+        let stored = healths.first(where: { $0.metric.contains("睡眠") }).flatMap { Double($0.value) } ?? 0
+        return usesHealthKit ? stored : stored + ManualHealthStore.shared.sleepHours(for: Date())
+    }
+    private var sleepRowText: String {
+        guard sleepLastNight > 0 else { return "—" }
+        let met = sleepGoalHours > 0 && sleepLastNight >= sleepGoalHours
+        return String(format: "%.1fh%@", sleepLastNight, met ? " · 达标" : "")
+    }
+    private var sleepRowColor: Color {
+        guard sleepLastNight > 0, sleepGoalHours > 0 else { return AIATheme.sub }
+        return sleepLastNight >= sleepGoalHours ? AIATheme.health : AIATheme.warning
+    }
+
     // MARK: 健康
     private var healthTile: some View {
         tile(bg: AIATheme.healthBG, accent: AIATheme.health, icon: "heart.fill", route: .health,
              title: "健康管理",
-             badge: TileBadge(text: health.stepsToday >= stepGoal ? "达标" : "今日", warn: false),
-             number: "\(health.stepsToday)", unit: "步",
+             badge: TileBadge(text: homeSteps >= stepGoal ? "达标" : "今日", warn: false),
+             number: "\(homeSteps)", unit: "步",
              isEmpty: healths.isEmpty) {
             VStack(alignment: .leading, spacing: 8) {
                 sparkBars
                 VStack(alignment: .leading, spacing: 5) {
                     healthSummaryRow("运动时长", exerciseTimeText, AIATheme.sub)
-                    healthSummaryRow("能量消耗", "\(healthStat("静息能量")) kcal", AIATheme.sub)
-                    healthSummaryRow("静息心率", "\(healthStat("静息心率")) bpm", AIATheme.sub)
+                    healthSummaryRow("能量消耗", homeEnergyBurned > 0 ? "\(Int(homeEnergyBurned)) kcal" : "—", AIATheme.sub)
+                    healthSummaryRow("昨晚睡眠", sleepRowText, sleepRowColor)
                 }
             }
         }
@@ -445,7 +838,7 @@ struct ContentView: View {
     }
 
     private var exerciseTimeText: String {
-        "\(Int(health.exerciseTimeToday)) min"
+        "\(Int(homeExerciseMin)) min"
     }
 
     // MARK: 账单
@@ -540,7 +933,6 @@ struct ContentView: View {
     // MARK: - 今日事项预览气泡（四条气泡固定展示，每条内部轮播各自内容）
     private var aiSummarySection: some View {
         let dietMsgs = AISummary.dietMessages(foods: foods)
-        let healthMsgs = AISummary.healthMessages(health: health, healths: healths)
         let billMsgs = AISummary.billMessages(bills: bills)
         let todoMsgs = AISummary.todoMessages(reminders: reminders)
 
@@ -548,7 +940,7 @@ struct ContentView: View {
             SectionTitle(text: "今日事项预览", trailing: "阿宝AI提醒")
             VStack(spacing: 8) {
                 rollingBubble(messages: dietMsgs, accent: AIATheme.food, active: rollSlot == 0, route: .diet)
-                rollingBubble(messages: healthMsgs, accent: AIATheme.health, active: rollSlot == 1, route: .health)
+                rollingBubble(messages: healthBubbleMessages, accent: AIATheme.health, active: rollSlot == 1, route: .health)
                 rollingBubble(messages: billMsgs, accent: AIATheme.bill, active: rollSlot == 2, route: .bill)
                 rollingBubble(messages: todoMsgs, accent: AIATheme.todo, active: rollSlot == 3, route: .todo)
             }
@@ -556,6 +948,7 @@ struct ContentView: View {
                 rollSlot = (rollSlot + 1) % 4
             }
         }
+        .frame(maxWidth: .infinity)
     }
 
     /// 单条气泡：当 `active` 为真（由外层调度器轮流指派）且候选 >1 时，像转轴一样向上滚动切换到下一条；气泡框本身不动。
@@ -643,7 +1036,14 @@ struct ContentView: View {
         titleTrailing: AnyView? = nil,
         @ViewBuilder details: () -> Content
     ) -> some View {
-        Button { router.path.append(route) } label: {
+        Button {
+            // 长按进入编辑后松手会连带触发本 tap：0.5s 内的跳转吞掉，只进编辑不跳页
+            if let t = longPressEnteredEditAt, Date().timeIntervalSince(t) < 0.5 {
+                longPressEnteredEditAt = nil
+                return
+            }
+            router.path.append(route)
+        } label: {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
                     // 标题 + 角标
@@ -749,7 +1149,7 @@ struct ContentView: View {
 
     // MARK: - 健康步数进度条（今日步数 / 目标步数，与饮食 MiniBar 同高）
     private var sparkBars: some View {
-        MiniBar(value: Double(health.stepsToday) / Double(stepGoal),
+        MiniBar(value: Double(homeSteps) / Double(stepGoal),
                 color: AIATheme.health,
                 height: 5)
     }
@@ -834,13 +1234,19 @@ struct ContentView: View {
         let v = todayFoods.filter { $0.meal == meal }.reduce(0) { $0 + $1.calories }
         return Int(v)
     }
-    private var tdee: Double { 1730 + health.activeEnergyToday }
+    /// 与饮食记录页同步：TDEE = 静息能量 + 活动能量（HealthKit 真实数据）；
+    /// 无真实数据时回落到 TDEE 目标值 BMR × 活动系数（与健康目标页同源）。
+    private var tdeeGoalFallback: Double {
+        (mifflinBMR(weightKg: weightKg, heightCm: heightCm, age: age, isMale: bioSex == 1) ?? 0)
+            * activityMultiplier(activityLevel)
+    }
+    private var tdee: Double {
+        let actual = health.restingEnergyToday + health.activeEnergyToday
+        return actual > 0 ? actual : tdeeGoalFallback
+    }
     private var netCalories: Double { todayCalories - tdee }
 
     // MARK: - 数据计算：健康
-    private func healthStat(_ key: String) -> String {
-        healths.first(where: { $0.metric.contains(key) }).map { "\($0.value)\($0.unit)" } ?? "—"
-    }
     private var weekStepValues: [Double] {
         // 仅今日步数可从 HealthKit 拿到；其余占位为 0（免费账号无 HealthKit 时全 0，柱子为最小高度）
         let today = Double(health.stepsToday)

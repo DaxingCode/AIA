@@ -9,14 +9,14 @@ private struct WPoint: Identifiable {
     let label: String
     let value: Double
 }
-private let wFmt: DateFormatter = {
-    let f = DateFormatter(); f.dateFormat = "M/d"; return f
-}()
-
 struct WeightTrendView: View {
-    @Query(sort: \HealthMetric.date, order: .reverse) private var healths: [HealthMetric]
+    @Query(filter: #Predicate<HealthMetric> { !$0.syncDeleted }, sort: \HealthMetric.date, order: .reverse) private var healths: [HealthMetric]
     @State private var toast: String?
     @State private var chartAppear = false   // 曲线淡入动画开关
+    @AppStorage("aia.weightGoalKg") private var weightGoalKg: Double = 65
+    @Environment(\.modelContext) private var context
+    @State private var showWeightGoalEditor = false
+    @State private var editedWeightGoal: Double = 65
 
     private var weights: [(date: Date, value: Double)] {
         healths.compactMap { m -> (Date, Double)? in
@@ -25,16 +25,21 @@ struct WeightTrendView: View {
             return (m.date, v)
         }.sorted { $0.date < $1.date }
     }
-    private var current: Double? { weights.last?.value }
-    private var maxV: Double? { weights.max(by: { $0.value < $1.value })?.value }
-    private var minV: Double? { weights.min(by: { $0.value < $1.value })?.value }
-    private var avg: Double? { weights.isEmpty ? nil : weights.reduce(0) { $0 + $1.value } / Double(weights.count) }
-    private var delta30: Double? {
-        guard let cur = current, let first = weights.first?.value else { return nil }
+    /// 最近 7 条体重记录（按时间升序，便于折线从左到右）。不按日历日期分组/过滤，仅取末尾 7 条。
+    private var recent7: [(date: Date, value: Double)] { Array(weights.suffix(7)) }
+    private var current: Double? { recent7.last?.value }
+    private var maxV: Double? { recent7.max(by: { $0.value < $1.value })?.value }
+    private var minV: Double? { recent7.min(by: { $0.value < $1.value })?.value }
+    private var avg: Double? { recent7.isEmpty ? nil : recent7.reduce(0) { $0 + $1.value } / Double(recent7.count) }
+    private var delta: Double? {
+        guard let cur = current, let first = recent7.first?.value else { return nil }
         return cur - first
     }
+    /// x 轴用序号 1..7（不挂钩日期），y 轴为 kg。
     private var points: [WPoint] {
-        weights.map { WPoint(label: wFmt.string(from: $0.date), value: $0.value) }
+        recent7.enumerated().map { i, w in
+            WPoint(label: "\(i + 1)", value: w.value)
+        }
     }
 
     var body: some View {
@@ -48,9 +53,9 @@ struct WeightTrendView: View {
                         Text("暂无体重").font(AIATheme.Font.callout.weight(.semibold))
                     }
                     Spacer()
-                    if let d = delta30 {
+                    if let d = delta {
                         let down = d < 0
-                        Text(String(format: "%@ %.1f / 30天", down ? "↓" : "↑", abs(d)))
+                        Text(String(format: "%@ %.1f / 近7次", down ? "↓" : "↑", abs(d)))
                             .font(AIATheme.Font.micro)
                             .padding(.horizontal, 8).padding(.vertical, 2)
                             .background(AIATheme.ok.opacity(0.14))
@@ -65,7 +70,7 @@ struct WeightTrendView: View {
                     StatCard(value: String(format: "%.1f", avg ?? 0), caption: "均值")
                 }
 
-                SectionTitle(text: "近 30 天曲线")
+                SectionTitle(text: "最近 7 次体重")
                 if points.isEmpty {
                     Text("暂无体重记录，去首页截一张体重截屏").font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
                         .frame(height: 80)
@@ -93,11 +98,14 @@ struct WeightTrendView: View {
                 Button { toast = "手动录入体重" } label: {
                     CardRow(icon: "✏️", iconBG: AIATheme.surfaceSecondary, title: "手动录入体重", subtitle: "无设备时保持连续", value: "›")
                 }.buttonStyle(.plain)
-                Button { toast = "设置体重目标" } label: {
+                Button {
+                    editedWeightGoal = weightGoalKg
+                    showWeightGoalEditor = true
+                } label: {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("设置体重目标").font(AIATheme.Font.footnote.weight(.medium))
-                            Text("当前 65.0 kg").font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
+                            Text("当前 \(String(format: "%.1f", weightGoalKg)) kg").font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
                         }
                         Spacer()
                         Image(systemName: "chevron.right").foregroundStyle(AIATheme.muted)
@@ -115,5 +123,63 @@ struct WeightTrendView: View {
         .alert("提示", isPresented: Binding(get: { toast != nil }, set: { if !$0 { toast = nil } })) {
             Button("好", role: .cancel) {}
         } message: { Text(toast ?? "") }
+        .sheet(isPresented: $showWeightGoalEditor) {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("设置体重目标")
+                        .font(AIATheme.Font.headline.weight(.semibold))
+                    Spacer()
+                    Button("完成") { showWeightGoalEditor = false }
+                        .font(AIATheme.Font.body.weight(.medium))
+                        .foregroundStyle(AIATheme.blue)
+                }
+                .padding()
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("目标体重")
+                            .font(AIATheme.Font.footnote)
+                            .foregroundStyle(AIATheme.sub)
+                        Spacer()
+                    }
+                    HStack {
+                        TextField("体重目标", value: $editedWeightGoal, format: .number)
+                            .keyboardType(.decimalPad)
+                            .font(AIATheme.Font.hero.weight(.semibold))
+                        Text("kg")
+                            .font(AIATheme.Font.subhead)
+                            .foregroundStyle(AIATheme.muted)
+                        Spacer()
+                    }
+                }
+                .padding()
+                .background(AIATheme.surface)
+                .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+                .padding(.horizontal)
+
+                Spacer()
+
+                VStack(spacing: 10) {
+                    Button {
+                        if editedWeightGoal > 0 { weightGoalKg = editedWeightGoal }
+                        showWeightGoalEditor = false
+                        // 记录修改时间并触发增量同步：随后经 aia_records(type:"setting") 上云，绑定后小程序可见。
+                        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "userSettingUpdatedAt")
+                        CloudSyncManager.shared.syncAfterLocalChange(context: context)
+                    } label: {
+                        Text("保存")
+                            .font(AIATheme.Font.body.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(AIATheme.blue)
+                            .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding()
+            }
+            .background(Color(.systemGroupedBackground))
+        }
     }
 }

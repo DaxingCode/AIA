@@ -12,6 +12,10 @@ struct AutoSyncSettingsView: View {
     @StateObject private var sync = CloudSyncManager.shared
     @State private var autoSync: Bool = CloudSyncManager.autoSync
 
+    // 绑定小程序相关
+    @State private var bindCodeInput = ""
+    @State private var showUnbindConfirm = false
+
     @State private var showCopied = false
     @State private var toastText = "已复制同步账号"
     @State private var showLogoutConfirm = false
@@ -21,6 +25,7 @@ struct AutoSyncSettingsView: View {
         ScrollView {
             VStack(spacing: 16) {
                 syncCard
+                miniProgramBindCard
             syncActionCard
             forcePullCard
             syncStatusCard
@@ -85,10 +90,12 @@ struct AutoSyncSettingsView: View {
             .padding(.top, 12)
 
             Group {
-                if auth.isLoggedIn {
+                if CloudSyncManager.boundMiniProgramCode != nil {
+                    Text("已绑定小程序，同步账号即小程序分区键。饮食 / 饮水 / 待办 / 健康数据与目标设置将在两端自动互通。")
+                } else if auth.isLoggedIn {
                     Text("同步账号已绑定当前登录账号。在其它设备用同一登录账号登录，即可自动共享同一份账单/待办/饮食/健康数据。")
                 } else {
-                    Text("登录后同步账号将自动绑定到登录账号；未登录时使用设备级随机账号，数据仅保存于本机。")
+                    Text("登录后同步账号将自动绑定到登录账号；未登录时使用设备级随机账号，数据仅保存于本机。也可在上方「绑定小程序」与小程序数据互通。")
                 }
             }
             .font(AIATheme.Font.micro)
@@ -98,6 +105,87 @@ struct AutoSyncSettingsView: View {
         }
         .padding(14)
         .card()
+    }
+
+    // MARK: - 绑定小程序（跨端数据互通）
+    private var miniProgramBindCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("绑定小程序", systemImage: "link.badge.plus")
+                    .font(AIATheme.Font.subhead.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            if let bound = CloudSyncManager.boundMiniProgramCode {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("已绑定小程序")
+                            .font(AIATheme.Font.caption)
+                            .foregroundStyle(AIATheme.muted)
+                        Text(bound)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(AIATheme.sub)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Button {
+                        showUnbindConfirm = true
+                    } label: {
+                        Text("解绑")
+                            .font(AIATheme.Font.subhead.weight(.medium))
+                            .foregroundStyle(AIATheme.warn)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(AIATheme.warn.opacity(0.1))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+                Text("已与「好好吃饭 AI 助理」小程序绑定，饮食 / 饮水 / 待办 / 健康数据与目标设置自动互通。")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                    .lineSpacing(2)
+            } else {
+                TextField("粘贴小程序同步码（wx_ 开头）", text: $bindCodeInput)
+                    .font(AIATheme.Font.footnote)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .padding(10)
+                    .background(AIATheme.fillSoft)
+                    .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+                Button {
+                    let ok = sync.bindMiniProgram(code: bindCodeInput, context: modelContext)
+                    if ok {
+                        bindCodeInput = ""
+                    } else {
+                        showToast("同步码格式不正确")
+                    }
+                } label: {
+                    Text("绑定")
+                        .font(AIATheme.Font.body.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(12)
+                        .background(AIATheme.blue)
+                        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+                }
+                .buttonStyle(.plain)
+                .disabled(bindCodeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Text("在小程序「我的 → 阿宝App绑定码」复制同步码并粘贴到这里即可互通。同步码即小程序的分区键，不会泄露你的微信号。")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                    .lineSpacing(2)
+            }
+        }
+        .padding(14)
+        .card()
+        .confirmationDialog("解绑小程序", isPresented: $showUnbindConfirm, titleVisibility: .visible) {
+            Button("解绑", role: .destructive) {
+                sync.unbindMiniProgram(context: modelContext)
+            }
+            Button("取消", role: .cancel) { }
+        } message: {
+            Text("解绑后将停止与小程序共享数据，App 回到原同步账号。已同步到小程序分区的数据仍保留在云端，不会删除。")
+        }
     }
 
     // MARK: - 立即同步主按钮
@@ -243,11 +331,8 @@ struct AutoSyncSettingsView: View {
     }
 
     private var syncUserId: String {
-        // 优先跟随登录账号；未登录时回退设备级账号
-        if auth.isLoggedIn, !auth.userId.isEmpty {
-            return auth.userId
-        }
-        return CloudSyncManager.userId
+        // CloudSyncManager.userId 已按优先级返回：绑定小程序 > 登录账号 > 设备级账号
+        CloudSyncManager.userId
     }
 
     // MARK: - 账号绑定说明

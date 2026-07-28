@@ -42,9 +42,12 @@ struct MyAccountView: View {
                 Circle()
                     .fill(LinearGradient.techAccent.opacity(0.15))
                     .frame(width: 72, height: 72)
-                Text(String(userNickname.prefix(1)))
-                    .font(AIATheme.Font.display.weight(.semibold))
-                    .foregroundStyle(AIATheme.blue)
+                // 默认展示阿宝头像（AIAvatar = app icon）。昵称首字不再作为头像，避免与首页阿宝形象割裂。
+                Image("AIAvatar")
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 72, height: 72)
+                    .clipShape(Circle())
             }
             Text(userNickname.isEmpty ? "阿宝的朋友" : userNickname)
                 .font(AIATheme.Font.title3.weight(.semibold))

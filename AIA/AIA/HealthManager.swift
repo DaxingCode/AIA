@@ -17,8 +17,10 @@ final class HealthManager: ObservableObject {
     @Published var authorized = false
     @Published var stepsToday: Int = 0
     @Published var activeEnergyToday: Double = 0   // 今日活动消耗（kcal），用于净热量联动
+    @Published var restingEnergyToday: Double = 0   // 今日静息能量消耗（kcal），用于能量圆环（目标=BMR）
     @Published var exerciseTimeToday: Double = 0   // 今日运动时长（分钟）
     @Published var authorizationFailed = false     // 标记授权失败（如免费账号无 entitlement），避免反复请求
+    @Published var hasHealthKitData = false        // 是否真正读到过非零 HealthKit 数据（用于区分「已授权但无数据」和「未授权/被拒绝」）
 
     private var authorizationTask: Task<Void, Never>?  // 防止并发请求
 
@@ -37,6 +39,7 @@ final class HealthManager: ObservableObject {
     private var stepType:         HKQuantityType? { HKQuantityType.quantityType(forIdentifier: .stepCount) }
     private var energyType:       HKQuantityType? { HKQuantityType.quantityType(forIdentifier: .dietaryEnergyConsumed) }
     private var activeEnergyType: HKQuantityType? { HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) }
+    private var restingEnergyType: HKQuantityType? { HKQuantityType.quantityType(forIdentifier: .basalEnergyBurned) }
     private var exerciseTimeType: HKQuantityType? { HKQuantityType.quantityType(forIdentifier: .appleExerciseTime) }
     private var bodyMassType:     HKQuantityType? { HKQuantityType.quantityType(forIdentifier: .bodyMass) }
     private var heightType:       HKQuantityType? { HKQuantityType.quantityType(forIdentifier: .height) }
@@ -78,8 +81,10 @@ final class HealthManager: ObservableObject {
         let store = self.store ?? HKHealthStore()
         self.store = store
 
-        let toShare: Set<HKSampleType> = [stepType, energyType, bodyMassType, heightType, heartRateType]
-        let toRead:  Set<HKObjectType> = [stepType, energyType, activeEnergyType, exerciseTimeType, bodyMassType, heightType, heartRateType]
+        let toShare: Set<HKSampleType> = Set([stepType, energyType, bodyMassType, heightType, heartRateType]
+            .compactMap { $0 }.map { $0 as HKSampleType })
+        let toRead: Set<HKObjectType> = Set([stepType, energyType, activeEnergyType, restingEnergyType, exerciseTimeType, bodyMassType, heightType, heartRateType]
+            .compactMap { $0 }.map { $0 as HKObjectType })
 
         store.requestAuthorization(toShare: toShare, read: toRead) { [weak self] ok, error in
             Task { @MainActor [weak self] in
@@ -92,6 +97,7 @@ final class HealthManager: ObservableObject {
                 if ok {
                     self.fetchStepsToday()
                     self.fetchActiveEnergyToday()
+                    self.fetchRestingEnergyToday()
                     self.fetchExerciseTimeToday()
                 }
             }
@@ -111,6 +117,7 @@ final class HealthManager: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.stepsToday = Int(sum)
+                if sum > 0 { self.hasHealthKitData = true }
             }
         }
         store.execute(query)
@@ -128,6 +135,25 @@ final class HealthManager: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.activeEnergyToday = sum
+                if sum > 0 { self.hasHealthKitData = true }
+            }
+        }
+        store.execute(query)
+    }
+
+    func fetchRestingEnergyToday() {
+        guard let store, let restingEnergyType else { return }
+        let now = Date()
+        let start = Calendar.current.startOfDay(for: now)
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: now, options: .strictStartDate)
+        let query = HKStatisticsQuery(quantityType: restingEnergyType,
+                                      quantitySamplePredicate: predicate,
+                                      options: .cumulativeSum) { [weak self] _, result, _ in
+            let sum = result?.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.restingEnergyToday = sum
+                if sum > 0 { self.hasHealthKitData = true }
             }
         }
         store.execute(query)
@@ -145,6 +171,7 @@ final class HealthManager: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.exerciseTimeToday = sum
+                if sum > 0 { self.hasHealthKitData = true }
             }
         }
         store.execute(query)

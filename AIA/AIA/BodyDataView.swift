@@ -277,6 +277,8 @@ struct BodyDataView: View {
         heightCm = height
         weightKg = weight
         showAddSheet = false
+        // 录入身高/体重/BMI 后立即触发增量同步，绑定后小程序可见
+        CloudSyncManager.shared.syncAfterLocalChange(context: context)
     }
 
     // MARK: - 多选删除（与商户规则页同构：长按入多选、左滑单删、底栏批量删）

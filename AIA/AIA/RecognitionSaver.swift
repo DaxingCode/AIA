@@ -24,6 +24,9 @@ final class SavedSession: Identifiable {
     var bills: [Bill] = []
     var todo: Reminder?
     var food: FoodEntry?
+    /// 预存的全部食物记录（多食物场景确认页覆盖时需整组替换；food 恒为 foods.first）。
+    var foods: [FoodEntry] = []
+    var foodCaloriesTotal: Double = 0
     var health: HealthMetric?
     var recognition: RecognitionRecord?
     weak var context: ModelContext?
@@ -40,6 +43,16 @@ final class SavedSession: Identifiable {
         self.context = context
         self.source = source
     }
+}
+
+/// processRecognition 的处理结论，由调用方（首页截图 pending / 聊天 / 相册相机链路）消费：
+/// - present：弹确认页（.saved 已预存 / .pending 未入库 / .duplicate 重复警告）。
+/// - silentlySaved：已静默入库的类别（按 bill/todo/food/health 顺序）→ 调用方清 pending + 弹 toast 引导。
+/// - nothing：按设置丢弃本次识别 → 调用方清 pending，不弹不存。
+enum RecognitionOutcome {
+    case present(RecognitionPresent)
+    case silentlySaved([String])
+    case nothing
 }
 
 enum RecognitionSaver {
@@ -106,12 +119,17 @@ enum RecognitionSaver {
     }
 
     /// 识别完成后立即入库，返回已存记录引用（供确认页覆盖更新）。
+    /// - Parameter allowedTypes: 非 nil 时只入库这些类别（按类别「自动保存」设置过滤）；
+    ///   nil = 全部入库（确认页点「存入」的旧路径，行为不变）。
     @MainActor
-    static func autoSave(result: RecognitionResult, rawText: String, image: UIImage?, context: ModelContext) -> SavedSession {
-        let session = SavedSession(result: result, rawText: rawText, sourceImage: image, context: context)
+    static func autoSave(result: RecognitionResult, rawText: String, image: UIImage?, context: ModelContext,
+                         source: RecognizeService.RecognitionSource = .cloud,
+                         allowedTypes: Set<String>? = nil) -> SavedSession {
+        let session = SavedSession(result: result, rawText: rawText, sourceImage: image, context: context, source: source)
         let imageName = LocalImageStore.save(image)
         session.imageName = imageName
-        let types = result.types ?? []
+        let rawTypes = result.types ?? []
+        let types = allowedTypes.map { allowed in rawTypes.filter { allowed.contains($0) } } ?? rawTypes
 
         if types.contains("bill") {
             for b in result.billList {
@@ -134,55 +152,65 @@ enum RecognitionSaver {
             }
         }
 
-        if types.contains("todo"),
-           let t = result.todo, let title = t.title, !title.isEmpty {
-            let due = dueDate(from: t.due)
-            let r = Reminder(title: title, due: due, imageName: imageName)
-            DefaultReminderSettings.shared.apply(to: r)
-            context.insert(r)
-            ReminderNotificationManager.schedule(r)   // 自动入库即排程，用户不修改也提醒
-            session.todo = r
-        }
-
-        if types.contains("food"),
-           let f = result.food, let name = f.name, !name.isEmpty {
-            let weight = weightFromPortion(f.portion)
-            let ratio = weight / 100
-            let baseCal = f.calories ?? 0
-            let basePro = f.protein ?? 0
-            let baseCar = f.carbs ?? 0
-            let baseFat = f.fat ?? 0
-
-            // 校验：所有宏量为零 → 跳过保存空壳记录
-            if baseCal > 0 || basePro > 0 || baseCar > 0 || baseFat > 0 {
-                let entry = FoodEntry(name: name,
-                                      calories: baseCal * ratio,
-                                      protein: basePro * ratio,
-                                      carbs: baseCar * ratio,
-                                      fat: baseFat * ratio,
-                                      portion: "\(Int(weight))克",
-                                      meal: defaultMeal(for: .now),
-                                      weightGram: weight,
-                                      baseCalories: baseCal,
-                                      baseProtein: basePro,
-                                      baseCarbs: baseCar,
-                                      baseFat: baseFat,
-                                      imageName: imageName)
-                context.insert(entry)
-                session.food = entry
-                // 卡路里同步放确认时（applyAndSave），避免自动阶段重复累加
-            } else {
-                print("[autoSave] 跳过空壳食物记录：\(name)（所有营养值均为零）")
+        if types.contains("todo") {
+            for t in result.todoList {
+                guard let title = t.title, !title.isEmpty, title.count >= 2 else { continue }
+                let due = dueDate(from: t.due)
+                let r = Reminder(title: title, due: due, imageName: imageName)
+                DefaultReminderSettings.shared.apply(to: r)
+                context.insert(r)
+                ReminderNotificationManager.schedule(r)   // 自动入库即排程，用户不修改也提醒
+                if session.todo == nil { session.todo = r }
             }
         }
 
-        if types.contains("health"),
-           let h = result.health, let metricName = h.metric, !metricName.isEmpty {
-            let metric = HealthMetric(metric: metricName, value: h.value ?? "",
-                                      unit: h.unit ?? "", imageName: imageName)
-            context.insert(metric)
-            session.health = metric
-            // 健康指标同步放确认时
+        if types.contains("food") {
+            var totalFoodCal: Double = 0
+            for f in result.foodList {
+                guard let name = f.name, !name.isEmpty else { continue }
+                let weight = weightFromPortion(f.portion)
+                let ratio = weight / 100
+                let baseCal = f.calories ?? 0
+                let basePro = f.protein ?? 0
+                let baseCar = f.carbs ?? 0
+                let baseFat = f.fat ?? 0
+
+                // 校验：所有宏量为零 → 跳过保存空壳记录
+                if baseCal > 0 || basePro > 0 || baseCar > 0 || baseFat > 0 {
+                    let entry = FoodEntry(name: name,
+                                          calories: baseCal * ratio,
+                                          protein: basePro * ratio,
+                                          carbs: baseCar * ratio,
+                                          fat: baseFat * ratio,
+                                          portion: "\(Int(weight))克",
+                                          meal: f.meal ?? defaultMeal(for: .now),
+                                          weightGram: weight,
+                                          baseCalories: baseCal,
+                                          baseProtein: basePro,
+                                          baseCarbs: baseCar,
+                                          baseFat: baseFat,
+                                          imageName: imageName)
+                    context.insert(entry)
+                    totalFoodCal += baseCal * ratio
+                    session.foods.append(entry)
+                    if session.food == nil { session.food = entry }
+                    // 卡路里同步放确认时（applyAndSave），避免自动阶段重复累加
+                } else {
+                    print("[autoSave] 跳过空壳食物记录：\(name)（所有营养值均为零）")
+                }
+            }
+            session.foodCaloriesTotal = totalFoodCal
+        }
+
+        if types.contains("health") {
+            for h in result.healthList {
+                guard let metricName = h.metric, !metricName.isEmpty else { continue }
+                let metric = HealthMetric(metric: metricName, value: h.value ?? "",
+                                          unit: h.unit ?? "", imageName: imageName)
+                context.insert(metric)
+                if session.health == nil { session.health = metric }
+                // 健康指标同步放确认时
+            }
         }
 
         if !types.isEmpty && !types.contains("none") {
@@ -197,25 +225,97 @@ enum RecognitionSaver {
         return session
     }
 
-    /// 识别完成后的「检查重复（不入库）+ 生成确认页面」：
-    /// - 图片类：算 aHash 指纹，与历史指纹比对。命中重复→.duplicate（挂警告，不入库）；
-    ///   未命中→.pending（新鲜结果，等待用户保存时才真正入库并登记指纹）。
-    /// - 无图类（语音等）：无指纹可比，永不走重复分支→直接 .pending。
+    /// 识别完成后的统一处理入口：按「图片自动识别」设置（ImageAutoRecogSettings，按类别
+    /// 自动保存 / 自动弹出）决定 入库 与 弹确认页 的组合，返回 RecognitionOutcome 由调用方消费。
+    ///
+    /// 行为矩阵（known = 命中的已知类别 bill/todo/food/health）：
+    /// - known 为空（none / 未识别）：维持现状 → .present(.pending)，弹「未识别」卡片，不入库。
+    /// - 有类别 自动弹出=开：弹确认页。其中 自动保存=开 的类别先预存（.saved(session)，
+    ///   确认页点「保存」覆盖）；自动保存=关 的类别不预存，点「存入」时才插入（applyAndSave 补插）。
+    ///   若全部弹出类别都不预存 → 走原「先不入库」的 .pending / .duplicate 流程。
+    /// - 全部类别 自动弹出=关：
+    ///   - 有类别 自动保存=开 → 静默入库这些类别 → .silentlySaved（调用方清 pending + 弹 toast）。
+    ///     例外：图片命中历史指纹（疑似重复）时升级为 .present(.saved)，弹确认页警告，防止无感重复入库。
+    ///   - 全部 自动保存=关 → .nothing（丢弃本次识别，调用方清 pending）。
+    /// - 无图类（语音等）：无指纹可比，永不走重复分支。
     @MainActor
-    static func preparePresent(result: RecognitionResult, rawText: String,
-                                image: UIImage?, context: ModelContext,
-                                source: RecognizeService.RecognitionSource = .cloud) -> RecognitionPresent {
-        if let img = image, let hash = ImageHasher.aHash(img) {
-            if let existing = DuplicateStore.match(hash) {
-                return .duplicate(DuplicatePayload(result: result, rawText: rawText,
-                                                    sourceImage: image,
-                                                    hash: hash,
-                                                    recognizedAt: existing.recognizedAt,
-                                                    summary: existing.summary,
-                                                    existingTypes: existing.types))
+    static func processRecognition(result: RecognitionResult, rawText: String,
+                                   image: UIImage?, context: ModelContext,
+                                   source: RecognizeService.RecognitionSource = .cloud) -> RecognitionOutcome {
+        let types = result.types ?? []
+        let known = ImageAutoRecogSettings.knownTypes.filter { types.contains($0) }
+
+        // 未识别出已知类别：维持现状，弹「未识别」卡片，不入库。
+        guard !known.isEmpty else {
+            return .present(.pending(result, rawText: rawText, image: image, source: source))
+        }
+
+        let popupTypes = known.filter { ImageAutoRecogSettings.autoPopup(for: $0) }
+        let saveTypes = Set(known.filter { ImageAutoRecogSettings.autoSave(for: $0) })
+
+        // 全部命中类别既不自动保存也不弹出 → 丢弃本次识别
+        if popupTypes.isEmpty && saveTypes.isEmpty { return .nothing }
+
+        // 没有任何类别需要预存：沿用「先不入库，确认页点保存才入库」流程
+        if saveTypes.isEmpty {
+            if let img = image, let fp = ImageHasher.fingerprint(img),
+               let existing = DuplicateStore.match(fp.hash, ratio: fp.ratio) {
+                return .present(.duplicate(DuplicatePayload(result: result, rawText: rawText,
+                                                            sourceImage: image,
+                                                            hash: fp.hash,
+                                                            ratio: fp.ratio,
+                                                            recognizedAt: existing.recognizedAt,
+                                                            summary: existing.summary,
+                                                            existingTypes: existing.types)))
+            }
+            return .present(.pending(result, rawText: rawText, image: image, source: source))
+        }
+
+        // 有需要预存的类别：按 saveTypes 过滤入库（弹出类别里 自动保存=关 的留待确认页点「存入」再插）
+        let session = autoSave(result: result, rawText: rawText, image: image, context: context,
+                               source: source, allowedTypes: saveTypes)
+        var duplicateHit = false
+        if let img = image, let fp = ImageHasher.fingerprint(img) {
+            if let existing = DuplicateStore.match(fp.hash, ratio: fp.ratio) {
+                session.duplicateHint = DuplicateHint(recognizedAt: existing.recognizedAt,
+                                                      summary: existing.summary,
+                                                      existingTypes: existing.types)
+                duplicateHit = true
+            } else {
+                // 登记指纹，供后续相同截图去重提示（仅新鲜图片登记一次）
+                DuplicateStore.add(DuplicateEntry(hashD: fp.hash, ratio: fp.ratio, recognizedAt: .now,
+                                                  types: known.joined(separator: ","),
+                                                  summary: RecognitionSaver.summary(of: result)))
             }
         }
-        return .pending(result, rawText: rawText, image: image, source: source)
+
+        // 任一类别要弹出，或静默路径撞上疑似重复（升级为弹页警告）→ 弹确认页
+        if !popupTypes.isEmpty || duplicateHit {
+            return .present(.saved(session))
+        }
+
+        // 静默保存：补上原本在确认页保存时才做的 HealthKit 副作用，调用方负责清 pending + toast
+        performSilentSideEffects(session: session, savedTypes: saveTypes)
+        let ordered = ImageAutoRecogSettings.knownTypes.filter { saveTypes.contains($0) }
+        return .silentlySaved(ordered)
+    }
+
+    /// 静默保存路径的 HealthKit 同步（确认页路径由 applyAndSave 做，这里对齐补上）。
+    @MainActor
+    private static func performSilentSideEffects(session: SavedSession, savedTypes: Set<String>) {
+        if savedTypes.contains("food"), session.foodCaloriesTotal > 0 {
+            HealthManager.shared.saveCaloriesConsumed(session.foodCaloriesTotal, date: .now)
+        }
+        if savedTypes.contains("health"), let h = session.health, let v = Double(h.value), v > 0 {
+            let name = h.metric
+            if name.contains("体重") || name.lowercased().contains("weight") {
+                HealthManager.shared.saveWeight(v)
+            } else if name.contains("身高") || name.lowercased().contains("height") {
+                HealthManager.shared.saveHeight(v)
+            } else if name.contains("心率") || name.lowercased().contains("heart") {
+                HealthManager.shared.saveHeartRate(v)
+            }
+        }
     }
 
     /// 生成人类可读的识别摘要（用于重复警告横幅）。
@@ -233,14 +333,17 @@ enum RecognitionSaver {
                 parts.append("账单 \(s)")
             }
         }
-        if types.contains("todo"), let t = result.todo, let title = t.title {
-            parts.append("待办 \(title)")
+        if types.contains("todo"), !result.todoList.isEmpty {
+            let s = result.todoList.compactMap { $0.title }.joined(separator: " · ")
+            if !s.isEmpty { parts.append("待办 \(s)") }
         }
-        if types.contains("food"), let f = result.food, let name = f.name {
-            parts.append("食物 \(name)")
+        if types.contains("food"), !result.foodList.isEmpty {
+            let s = result.foodList.compactMap { $0.name }.joined(separator: " · ")
+            if !s.isEmpty { parts.append("食物 \(s)") }
         }
-        if types.contains("health"), let h = result.health, let metric = h.metric {
-            parts.append("健康 \(metric)")
+        if types.contains("health"), !result.healthList.isEmpty {
+            let s = result.healthList.compactMap { "\($0.metric ?? "")\($0.value ?? "")\($0.unit ?? "")" }.joined(separator: " · ")
+            if !s.isEmpty { parts.append("健康 \(s)") }
         }
         return parts.isEmpty ? "其他" : parts.joined(separator: " · ")
     }
