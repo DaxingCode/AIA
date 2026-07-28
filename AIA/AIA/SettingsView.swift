@@ -3,6 +3,7 @@
 import SwiftUI
 import SwiftData
 import Combine
+import PhotosUI
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
@@ -24,6 +25,12 @@ struct SettingsView: View {
     @State private var toastText = "已复制同步账号"
     @State private var showShortcutGuide = false
     @State private var showOnboarding = false
+    // 背景图选择
+    @State private var bgPicker: PhotosPickerItem?
+    @State private var bgReload = false
+    // 开发者模式口令
+    @State private var showPasscode = false
+    @State private var passcodeText = ""
 
     var body: some View {
         // 注意：本页由首页 navigationDestination(for:) push 进来，
@@ -33,6 +40,7 @@ struct SettingsView: View {
             VStack(spacing: 16) {
                 myAccountEntry
                 appearanceCard
+                backgroundCard
                 homeLayoutEntry
                 tierCard
                 autoSyncSettingsCard
@@ -44,6 +52,9 @@ struct SettingsView: View {
                 testNotifyCard
                 guideCard
                 aboutCard
+                if DeveloperGate.isUnlocked {
+                    DeveloperCenterCard()
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -71,6 +82,18 @@ struct SettingsView: View {
         }
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView { showOnboarding = false }
+        }
+        .alert("解锁开发者模式", isPresented: $showPasscode) {
+            SecureField("输入口令", text: $passcodeText)
+            Button("取消", role: .cancel) { passcodeText = "" }
+            Button("确认") {
+                if passcodeText == DeveloperGate.passcode {
+                    DeveloperGate.isUnlocked = true
+                }
+                passcodeText = ""
+            }
+        } message: {
+            Text("长按版本号可解锁广告管理与开发者工具。")
         }
     }
 
@@ -139,6 +162,62 @@ struct SettingsView: View {
         }
         .padding(14)
         .card()
+    }
+
+    // MARK: - App 背景图（用户本人从相册换图，仅本机）
+
+    private var backgroundCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "photo.fill")
+                    .font(AIATheme.Font.callout.weight(.medium))
+                    .foregroundStyle(AIATheme.purple)
+                Text("App 背景图")
+                    .font(AIATheme.Font.subhead.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+                if AppBackgroundStore.shared.isEnabled {
+                    Button {
+                        AppBackgroundStore.shared.reset()
+                    } label: {
+                        Text("恢复默认").font(AIATheme.Font.footnote).foregroundStyle(AIATheme.blue)
+                    }
+                }
+            }
+
+            if AppBackgroundStore.shared.isEnabled, let img = AppBackgroundStore.shared.loadImage() {
+                Image(uiImage: img)
+                    .resizable().scaledToFill()
+                    .frame(height: 120).clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+            }
+
+            PhotosPicker(selection: $bgPicker, matching: .images) {
+                Label(AppBackgroundStore.shared.isEnabled ? "更换背景图" : "从相册选择背景图",
+                      systemImage: "photo.on.rectangle.angled")
+                    .font(AIATheme.Font.footnote.weight(.medium))
+                    .foregroundStyle(.primary)
+            }
+
+            if AppBackgroundStore.shared.isEnabled {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("遮罩浓度（保证文字可读）：\(Int(AppBackgroundStore.shared.maskOpacity * 100))%")
+                        .font(AIATheme.Font.micro).foregroundStyle(AIATheme.muted)
+                    Slider(value: Binding(
+                        get: { AppBackgroundStore.shared.maskOpacity },
+                        set: { AppBackgroundStore.shared.maskOpacity = $0 }
+                    ), in: 0...0.85)
+                }
+            }
+
+            Text("仅首页与聊天页生效；图片仅保存在本机，不会上传。")
+                .font(AIATheme.Font.micro).foregroundStyle(AIATheme.muted).lineSpacing(2)
+        }
+        .padding(14)
+        .card()
+        .onReceive(NotificationCenter.default.publisher(for: .aiaBackgroundChanged)) { _ in
+            bgReload.toggle()
+        }
     }
 
     // MARK: - 首页布局（模块排序 / 显示隐藏）
@@ -513,6 +592,9 @@ struct SettingsView: View {
             }
             .padding(14)
             .background(AIATheme.surface)
+            .onLongPressGesture(minimumDuration: 1.2) {
+                showPasscode = true
+            }
 
             Divider().padding(.leading, 14).background(AIATheme.hairline)
 

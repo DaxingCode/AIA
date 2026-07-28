@@ -326,6 +326,7 @@ struct ChatView: View {
                 .overlay(alignment: .top) { Divider() }
             }
         }
+        .background(AppBackgroundView())
         .onAppear {
             // 语音自动启动与键盘聚焦解耦：不依赖 hasAutoFocused，否则会被上方 ScrollView 的 onAppear 抢先消费标记而跳过。
             // 从语音快捷操作/语音按钮进入：不弹键盘，自动开启内联语音输入。
@@ -693,15 +694,25 @@ struct ChatView: View {
                     .foregroundStyle(userSide ? .white : .primary)
                     .textSelection(.enabled)
                     .padding(10)
-                    .background(userSide ? AIATheme.blue : AIATheme.billBG)
+                    .background(userSide ? AIATheme.blue : Color.adaptive(light: 0xffffff, dark: 0x2c2c2e))
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                     .opacity(showSelection && !isSelected ? 0.4 : 1.0)
 
                 if showSelection {
+                    // 深色模式适配：未选中圆圈禁写死黑色（深色下黑圈落在黑底/深灰气泡上隐形）。
+                    // 浅色=半透明黑、深色=半透明白，另加自适应细描边保证任意气泡底色上可见。
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle.fill")
                         .symbolRenderingMode(.palette)
-                        .foregroundStyle(isSelected ? Color.green : Color.black.opacity(0.5), Color.white)
+                        .foregroundStyle(
+                            isSelected ? Color.green : Color.adaptive(light: 0x000000, dark: 0xffffff).opacity(0.5),
+                            Color.white
+                        )
                         .font(.system(size: 18))
+                        .overlay(
+                            Circle()
+                                .stroke(Color.adaptive(light: 0xffffff, dark: 0x8e8e93), lineWidth: 1)
+                                .opacity(isSelected ? 0 : 1)
+                        )
                         .offset(x: 8, y: -8)
                 }
             }

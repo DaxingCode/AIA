@@ -129,6 +129,7 @@ struct ContentView: View {
                         header
                             .padding(.bottom, 8)
                         syncHeaderIndicator
+                        AdBannerView()
                         if isEditing {
                             homeModulesEditView
                         } else {
@@ -141,7 +142,7 @@ struct ContentView: View {
                 }
                 AIBottomBar()
             }
-            .background(Color(.systemGroupedBackground))
+            .background(AppBackgroundView())
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
