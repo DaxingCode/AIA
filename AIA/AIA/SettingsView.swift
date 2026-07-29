@@ -196,8 +196,6 @@ struct SettingsView: View {
                 if bgEnabled {
                     Button {
                         AppBackgroundStore.shared.reset()
-                        bgEnabled = false
-                        bgPreview = nil
                     } label: {
                         Text("恢复默认").font(AIATheme.Font.footnote).foregroundStyle(AIATheme.blue)
                     }

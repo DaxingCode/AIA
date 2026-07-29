@@ -62,6 +62,7 @@ final class AppBackgroundStore {
 
     func reset() {
         try? fileManager.removeItem(at: fileURL)
+        maskOpacity = 0.35
         isEnabled = false
     }
 }
