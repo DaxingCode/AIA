@@ -68,6 +68,15 @@ struct SettingsView: View {
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: $devNavigate) { AdManagerView() }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("恢复默认") {
+                    print("[AIA] 恢复默认按钮被点击（工具栏）")
+                    resetBackground()
+                }
+                .disabled(!bgEnabled)
+            }
+        }
         .overlay(alignment: .top) {
             if showCopied {
                 copiedToast
@@ -195,10 +204,8 @@ struct SettingsView: View {
                     .foregroundStyle(.primary)
                 Spacer()
                 Button {
-                    print("[AIA] 恢复默认按钮被点击")
-                    AppBackgroundStore.shared.reset()
-                    bgEnabled = false
-                    bgPreview = nil
+                    print("[AIA] 恢复默认按钮被点击（卡片）")
+                    resetBackground()
                 } label: {
                     Text("恢复默认")
                         .font(AIATheme.Font.footnote)
@@ -665,6 +672,14 @@ struct SettingsView: View {
         .background(Color.black.opacity(0.8))
         .clipShape(Capsule())
         .padding(.top, 8)
+    }
+
+    // MARK: - 恢复默认背景（卡片按钮 / 工具栏按钮共用，带 toast 反馈便于确认是否触发）
+    private func resetBackground() {
+        AppBackgroundStore.shared.reset()
+        bgEnabled = false
+        bgPreview = nil
+        showToast("已恢复默认背景")
     }
 
     private func hideKeyboard() {
