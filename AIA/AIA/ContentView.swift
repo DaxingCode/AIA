@@ -58,8 +58,6 @@ struct ContentView: View {
     @State private var rollSlot = 0
     @State private var rollTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
-    // 定时同步：已登录且前台时，每 60 秒自动推一次本地数据到云端，降低删除 App 前未同步的概率。
-    @State private var syncTimer: Timer?
     @StateObject private var sync = CloudSyncManager.shared
 
     // 首次启动引导：未看过引导则弹出 OnboardingView
@@ -255,17 +253,13 @@ struct ContentView: View {
             RecurringBillManager.generateDue(context: context)
             // 打通 HealthKit：进入首页即尝试授权。autoAuthEnabled=false（免费账号默认）时内部自动跳过，不会崩。
             health.requestAuthorization()
-            // 启动定时同步器
-            startPeriodicSync()
+            // 冷启动首拉：0.3s 后从云端拉一次（之后不再周期轮询，靠 3s 防抖推送 + 回前台拉取）
+            coldStartSync()
             // 冷启动同步指示器：仅当已登录才亮起（本地无数据才真正可见）
             if UserDefaults.standard.bool(forKey: "aia.isLoggedIn") {
                 showSyncIndicator = true
                 hasFirstSyncStarted = false
             }
-        }
-        .onDisappear {
-            syncTimer?.invalidate()
-            syncTimer = nil
         }
         // 热启动（App 后台时长按图标）：performActionFor 改 pending 时 ContentView 已订阅，onReceive 能收到。
         .onReceive(quickAction.$pending) { action in
@@ -1156,22 +1150,16 @@ struct ContentView: View {
     }
 
     // MARK: - 定时同步器（首次 0.3s 触发让首页先渲染，之后 60s 一次）
-    private func startPeriodicSync() {
-        syncTimer?.invalidate()
+    /// 冷启动首拉：延迟 0.3s 让首页 @Query 先把本地空态渲染一帧，再立即从云端拉真实数据写回本地，4 宫格随后自动刷新。
+    /// 之后**不再周期轮询**——同步完全由「本地改动 3s 防抖推送（syncAfterLocalChange，已在各写入口接好）」
+    /// +「回前台拉取（didBecomeActive → autoSyncIfEnabled）」驱动，避免每 60s 空转调一次云函数
+    /// 浪费 CloudBase 调用/数据库读配额。小程序/其他设备写入的数据会在用户下次打开 App（冷启动）
+    /// 或从后台切回（didBecomeActive）时拉到，双端交叉使用体感等同自动同步。
+    private func coldStartSync() {
         guard UserDefaults.standard.bool(forKey: "aia.isLoggedIn") else { return }
-        // 首次同步：延迟 0.3s 让首页 @Query 先把本地空态渲染一帧，避免和首帧渲染抢资源；
-        // 然后立即从云端拉真实数据写回本地，4 宫格会随后自动刷新。
-        // 关键：之前 60s 干等的版本会让用户在 60s 内看到「全 0」的假数据，体验非常糟。
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak sync] in
-            print("[ContentView] 首次同步触发（0.3s 延迟后）")
+            print("[ContentView] 冷启动首拉（0.3s 延迟后）")
             sync?.autoSyncIfEnabled(context: context)
-        }
-        // 之后每 60s 增量同步一次
-        syncTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak sync] _ in
-            print("[ContentView] 定时同步触发")
-            MainActor.assumeIsolated {
-                sync?.autoSyncIfEnabled(context: context)
-            }
         }
     }
 
