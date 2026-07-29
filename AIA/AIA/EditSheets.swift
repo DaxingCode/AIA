@@ -95,26 +95,27 @@ struct EditFoodView: View {
 
     init(entry: FoodEntry) {
         self.entry = entry
-        let weight = entry.weightGram ?? RecognitionSaver.weightFromPortion(entry.portion)
+        // 重量：weightGram 缺失或为 0 时，回退到 portion 推算；再不行默认 100g。
+        let rawWeight = entry.weightGram ?? 0
+        let weight = rawWeight > 0 ? rawWeight : max(RecognitionSaver.weightFromPortion(entry.portion), 1)
         let currentWeight = max(weight, 1)
         _name = State(initialValue: entry.name)
         _meal = State(initialValue: entry.meal)
         _weightText = State(initialValue: String(format: "%.0f", weight))
-        // 没有持久化基准时，用当前营养反推每100g含量作为基准。
-        _baseCaloriesText = State(initialValue: String(format: "%.1f",
-            entry.baseCalories ?? (entry.calories / currentWeight * 100)))
-        _baseProteinText = State(initialValue: String(format: "%.1f",
-            entry.baseProtein ?? (entry.protein / currentWeight * 100)))
-        _baseCarbsText = State(initialValue: String(format: "%.1f",
-            entry.baseCarbs ?? (entry.carbs / currentWeight * 100)))
-        _baseFatText = State(initialValue: String(format: "%.1f",
-            entry.baseFat ?? (entry.fat / currentWeight * 100)))
-        _baseFiberText = State(initialValue: String(format: "%.1f",
-            entry.baseFiber ?? (entry.fiber / currentWeight * 100)))
-        _baseSugarText = State(initialValue: String(format: "%.1f",
-            entry.baseSugar ?? (entry.sugar / currentWeight * 100)))
-        _baseSodiumText = State(initialValue: String(format: "%.1f",
-            entry.baseSodium ?? (entry.sodium / currentWeight * 100)))
+        // 每100g基准：已存且 >0 直接用；否则用「当前总量 ÷ 重量 ×100」反推
+        // （覆盖 base 为 nil 或 0 的脏数据，避免编辑页营养全显示 0）。
+        func deriveBase(_ base: Double?, _ total: Double) -> Double {
+            if let b = base, b > 0 { return b }
+            if total > 0 { return total / currentWeight * 100 }
+            return 0
+        }
+        _baseCaloriesText = State(initialValue: String(format: "%.1f", deriveBase(entry.baseCalories, entry.calories)))
+        _baseProteinText  = State(initialValue: String(format: "%.1f", deriveBase(entry.baseProtein, entry.protein)))
+        _baseCarbsText    = State(initialValue: String(format: "%.1f", deriveBase(entry.baseCarbs, entry.carbs)))
+        _baseFatText      = State(initialValue: String(format: "%.1f", deriveBase(entry.baseFat, entry.fat)))
+        _baseFiberText    = State(initialValue: String(format: "%.1f", deriveBase(entry.baseFiber, entry.fiber)))
+        _baseSugarText    = State(initialValue: String(format: "%.1f", deriveBase(entry.baseSugar, entry.sugar)))
+        _baseSodiumText   = State(initialValue: String(format: "%.1f", deriveBase(entry.baseSodium, entry.sodium)))
         _sourceImageName = State(initialValue: entry.imageName)
     }
 
@@ -1235,23 +1236,34 @@ struct BillCategoryPickerSheet: View {
         }
     }
 
-    /// 按用户实际使用次数排序：使用次数多的靠前；次数相同保持原固定顺序；"其他"始终垫底。
+    /// 按用户实际使用次数排序：使用次数多的靠前；次数相同保持原固定顺序；新增分类排在已知分类之后；"其他"始终垫底。
     private func sortCategoriesByUsage() {
         var counts: [String: Int] = [:]
+        var userCategories: Set<String> = []
         if let bills = try? context.fetch(FetchDescriptor<Bill>(predicate: #Predicate { !$0.syncDeleted })) {
             for b in bills {
-                counts[b.category, default: 0] += 1
+                let cat = b.category.trimmingCharacters(in: .whitespaces)
+                guard !cat.isEmpty else { continue }
+                counts[cat, default: 0] += 1
+                userCategories.insert(cat)
             }
         }
         let others = "其他"
-        let mainCategories = billCategoryOptions.filter { $0 != others }
-        let sortedMain = mainCategories.sorted { a, b in
+        // 合并固定选项与用户实际账单中产生的分类（如识别自动新增的分类）
+        let allCategories = Array(Set(billCategoryOptions).union(userCategories))
+        let sortedMain = allCategories.filter { $0 != others }.sorted { a, b in
             let ca = counts[a, default: 0]
             let cb = counts[b, default: 0]
             if ca != cb { return ca > cb }
-            guard let ia = billCategoryOptions.firstIndex(of: a),
-                  let ib = billCategoryOptions.firstIndex(of: b) else { return false }
-            return ia < ib
+            // 次数相同：已知分类按 billCategoryOptions 原顺序；新增分类放最后，且彼此按字母序稳定
+            let ia = billCategoryOptions.firstIndex(of: a)
+            let ib = billCategoryOptions.firstIndex(of: b)
+            switch (ia, ib) {
+            case let (.some(i), .some(j)): return i < j
+            case (.some, .none): return true
+            case (.none, .some): return false
+            case (.none, .none): return a < b
+            }
         }
         sortedCategories = sortedMain + [others]
     }

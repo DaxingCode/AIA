@@ -622,6 +622,22 @@ final class CloudSyncManager: ObservableObject {
         let baseSugar = payload["baseSugar"] as? Double
         let baseSodium = payload["baseSodium"] as? Double
 
+        // 防御：云端可能把 base/weight 传成字面 0（而非缺失）。0 视为「未提供」，
+        // 优先用「总量 ÷ 有效重量 ×100」反推每100g基准；重量 0 则从 portion 推算。
+        // 否则每次同步都会把已纠正的基准覆盖回 0，编辑页永远显示 0。
+        func resolveWeight(_ incoming: Double?, _ existing: Double?) -> Double {
+            let inW = incoming ?? 0
+            let exW = existing ?? 0
+            if inW > 0 { return inW }
+            if exW > 0 { return exW }
+            return RecognitionSaver.weightFromPortion(portion)
+        }
+        func resolveBase(_ incoming: Double?, _ total: Double, _ w: Double, _ existing: Double?) -> Double? {
+            if let b = incoming, b > 0 { return b }
+            if total > 0, w > 0 { return total / w * 100 }
+            return existing
+        }
+
         func fill(_ target: FoodEntry) {
             target.name = name.isEmpty ? target.name : name
             target.calories = calories
@@ -635,14 +651,15 @@ final class CloudSyncManager: ObservableObject {
             target.portion = portion
             target.meal = meal
             target.date = date
-            target.weightGram = weightGram ?? target.weightGram
-            target.baseCalories = baseCalories ?? target.baseCalories
-            target.baseProtein = baseProtein ?? target.baseProtein
-            target.baseCarbs = baseCarbs ?? target.baseCarbs
-            target.baseFat = baseFat ?? target.baseFat
-            target.baseFiber = baseFiber ?? target.baseFiber
-            target.baseSugar = baseSugar ?? target.baseSugar
-            target.baseSodium = baseSodium ?? target.baseSodium
+            let w = resolveWeight(weightGram, target.weightGram)
+            target.weightGram = w
+            target.baseCalories = resolveBase(baseCalories, calories, w, target.baseCalories)
+            target.baseProtein  = resolveBase(baseProtein,  protein,  w, target.baseProtein)
+            target.baseCarbs    = resolveBase(baseCarbs,    carbs,    w, target.baseCarbs)
+            target.baseFat      = resolveBase(baseFat,      fat,      w, target.baseFat)
+            target.baseFiber    = resolveBase(baseFiber,    fiber,    w, target.baseFiber)
+            target.baseSugar    = resolveBase(baseSugar,    sugar,    w, target.baseSugar)
+            target.baseSodium   = resolveBase(baseSodium,   sodium,   w, target.baseSodium)
             target.syncUpdatedAt = remoteDate
         }
 
@@ -683,6 +700,7 @@ final class CloudSyncManager: ObservableObject {
 
         // 3) 全新记录
         if deleted { return 0 }
+        let w = resolveWeight(weightGram, nil)
         let f = FoodEntry(name: name,
                           calories: calories,
                           protein: protein,
@@ -695,14 +713,14 @@ final class CloudSyncManager: ObservableObject {
                           portion: portion,
                           meal: meal,
                           date: date,
-                          weightGram: weightGram,
-                          baseCalories: baseCalories,
-                          baseProtein: baseProtein,
-                          baseCarbs: baseCarbs,
-                          baseFat: baseFat,
-                          baseFiber: baseFiber,
-                          baseSugar: baseSugar,
-                          baseSodium: baseSodium,
+                          weightGram: w,
+                          baseCalories: resolveBase(baseCalories, calories, w, nil),
+                          baseProtein: resolveBase(baseProtein, protein, w, nil),
+                          baseCarbs: resolveBase(baseCarbs, carbs, w, nil),
+                          baseFat: resolveBase(baseFat, fat, w, nil),
+                          baseFiber: resolveBase(baseFiber, fiber, w, nil),
+                          baseSugar: resolveBase(baseSugar, sugar, w, nil),
+                          baseSodium: resolveBase(baseSodium, sodium, w, nil),
                           syncId: id, syncUpdatedAt: remoteDate)
         context.insert(f)
         context.insert(FoodSource(foodSyncId: id, origin: "miniprogram"))
