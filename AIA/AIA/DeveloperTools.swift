@@ -51,6 +51,7 @@ final class AdManagerStore: ObservableObject {
 
     @Published var items: [AdItem] = []
     @Published var loading = false
+    @Published var lastError: String?
 
     func listAll() async {
         loading = true
@@ -58,7 +59,13 @@ final class AdManagerStore: ObservableObject {
         do {
             let resp = try await postAdsJSON(["action": "listAll", "passcode": DeveloperGate.passcode])
             print("[AdManager] listAll resp: \(resp)")
-            guard resp["ok"] as? Bool == true, let arr = resp["items"] as? [[String: Any]] else {
+            guard resp["ok"] as? Bool == true else {
+                lastError = (resp["error"] as? String) ?? "listAll 失败"
+                items = []
+                return
+            }
+            lastError = nil
+            guard let arr = resp["items"] as? [[String: Any]] else {
                 items = []
                 return
             }
@@ -66,6 +73,7 @@ final class AdManagerStore: ObservableObject {
             items = try JSONDecoder().decode([AdItem].self, from: data)
         } catch {
             print("[AdManager] listAll error: \(error)")
+            lastError = error.localizedDescription
             items = []
         }
     }
@@ -81,9 +89,15 @@ final class AdManagerStore: ObservableObject {
                 "item": dict
             ])
             print("[AdManager] upsert resp: \(resp)")
-            return resp["ok"] as? Bool == true
+            guard resp["ok"] as? Bool == true else {
+                lastError = (resp["error"] as? String) ?? "upsert 失败"
+                return false
+            }
+            lastError = nil
+            return true
         } catch {
             print("[AdManager] upsert error: \(error)")
+            lastError = error.localizedDescription
             return false
         }
     }
@@ -95,8 +109,14 @@ final class AdManagerStore: ObservableObject {
                 "passcode": DeveloperGate.passcode,
                 "id": id
             ])
-            return resp["ok"] as? Bool == true
+            guard resp["ok"] as? Bool == true else {
+                lastError = (resp["error"] as? String) ?? "delete 失败"
+                return false
+            }
+            lastError = nil
+            return true
         } catch {
+            lastError = error.localizedDescription
             return false
         }
     }
@@ -114,27 +134,34 @@ struct AdManagerView: View {
             if mgr.loading && mgr.items.isEmpty {
                 ProgressView("加载中…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if mgr.items.isEmpty {
-                emptyState
             } else {
-                List {
-                    ForEach(mgr.items) { item in
-                        AdRow(item: item)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                editing = item
-                            }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    Task {
-                                        if await mgr.delete(item.id) { await mgr.listAll() }
+                VStack(spacing: 0) {
+                    if let err = mgr.lastError {
+                        errorBanner(err)
+                    }
+                    if mgr.items.isEmpty {
+                        emptyState
+                    } else {
+                        List {
+                            ForEach(mgr.items) { item in
+                                AdRow(item: item)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        editing = item
                                     }
-                                } label: { Label("删除", systemImage: "trash") }
+                                    .swipeActions(edge: .trailing) {
+                                        Button(role: .destructive) {
+                                            Task {
+                                                if await mgr.delete(item.id) { await mgr.listAll() }
+                                            }
+                                        } label: { Label("删除", systemImage: "trash") }
+                                    }
                             }
+                        }
+                        .listStyle(.insetGrouped)
+                        .refreshable { await mgr.listAll() }
                     }
                 }
-                .listStyle(.insetGrouped)
-                .refreshable { await mgr.listAll() }
             }
         }
         .navigationTitle("广告管理")
@@ -175,6 +202,23 @@ struct AdManagerView: View {
                 .foregroundStyle(AIATheme.muted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func errorBanner(_ text: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(AIATheme.warn)
+            Text(text)
+                .font(AIATheme.Font.footnote)
+                .foregroundStyle(.primary)
+                .lineLimit(3)
+            Spacer()
+        }
+        .padding(12)
+        .background(AIATheme.warn.opacity(0.08))
+        .cornerRadius(AIATheme.rMD)
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
     }
 }
 
