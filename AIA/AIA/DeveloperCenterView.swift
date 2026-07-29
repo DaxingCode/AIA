@@ -18,6 +18,7 @@ struct DeveloperCenterView: View {
                 adManagerEntry
                 agentCard
                 modelProviderCard
+                testNotifyCard
                 // 后续新增开发者功能在这里加卡片即可
             }
             .padding(.horizontal, 16)
@@ -27,6 +28,44 @@ struct DeveloperCenterView: View {
         .background(AIATheme.fillSoft)
         .navigationTitle("开发者中心")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: - 测试通知
+    private var testNotifyCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("通知测试")
+                    .font(AIATheme.Font.subhead.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            HStack(spacing: 6) {
+                Image(systemName: "bell.badge.fill")
+                Text("发送测试通知")
+            }
+            .font(AIATheme.Font.subhead.weight(.medium))
+            .foregroundStyle(AIATheme.blue)
+            .padding(10)
+            .frame(maxWidth: .infinity)
+            .background(AIATheme.blue.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+            .contentShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+            .onTapGesture {
+                ReminderNotificationManager.sendTest(after: 5) { ok in
+                    if ok {
+                        ToastCenter.shared.show("测试通知已安排，5 秒后弹出")
+                    } else {
+                        ToastCenter.shared.show("未开启通知权限，请到系统设置开启")
+                    }
+                }
+            }
+            Text("点击后 5 秒弹出一条本地通知。可切到后台或锁屏查看效果；若无反应，请到 iPhone「设置 → 通知 → 阿宝AI管家」确认已允许通知。")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+                .lineSpacing(2)
+        }
+        .padding(14)
+        .card()
     }
 
     // MARK: - 广告管理入口
