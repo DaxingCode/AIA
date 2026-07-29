@@ -193,13 +193,14 @@ struct SettingsView: View {
                     .font(AIATheme.Font.subhead.weight(.medium))
                     .foregroundStyle(.primary)
                 Spacer()
-                if bgEnabled {
-                    Button {
-                        AppBackgroundStore.shared.reset()
-                    } label: {
-                        Text("恢复默认").font(AIATheme.Font.footnote).foregroundStyle(AIATheme.blue)
-                    }
+                Button {
+                    AppBackgroundStore.shared.reset()
+                    bgEnabled = false
+                    bgPreview = nil
+                } label: {
+                    Text("恢复默认").font(AIATheme.Font.footnote).foregroundStyle(AIATheme.blue)
                 }
+                .disabled(!bgEnabled)
             }
 
             if let img = bgPreview ?? AppBackgroundStore.shared.loadImage() {
