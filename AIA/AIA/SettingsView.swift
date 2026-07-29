@@ -97,7 +97,10 @@ struct SettingsView: View {
                         devNavigate = true
                     }
                 } else {
-                    showPasscodeError = true
+                    // 等 passcode alert 完全 dismiss 后再弹错误提示，避免两个 .alert 冲突导致提示不出现
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        showPasscodeError = true
+                    }
                 }
                 passcodeText = ""
             }
