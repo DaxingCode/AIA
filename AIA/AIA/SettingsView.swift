@@ -28,6 +28,7 @@ struct SettingsView: View {
     // 背景图选择
     @State private var bgPicker: PhotosPickerItem?
     @State private var bgPreview: UIImage?
+    @State private var bgEnabled: Bool = AppBackgroundStore.shared.isEnabled
     // 开发者模式口令
     @State private var showPasscode = false
     @State private var passcodeText = ""
@@ -181,9 +182,10 @@ struct SettingsView: View {
                     .font(AIATheme.Font.subhead.weight(.medium))
                     .foregroundStyle(.primary)
                 Spacer()
-                if AppBackgroundStore.shared.isEnabled {
+                if bgEnabled {
                     Button {
                         AppBackgroundStore.shared.reset()
+                        bgEnabled = false
                         bgPreview = nil
                     } label: {
                         Text("恢复默认").font(AIATheme.Font.footnote).foregroundStyle(AIATheme.blue)
@@ -199,13 +201,13 @@ struct SettingsView: View {
             }
 
             PhotosPicker(selection: $bgPicker, matching: .images) {
-                Label(AppBackgroundStore.shared.isEnabled ? "更换背景图" : "从相册选择背景图",
+                Label(bgEnabled ? "更换背景图" : "从相册选择背景图",
                       systemImage: "photo.on.rectangle.angled")
                     .font(AIATheme.Font.footnote.weight(.medium))
                     .foregroundStyle(.primary)
             }
 
-            if AppBackgroundStore.shared.isEnabled {
+            if bgEnabled {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("遮罩浓度（保证文字可读）：\(Int(AppBackgroundStore.shared.maskOpacity * 100))%")
                         .font(AIATheme.Font.micro).foregroundStyle(AIATheme.muted)
@@ -227,10 +229,15 @@ struct SettingsView: View {
                 if let data = try? await newItem.loadTransferable(type: Data.self),
                    let img = UIImage(data: data) {
                     AppBackgroundStore.shared.save(img)
+                    bgEnabled = true
                     bgPreview = img
                 }
                 bgPicker = nil
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .aiaBackgroundChanged)) { _ in
+            bgEnabled = AppBackgroundStore.shared.isEnabled
+            bgPreview = AppBackgroundStore.shared.loadImage()
         }
     }
 
