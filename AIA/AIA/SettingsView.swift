@@ -181,7 +181,7 @@ struct SettingsView: View {
         .card()
     }
 
-    // MARK: - App 背景图（用户本人从相册换图，仅本机）
+    // MARK: - 设置App背景图（用户本人从相册换图，仅本机）
 
     @ViewBuilder
     private func backgroundCard() -> some View {
@@ -190,7 +190,7 @@ struct SettingsView: View {
                 Image(systemName: "photo.fill")
                     .font(AIATheme.Font.callout.weight(.medium))
                     .foregroundStyle(AIATheme.purple)
-                Text("App 背景图")
+                Text("设置App背景图")
                     .font(AIATheme.Font.subhead.weight(.medium))
                     .foregroundStyle(.primary)
                 Spacer()
