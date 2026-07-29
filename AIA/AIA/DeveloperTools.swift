@@ -8,7 +8,7 @@ import Combine
 
 enum DeveloperGate {
     /// 解锁口令（与服务端 DEV_PASSCODE 一致）。改口令需同步云函数环境变量。
-    static let passcode = "aia-dev-pass-2026"
+    static let passcode = "Daxing@0329"
     private static let key = "aia.devModeUnlocked"
 
     static var isUnlocked: Bool {

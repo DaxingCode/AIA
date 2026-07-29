@@ -15,7 +15,7 @@ const db = cloud.database()
 const _ = db.command
 const COLLECTION = 'aia_ads'
 // 服务端口令：优先读环境变量，fallback 硬编码常量（防抓包伪造）。
-const DEV_PASSCODE = process.env.DEV_PASSCODE || 'aia-dev-pass-2026'
+const DEV_PASSCODE = process.env.DEV_PASSCODE || 'Daxing@0329'
 
 function parseEvent(event) {
   if (event && (event.httpMethod || event.body !== undefined)) {
