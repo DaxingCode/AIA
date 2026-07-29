@@ -31,6 +31,8 @@ struct SettingsView: View {
     // 开发者模式口令
     @State private var showPasscode = false
     @State private var passcodeText = ""
+    @State private var devUnlocked: Bool = DeveloperGate.isUnlocked
+    @State private var devNavigate = false
 
     var body: some View {
         // 注意：本页由首页 navigationDestination(for:) push 进来，
@@ -52,7 +54,7 @@ struct SettingsView: View {
                 testNotifyCard
                 guideCard
                 aboutCard
-                if DeveloperGate.isUnlocked {
+                if devUnlocked {
                     DeveloperCenterCard()
                 }
             }
@@ -66,6 +68,7 @@ struct SettingsView: View {
         .background(AIATheme.fillSoft)
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(isPresented: $devNavigate) { AdManagerView() }
         .overlay(alignment: .top) {
             if showCopied {
                 copiedToast
@@ -89,6 +92,8 @@ struct SettingsView: View {
             Button("确认") {
                 if passcodeText == DeveloperGate.passcode {
                     DeveloperGate.isUnlocked = true
+                    devUnlocked = true
+                    devNavigate = true
                 }
                 passcodeText = ""
             }
