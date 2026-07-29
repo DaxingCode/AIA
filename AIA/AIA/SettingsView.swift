@@ -32,6 +32,7 @@ struct SettingsView: View {
     // 开发者模式口令
     @State private var showPasscode = false
     @State private var passcodeText = ""
+    @State private var showPasscodeError = false
     @State private var devUnlocked: Bool = DeveloperGate.isUnlocked
     @State private var devNavigate = false
 
@@ -94,12 +95,22 @@ struct SettingsView: View {
                 if passcodeText == DeveloperGate.passcode {
                     DeveloperGate.isUnlocked = true
                     devUnlocked = true
-                    devNavigate = true
+                    // 等 alert -dismiss 动画结束后再 push，避免与 NavigationStack 转场冲突
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        devNavigate = true
+                    }
+                } else {
+                    showPasscodeError = true
                 }
                 passcodeText = ""
             }
         } message: {
             Text("长按版本号可解锁广告管理与开发者工具。")
+        }
+        .alert("口令错误", isPresented: $showPasscodeError) {
+            Button("知道了", role: .cancel) { }
+        } message: {
+            Text("请重新长按版本号输入正确口令。")
         }
     }
 
