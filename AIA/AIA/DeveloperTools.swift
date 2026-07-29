@@ -131,10 +131,13 @@ struct AdManagerView: View {
         .navigationTitle("广告管理")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    editing = AdItem.empty()
-                    showEditor = true
-                } label: { Image(systemName: "plus") }
+                Image(systemName: "plus")
+                    .font(AIATheme.Font.body.weight(.semibold))
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        editing = AdItem.empty()
+                        showEditor = true
+                    }
             }
         }
         .task { await mgr.listAll() }
@@ -198,7 +201,29 @@ struct AdEditorView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            // 自定义顶部栏：避开内嵌 NavigationStack 在 sheet 里渲染空白的问题
+            HStack(spacing: 16) {
+                Text("取消")
+                    .font(AIATheme.Font.body)
+                    .foregroundStyle(AIATheme.blue)
+                    .contentShape(Rectangle())
+                    .onTapGesture { dismiss() }
+                Spacer()
+                Text(draft.id.isEmpty ? "新建广告" : "编辑广告")
+                    .font(AIATheme.Font.headline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text("保存")
+                    .font(AIATheme.Font.body.weight(.semibold))
+                    .foregroundStyle(AIATheme.blue)
+                    .contentShape(Rectangle())
+                    .onTapGesture { save() }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(AIATheme.surface)
+
             Form {
                 Section("基础") {
                     TextField("标题", text: $draft.title)
@@ -230,25 +255,19 @@ struct AdEditorView: View {
                         }
                     }
                     if imagePreview != nil {
-                        Button("移除图片", role: .destructive) {
-                            picked = nil
-                            imagePreview = nil
-                            imageData = nil
-                        }
+                        Text("移除图片")
+                            .foregroundStyle(.red)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                picked = nil
+                                imagePreview = nil
+                                imageData = nil
+                            }
                     }
                 }
             }
-            .navigationTitle(draft.id.isEmpty ? "新建广告" : "编辑广告")
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") { dismiss() }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("保存") { save() }
-                }
-            }
-            .onChange(of: picked) { _ in loadPicked() }
         }
+        .onChange(of: picked) { _ in loadPicked() }
     }
 
     private var startDate: Binding<Date> {
