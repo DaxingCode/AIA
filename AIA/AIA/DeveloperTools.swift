@@ -99,8 +99,8 @@ final class AdManagerStore: ObservableObject {
 
 struct AdManagerView: View {
     @StateObject private var mgr = AdManagerStore.shared
+    // 用 item 绑定 sheet：避免 .sheet(isPresented:) 首次弹窗时闭包拿到旧值/空值导致空白
     @State private var editing: AdItem?
-    @State private var showEditor = false
 
     var body: some View {
         Group {
@@ -114,7 +114,6 @@ struct AdManagerView: View {
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 editing = item
-                                showEditor = true
                             }
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) {
@@ -136,18 +135,15 @@ struct AdManagerView: View {
                     .contentShape(Rectangle())
                     .onTapGesture {
                         editing = AdItem.empty()
-                        showEditor = true
                     }
             }
         }
         .task { await mgr.listAll() }
-        .sheet(isPresented: $showEditor) {
-            if let item = editing {
-                AdEditorView(item: item) { saved, b64 in
-                    Task {
-                        _ = await mgr.upsert(saved, imageBase64: b64)
-                        await mgr.listAll()
-                    }
+        .sheet(item: $editing) { item in
+            AdEditorView(item: item) { saved, b64 in
+                Task {
+                    _ = await mgr.upsert(saved, imageBase64: b64)
+                    await mgr.listAll()
                 }
             }
         }
