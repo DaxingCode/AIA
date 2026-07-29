@@ -57,10 +57,15 @@ final class AdManagerStore: ObservableObject {
         defer { loading = false }
         do {
             let resp = try await postAdsJSON(["action": "listAll", "passcode": DeveloperGate.passcode])
-            guard resp["ok"] as? Bool == true, let arr = resp["items"] as? [[String: Any]] else { return }
+            print("[AdManager] listAll resp: \(resp)")
+            guard resp["ok"] as? Bool == true, let arr = resp["items"] as? [[String: Any]] else {
+                items = []
+                return
+            }
             let data = try JSONSerialization.data(withJSONObject: arr)
             items = try JSONDecoder().decode([AdItem].self, from: data)
         } catch {
+            print("[AdManager] listAll error: \(error)")
             items = []
         }
     }
@@ -75,8 +80,10 @@ final class AdManagerStore: ObservableObject {
                 "passcode": DeveloperGate.passcode,
                 "item": dict
             ])
+            print("[AdManager] upsert resp: \(resp)")
             return resp["ok"] as? Bool == true
         } catch {
+            print("[AdManager] upsert error: \(error)")
             return false
         }
     }
@@ -107,6 +114,8 @@ struct AdManagerView: View {
             if mgr.loading && mgr.items.isEmpty {
                 ProgressView("加载中…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if mgr.items.isEmpty {
+                emptyState
             } else {
                 List {
                     ForEach(mgr.items) { item in
@@ -125,6 +134,7 @@ struct AdManagerView: View {
                     }
                 }
                 .listStyle(.insetGrouped)
+                .refreshable { await mgr.listAll() }
             }
         }
         .navigationTitle("广告管理")
@@ -142,11 +152,29 @@ struct AdManagerView: View {
         .sheet(item: $editing) { item in
             AdEditorView(item: item) { saved, b64 in
                 Task {
-                    _ = await mgr.upsert(saved, imageBase64: b64)
+                    let ok = await mgr.upsert(saved, imageBase64: b64)
+                    print("[AdManager] upsert result: \(ok)")
                     await mgr.listAll()
+                    // 保存后立即同步首页广告位，避免 60 秒缓存导致看不到
+                    await AdStore.shared.invalidateAndFetch()
                 }
             }
         }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "rectangle.portrait.on.rectangle.portrait.angled")
+                .font(.system(size: 48))
+                .foregroundStyle(AIATheme.muted.opacity(0.5))
+            Text("暂无广告")
+                .font(AIATheme.Font.subhead.weight(.medium))
+                .foregroundStyle(.primary)
+            Text("点击右上角 + 新建一条广告")
+                .font(AIATheme.Font.footnote)
+                .foregroundStyle(AIATheme.muted)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

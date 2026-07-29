@@ -81,6 +81,12 @@ final class AdStore: ObservableObject {
         await fetch()
     }
 
+    /// 强制刷新：忽略 60 秒防抖，用于广告保存后立即同步到首页。
+    func invalidateAndFetch() async {
+        lastFetch = .distantPast
+        await fetch()
+    }
+
     func fetch() async {
         lastFetch = Date()
         do {

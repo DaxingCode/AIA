@@ -1,14 +1,23 @@
 // DeveloperCenterView.swift
-// 开发者中心：解锁后展示的高级功能入口页。广告管理等子功能从这里进入，便于后续扩展。
+// 开发者中心：解锁后展示的高级功能入口页。广告管理、Agent、AI 模型等高级功能从这里进入，便于后续扩展。
 import SwiftUI
 
 struct DeveloperCenterView: View {
     @Environment(\.dismiss) private var dismiss
 
+    // 智能问答 Agent 总开关（原在设置页，现移到开发者中心）
+    @AppStorage("aia.agentEnabled") private var agentEnabled = false
+    // 模型供应商选择（原在设置页，现移到开发者中心）
+    @AppStorage("aia.modelProvider") private var modelProvider = "glm"
+    // 视觉识别模型单独选择
+    @AppStorage("aia.visionModelProvider") private var visionModelProvider = "glm"
+
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
                 adManagerEntry
+                agentCard
+                modelProviderCard
                 // 后续新增开发者功能在这里加卡片即可
             }
             .padding(.horizontal, 16)
@@ -51,6 +60,80 @@ struct DeveloperCenterView: View {
             .background(AIATheme.surface)
         }
         .buttonStyle(.plain)
+        .card()
+    }
+
+    // MARK: - 智能问答 Agent（可单独开关）
+    private var agentCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "brain")
+                    .font(AIATheme.Font.callout.weight(.medium))
+                    .foregroundStyle(AIATheme.blue)
+                Text("智能问答 Agent")
+                    .font(AIATheme.Font.subhead.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Toggle("智能问答 Agent", isOn: $agentEnabled)
+                    .labelsHidden()
+            }
+            Text("开启后，对话页的问答由 AI 基于你的记录智能回答（只读，不会改动任何数据）。")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+                .lineSpacing(2)
+        }
+        .padding(14)
+        .card()
+    }
+
+    // MARK: - 模型供应商选择（文本 / 视觉独立切换，零污染云端）
+    private var modelProviderCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "cpu")
+                    .font(AIATheme.Font.callout.weight(.medium))
+                    .foregroundStyle(AIATheme.blue)
+                Text("AI 模型")
+                    .font(AIATheme.Font.subhead.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            Text("问答与截图识别可分别选择模型（默认均为智谱 GLM）。需在云端对应环境变量已配置该供应商 Key。")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+                .lineSpacing(2)
+            // 文本模型（问答 / Agent）
+            VStack(alignment: .leading, spacing: 4) {
+                Text("问答 / Agent 模型")
+                    .font(AIATheme.Font.micro.weight(.medium))
+                    .foregroundStyle(AIATheme.muted)
+                Picker("问答模型", selection: $modelProvider) {
+                    ForEach(AIAModelProvider.allCases) { p in
+                        Text(p.displayName).tag(p.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(AIATheme.blue)
+            }
+            // 视觉模型（截图识别）。仅展示支持视觉的 provider，过滤掉 DeepSeek（仅文字）。
+            VStack(alignment: .leading, spacing: 4) {
+                Text("截图识别模型")
+                    .font(AIATheme.Font.micro.weight(.medium))
+                    .foregroundStyle(AIATheme.muted)
+                Picker("识别模型", selection: $visionModelProvider) {
+                    ForEach(AIAModelProvider.visionCases) { p in
+                        Text(p.displayName).tag(p.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(AIATheme.blue)
+            }
+            Text("DeepSeek 仅支持文字，对话体验更好但不能用于截图识别（视觉 Picker 已自动隐藏）。Agent 模式推荐用 DeepSeek，function-calling 准确度高于其他。")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+                .lineSpacing(2)
+        }
+        .padding(14)
         .card()
     }
 }
