@@ -44,7 +44,7 @@ struct SettingsView: View {
             VStack(spacing: 16) {
                 myAccountEntry
                 appearanceCard
-                backgroundCard
+                backgroundCard()
                 homeLayoutEntry
                 tierCard
                 autoSyncSettingsCard
@@ -64,9 +64,6 @@ struct SettingsView: View {
             .padding(.vertical, 12)
         }
         .scrollDismissesKeyboard(.immediately)
-        .onTapGesture {
-            hideKeyboard()
-        }
         .background(AIATheme.fillSoft)
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
@@ -183,7 +180,8 @@ struct SettingsView: View {
 
     // MARK: - App 背景图（用户本人从相册换图，仅本机）
 
-    private var backgroundCard: some View {
+    @ViewBuilder
+    private func backgroundCard() -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "photo.fill")
