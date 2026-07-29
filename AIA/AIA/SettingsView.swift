@@ -71,10 +71,16 @@ struct SettingsView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("恢复默认") {
-                    print("[AIA] 恢复默认按钮被点击（工具栏）")
-                    resetBackground()
+                    print("[AIA] 工具栏恢复默认点击，bgEnabled=\(bgEnabled)")
+                    guard bgEnabled else {
+                        showToast("当前没有自定义背景")
+                        return
+                    }
+                    AppBackgroundStore.shared.reset()
+                    bgEnabled = false
+                    bgPreview = nil
+                    showToast("已恢复默认背景")
                 }
-                .disabled(!bgEnabled)
             }
         }
         .overlay(alignment: .top) {
