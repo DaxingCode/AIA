@@ -68,22 +68,6 @@ struct SettingsView: View {
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: $devNavigate) { AdManagerView() }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Text("恢复默认")
-                    .font(AIATheme.Font.body.weight(.medium))
-                    .foregroundStyle(bgEnabled ? AIATheme.blue : AIATheme.muted)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        print("[AIA] 工具栏恢复默认点击(手势)，bgEnabled=\(bgEnabled)")
-                        guard bgEnabled else {
-                            showToast("当前没有自定义背景")
-                            return
-                        }
-                        resetBackground()
-                    }
-            }
-        }
         .overlay(alignment: .top) {
             if showCopied {
                 copiedToast
