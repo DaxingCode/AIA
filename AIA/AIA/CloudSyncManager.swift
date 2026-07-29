@@ -259,14 +259,15 @@ final class CloudSyncManager: ObservableObject {
         var items: [[String: Any]] = []
         // 增量边界：since == nil（首次/登录后）时取 0，timeIntervalSince1970 恒为正，等价"全量发送"。
         let sinceTime = since ?? 0
+        // P2：把增量边界转成 Date，用于 SwiftData #Predicate 在本地 SQLite 层只捞脏记录（省内存）。
+        let sinceDate = Date(timeIntervalSince1970: sinceTime)
         // 本地各类型总条数（用于打印"增量上传省了多少"）。
         var totalFetched = 0
 
-        if let bills = try? context.fetch(FetchDescriptor<Bill>()) {
-            print("[sync] 本地 bills 数量 = \(bills.count)")
-            totalFetched += bills.count
+        if let bills = try? context.fetch(FetchDescriptor<Bill>(predicate: #Predicate { $0.syncUpdatedAt > sinceDate })) {
+            totalFetched += (try? context.fetchCount(FetchDescriptor<Bill>())) ?? 0
+            print("[sync] 本地 bills 增量(脏) = \(bills.count)")
             for b in bills {
-                guard b.syncUpdatedAt.timeIntervalSince1970 > sinceTime else { continue }
                 items.append(item(id: b.syncId, type: "bill", updatedAt: b.syncUpdatedAt,
                                   deleted: b.syncDeleted,                                   payload: [
                                     "merchant": b.merchant,
@@ -280,11 +281,10 @@ final class CloudSyncManager: ObservableObject {
                                   ]))
             }
         }
-        if let reminders = try? context.fetch(FetchDescriptor<Reminder>()) {
-            print("[sync] 本地 reminders 数量 = \(reminders.count)")
-            totalFetched += reminders.count
+        if let reminders = try? context.fetch(FetchDescriptor<Reminder>(predicate: #Predicate { $0.syncUpdatedAt > sinceDate })) {
+            totalFetched += (try? context.fetchCount(FetchDescriptor<Reminder>())) ?? 0
+            print("[sync] 本地 reminders 增量(脏) = \(reminders.count)")
             for r in reminders {
-                guard r.syncUpdatedAt.timeIntervalSince1970 > sinceTime else { continue }
                 items.append(item(id: r.syncId, type: "reminder", updatedAt: r.syncUpdatedAt,
                                   deleted: r.syncDeleted, payload: [
                                     "title": r.title,
@@ -298,11 +298,10 @@ final class CloudSyncManager: ObservableObject {
                                   ]))
             }
         }
-        if let foods = try? context.fetch(FetchDescriptor<FoodEntry>()) {
-            print("[sync] 本地 foods 数量 = \(foods.count)")
-            totalFetched += foods.count
+        if let foods = try? context.fetch(FetchDescriptor<FoodEntry>(predicate: #Predicate { $0.syncUpdatedAt > sinceDate })) {
+            totalFetched += (try? context.fetchCount(FetchDescriptor<FoodEntry>())) ?? 0
+            print("[sync] 本地 foods 增量(脏) = \(foods.count)")
             for f in foods {
-                guard f.syncUpdatedAt.timeIntervalSince1970 > sinceTime else { continue }
                 items.append(item(id: f.syncId, type: "food", updatedAt: f.syncUpdatedAt,
                                   deleted: f.syncDeleted,                                   payload: [
                                     "name": f.name,
@@ -322,11 +321,10 @@ final class CloudSyncManager: ObservableObject {
                                   ]))
             }
         }
-        if let healths = try? context.fetch(FetchDescriptor<HealthMetric>()) {
-            print("[sync] 本地 healths 数量 = \(healths.count)")
-            totalFetched += healths.count
+        if let healths = try? context.fetch(FetchDescriptor<HealthMetric>(predicate: #Predicate { $0.syncUpdatedAt > sinceDate })) {
+            totalFetched += (try? context.fetchCount(FetchDescriptor<HealthMetric>())) ?? 0
+            print("[sync] 本地 healths 增量(脏) = \(healths.count)")
             for h in healths {
-                guard h.syncUpdatedAt.timeIntervalSince1970 > sinceTime else { continue }
                 items.append(item(id: h.syncId, type: "health", updatedAt: h.syncUpdatedAt,
                                   deleted: h.syncDeleted, payload: [
                                     "metric": h.metric,
@@ -336,11 +334,10 @@ final class CloudSyncManager: ObservableObject {
                                   ]))
             }
         }
-        if let recognitions = try? context.fetch(FetchDescriptor<RecognitionRecord>()) {
-            print("[sync] 本地 recognitions 数量 = \(recognitions.count)")
-            totalFetched += recognitions.count
+        if let recognitions = try? context.fetch(FetchDescriptor<RecognitionRecord>(predicate: #Predicate { $0.syncUpdatedAt > sinceDate })) {
+            totalFetched += (try? context.fetchCount(FetchDescriptor<RecognitionRecord>())) ?? 0
+            print("[sync] 本地 recognitions 增量(脏) = \(recognitions.count)")
             for r in recognitions {
-                guard r.syncUpdatedAt.timeIntervalSince1970 > sinceTime else { continue }
                 items.append(item(id: r.syncId, type: "recognition", updatedAt: r.syncUpdatedAt,
                                   deleted: r.syncDeleted, payload: [
                                     "recognizedAt": r.recognizedAt.timeIntervalSince1970,
@@ -350,11 +347,10 @@ final class CloudSyncManager: ObservableObject {
                                   ]))
             }
         }
-        if let metas = try? context.fetch(FetchDescriptor<MerchantMeta>()) {
-            print("[sync] 本地 merchantMetas 数量 = \(metas.count)")
-            totalFetched += metas.count
+        if let metas = try? context.fetch(FetchDescriptor<MerchantMeta>(predicate: #Predicate { $0.syncUpdatedAt > sinceDate })) {
+            totalFetched += (try? context.fetchCount(FetchDescriptor<MerchantMeta>())) ?? 0
+            print("[sync] 本地 merchantMetas 增量(脏) = \(metas.count)")
             for m in metas {
-                guard m.syncUpdatedAt.timeIntervalSince1970 > sinceTime else { continue }
                 items.append(item(id: m.syncId, type: "merchant_meta", updatedAt: m.syncUpdatedAt,
                                   deleted: m.syncDeleted, payload: [
                                     "merchant": m.merchant,
@@ -365,11 +361,10 @@ final class CloudSyncManager: ObservableObject {
                                   ]))
             }
         }
-        if let chats = try? context.fetch(FetchDescriptor<ChatMessage>()) {
-            print("[sync] 本地 chats 数量 = \(chats.count)")
-            totalFetched += chats.count
+        if let chats = try? context.fetch(FetchDescriptor<ChatMessage>(predicate: #Predicate { $0.syncUpdatedAt > sinceDate })) {
+            totalFetched += (try? context.fetchCount(FetchDescriptor<ChatMessage>())) ?? 0
+            print("[sync] 本地 chats 增量(脏) = \(chats.count)")
             for c in chats {
-                guard c.syncUpdatedAt.timeIntervalSince1970 > sinceTime else { continue }
                 items.append(item(id: c.syncId, type: "chat", updatedAt: c.syncUpdatedAt,
                                   deleted: c.syncDeleted, payload: [
                                     "role": c.roleRaw,
@@ -379,10 +374,10 @@ final class CloudSyncManager: ObservableObject {
             }
         }
         // 饮水（WaterLog）—— 让阿宝可经云端管理
-        if let waters = try? context.fetch(FetchDescriptor<WaterLog>()) {
-            totalFetched += waters.count
+        if let waters = try? context.fetch(FetchDescriptor<WaterLog>(predicate: #Predicate { $0.syncUpdatedAt > sinceDate })) {
+            totalFetched += (try? context.fetchCount(FetchDescriptor<WaterLog>())) ?? 0
+            print("[sync] 本地 waters 增量(脏) = \(waters.count)")
             for w in waters {
-                guard w.syncUpdatedAt.timeIntervalSince1970 > sinceTime else { continue }
                 items.append(item(id: w.syncId, type: "water", updatedAt: w.syncUpdatedAt,
                                   deleted: w.syncDeleted, payload: [
                                     "amount": w.amount,
@@ -391,10 +386,10 @@ final class CloudSyncManager: ObservableObject {
             }
         }
         // 周期排程（RecurringRule）—— 让阿宝可经云端管理
-        if let rules = try? context.fetch(FetchDescriptor<RecurringRule>()) {
-            totalFetched += rules.count
+        if let rules = try? context.fetch(FetchDescriptor<RecurringRule>(predicate: #Predicate { $0.syncUpdatedAt > sinceDate })) {
+            totalFetched += (try? context.fetchCount(FetchDescriptor<RecurringRule>())) ?? 0
+            print("[sync] 本地 rules 增量(脏) = \(rules.count)")
             for r in rules {
-                guard r.syncUpdatedAt.timeIntervalSince1970 > sinceTime else { continue }
                 items.append(item(id: r.syncId, type: "recurring_rule", updatedAt: r.syncUpdatedAt,
                                   deleted: r.syncDeleted, payload: [
                                     "merchant": r.merchant,
@@ -606,47 +601,112 @@ final class CloudSyncManager: ObservableObject {
     }
 
     private func applyFood(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
+        let name = payload["name"] as? String ?? ""
+        let calories = payload["calories"] as? Double ?? 0
+        let protein = payload["protein"] as? Double ?? 0
+        let carbs = payload["carbs"] as? Double ?? 0
+        let fat = payload["fat"] as? Double ?? 0
+        let fiber = payload["fiber"] as? Double ?? 0
+        let sugar = payload["sugar"] as? Double ?? 0
+        let sodium = payload["sodium"] as? Double ?? 0
+        let waterIntake = payload["waterIntake"] as? Double ?? 0
+        let portion = payload["portion"] as? String ?? ""
+        let meal = payload["meal"] as? String ?? "午餐"
+        let date = Date(timeIntervalSince1970: payload["date"] as? Double ?? Date().timeIntervalSince1970)
+        let weightGram = payload["weightGram"] as? Double
+        let baseCalories = payload["baseCalories"] as? Double
+        let baseProtein = payload["baseProtein"] as? Double
+        let baseCarbs = payload["baseCarbs"] as? Double
+        let baseFat = payload["baseFat"] as? Double
+        let baseFiber = payload["baseFiber"] as? Double
+        let baseSugar = payload["baseSugar"] as? Double
+        let baseSodium = payload["baseSodium"] as? Double
+
+        func fill(_ target: FoodEntry) {
+            target.name = name.isEmpty ? target.name : name
+            target.calories = calories
+            target.protein = protein
+            target.carbs = carbs
+            target.fat = fat
+            target.fiber = fiber
+            target.sugar = sugar
+            target.sodium = sodium
+            target.waterIntake = waterIntake
+            target.portion = portion
+            target.meal = meal
+            target.date = date
+            target.weightGram = weightGram ?? target.weightGram
+            target.baseCalories = baseCalories ?? target.baseCalories
+            target.baseProtein = baseProtein ?? target.baseProtein
+            target.baseCarbs = baseCarbs ?? target.baseCarbs
+            target.baseFat = baseFat ?? target.baseFat
+            target.baseFiber = baseFiber ?? target.baseFiber
+            target.baseSugar = baseSugar ?? target.baseSugar
+            target.baseSodium = baseSodium ?? target.baseSodium
+            target.syncUpdatedAt = remoteDate
+        }
+
+        // 1) 按 syncId 精确 upsert
         if let existing = (try? context.fetch(FetchDescriptor<FoodEntry>(predicate: #Predicate { $0.syncId == id })))?.first {
             if deleted { context.delete(existing); return 1 }
             guard existing.syncUpdatedAt < remoteDate else { return 0 }
-            existing.name = payload["name"] as? String ?? existing.name
-            existing.calories = payload["calories"] as? Double ?? existing.calories
-            existing.protein = payload["protein"] as? Double ?? existing.protein
-            existing.carbs = payload["carbs"] as? Double ?? existing.carbs
-            existing.fat = payload["fat"] as? Double ?? existing.fat
-            existing.waterIntake = payload["waterIntake"] as? Double ?? existing.waterIntake
-            existing.portion = payload["portion"] as? String ?? existing.portion
-            existing.meal = payload["meal"] as? String ?? existing.meal
-            existing.date = Date(timeIntervalSince1970: payload["date"] as? Double ?? existing.date.timeIntervalSince1970)
-            existing.weightGram = payload["weightGram"] as? Double ?? existing.weightGram
-            existing.baseCalories = payload["baseCalories"] as? Double ?? existing.baseCalories
-            existing.baseProtein = payload["baseProtein"] as? Double ?? existing.baseProtein
-            existing.baseCarbs = payload["baseCarbs"] as? Double ?? existing.baseCarbs
-            existing.baseFat = payload["baseFat"] as? Double ?? existing.baseFat
-            existing.syncUpdatedAt = remoteDate
-            return 1
-        } else {
-            if deleted { return 0 }
-            let f = FoodEntry(name: payload["name"] as? String ?? "",
-                              calories: payload["calories"] as? Double ?? 0,
-                              protein: payload["protein"] as? Double ?? 0,
-                              carbs: payload["carbs"] as? Double ?? 0,
-                              fat: payload["fat"] as? Double ?? 0,
-                              waterIntake: payload["waterIntake"] as? Double ?? 0,
-                              portion: payload["portion"] as? String ?? "",
-                              meal: payload["meal"] as? String ?? "午餐",
-                              date: Date(timeIntervalSince1970: payload["date"] as? Double ?? Date().timeIntervalSince1970),
-                              weightGram: payload["weightGram"] as? Double,
-                              baseCalories: payload["baseCalories"] as? Double,
-                              baseProtein: payload["baseProtein"] as? Double,
-                              baseCarbs: payload["baseCarbs"] as? Double,
-                              baseFat: payload["baseFat"] as? Double,
-                              syncId: id, syncUpdatedAt: remoteDate)
-            context.insert(f)
-            // 来源标记：从小程序分区 pull 进来的饮食记录（绑定后分区=小程序），标记为「小程序」。
-            context.insert(FoodSource(foodSyncId: id, origin: "miniprogram"))
+            fill(existing)
             return 1
         }
+
+        // 2) syncId 未命中时按业务键 fallback 去重（小程序/App syncId 不一致导致重复）
+        let cal = Calendar.current
+        let dayStart = cal.startOfDay(for: date)
+        guard let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) else { return 0 }
+        let normName = name.lowercased().trimmingCharacters(in: .whitespaces)
+        let normPortion = portion.trimmingCharacters(in: .whitespaces)
+        let byContent = (try? context.fetch(FetchDescriptor<FoodEntry>(
+            predicate: #Predicate { !$0.syncDeleted && $0.meal == meal && $0.date >= dayStart && $0.date < dayEnd }
+        )))?.first { f in
+            f.name.lowercased().trimmingCharacters(in: .whitespaces) == normName &&
+            f.portion.trimmingCharacters(in: .whitespaces) == normPortion
+        }
+
+        if let existing = byContent {
+            if deleted { context.delete(existing); return 1 }
+            guard existing.syncUpdatedAt < remoteDate else { return 0 }
+            let oldSyncId = existing.syncId
+            existing.syncId = id
+            fill(existing)
+            if let existingSource = (try? context.fetch(FetchDescriptor<FoodSource>(predicate: #Predicate { $0.foodSyncId == oldSyncId })))?.first {
+                existingSource.foodSyncId = id
+            } else {
+                context.insert(FoodSource(foodSyncId: id, origin: "miniprogram"))
+            }
+            return 1
+        }
+
+        // 3) 全新记录
+        if deleted { return 0 }
+        let f = FoodEntry(name: name,
+                          calories: calories,
+                          protein: protein,
+                          carbs: carbs,
+                          fat: fat,
+                          fiber: fiber,
+                          sugar: sugar,
+                          sodium: sodium,
+                          waterIntake: waterIntake,
+                          portion: portion,
+                          meal: meal,
+                          date: date,
+                          weightGram: weightGram,
+                          baseCalories: baseCalories,
+                          baseProtein: baseProtein,
+                          baseCarbs: baseCarbs,
+                          baseFat: baseFat,
+                          baseFiber: baseFiber,
+                          baseSugar: baseSugar,
+                          baseSodium: baseSodium,
+                          syncId: id, syncUpdatedAt: remoteDate)
+        context.insert(f)
+        context.insert(FoodSource(foodSyncId: id, origin: "miniprogram"))
+        return 1
     }
 
     private func applyWater(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {

@@ -8,10 +8,11 @@ enum DataDeduplicator {
     /// 清理本地所有 SwiftData 模型中的重复记录。
     /// 按业务键分组：每组保留 syncUpdatedAt 最早的一条（兼顾已有同步数据），
     /// 其余标记 syncDeleted=true（墓碑会通过同步传播到其他设备）。
-    /// 用 UserDefaults 标记「已清理过」，避免每次启动都跑。
+    /// 用 UserDefaults 标记「已清理过」，避免每次启动都跑；版本号 bump 可强制重新清理一次。
+    ///  bumped to v2 (2026-07-29)：修复小程序与 App 跨端同步时因 syncId 不一致导致的重复记录。
     @MainActor
     static func runOnce(context: ModelContext) {
-        let key = "aia_dedup_done_v1"
+        let key = "aia_dedup_done_v2"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
         defer { UserDefaults.standard.set(true, forKey: key) }
 
