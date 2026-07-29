@@ -70,17 +70,18 @@ struct SettingsView: View {
         .navigationDestination(isPresented: $devNavigate) { AdManagerView() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("恢复默认") {
-                    print("[AIA] 工具栏恢复默认点击，bgEnabled=\(bgEnabled)")
-                    guard bgEnabled else {
-                        showToast("当前没有自定义背景")
-                        return
+                Text("恢复默认")
+                    .font(AIATheme.Font.body.weight(.medium))
+                    .foregroundStyle(bgEnabled ? AIATheme.blue : AIATheme.muted)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        print("[AIA] 工具栏恢复默认点击(手势)，bgEnabled=\(bgEnabled)")
+                        guard bgEnabled else {
+                            showToast("当前没有自定义背景")
+                            return
+                        }
+                        resetBackground()
                     }
-                    AppBackgroundStore.shared.reset()
-                    bgEnabled = false
-                    bgPreview = nil
-                    showToast("已恢复默认背景")
-                }
             }
         }
         .overlay(alignment: .top) {
@@ -209,17 +210,16 @@ struct SettingsView: View {
                     .font(AIATheme.Font.subhead.weight(.medium))
                     .foregroundStyle(.primary)
                 Spacer()
-                Button {
-                    print("[AIA] 恢复默认按钮被点击（卡片）")
-                    resetBackground()
-                } label: {
-                    Text("恢复默认")
-                        .font(AIATheme.Font.footnote)
-                        .foregroundStyle(AIATheme.blue)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(!bgEnabled)
+                Text("恢复默认")
+                    .font(AIATheme.Font.footnote)
+                    .foregroundStyle(AIATheme.blue)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        print("[AIA] 卡片恢复默认点击(手势)，bgEnabled=\(bgEnabled)")
+                        guard bgEnabled else { return }
+                        resetBackground()
+                    }
+                    .opacity(bgEnabled ? 1 : 0.4)
             }
 
             if let img = bgPreview ?? AppBackgroundStore.shared.loadImage() {
@@ -227,6 +227,13 @@ struct SettingsView: View {
                     .resizable().scaledToFill()
                     .frame(height: 120).clipped()
                     .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+                    .contentShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+                    .contextMenu {
+                        Button("恢复默认背景", role: .destructive) {
+                            print("[AIA] 预览图长按恢复默认")
+                            resetBackground()
+                        }
+                    }
             }
 
             PhotosPicker(selection: $bgPicker, matching: .images) {
