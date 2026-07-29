@@ -431,12 +431,23 @@ struct FoodListView: View {
         selectedFoods.filter { $0.meal == meal.mealString }.reduce(0) { $0 + $1.calories }
     }
 
-    /// 常吃食物：前 10 个按吃过次数倒序（常吃 Top10），第 11 个起按最近一次进食时间倒序；无历史则回退默认清单。
+    /// 常吃食物：按当前餐次过滤后统计。
+    /// - 早餐：只统计「早餐」历史。
+    /// - 午餐/晚餐：合并统计「午餐+晚餐」历史。
+    /// - 加餐：统计全部历史。
+    /// 排序：前 10 个按吃过次数倒序（常吃 Top10），第 11 个起按最近一次进食时间倒序；无历史则回退默认清单。
     private static let defaultFrequentFoods = ["米饭", "鸡蛋", "牛奶", "苹果", "鸡胸肉", "面包", "面条", "牛肉", "西兰花", "香蕉"]
     private var frequentFoods: [String] {
+        let source = foods.filter { f in
+            switch meal {
+            case .bf: return f.meal == "早餐"
+            case .lu, .dn: return f.meal == "午餐" || f.meal == "晚餐"
+            case .sn: return true
+            }
+        }
         var counts: [String: Int] = [:]
         var latestDate: [String: Date] = [:]
-        for f in foods {
+        for f in source {
             counts[f.name, default: 0] += 1
             if let t = latestDate[f.name] {
                 if f.date > t { latestDate[f.name] = f.date }
@@ -2202,8 +2213,10 @@ struct BillListView: View {
             }
 
             // 日期网格
+            // 2026-07-29：同待办日历 —— [Date?] 的多个 nil 用 id: \.self 会重复 ID，
+            // 导致月末行点击后选中态不重绘，必须用 offset 作 id。
             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 4) {
-                ForEach(billDaysInMonthView, id: \.self) { date in
+                ForEach(Array(billDaysInMonthView.enumerated()), id: \.offset) { _, date in
                     if let date = date {
                         billDayCell(date)
                     } else {
@@ -2683,8 +2696,11 @@ struct ReminderListView: View {
             }
 
             // 日期网格
+            // 2026-07-29：id 必须用 offset —— daysInMonthView 是 [Date?]，月首/月尾的多个 nil
+            // 用 id: \.self 会产生重复 ID，SwiftUI diff 错乱导致月末行（如 30/31）点击后
+            // selectedDate 已变但 cell 不重绘（不出蓝圈）。
             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 4) {
-                ForEach(daysInMonthView, id: \.self) { date in
+                ForEach(Array(daysInMonthView.enumerated()), id: \.offset) { _, date in
                     if let date = date {
                         dayCell(date)
                     } else {
