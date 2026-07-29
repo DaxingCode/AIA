@@ -21,7 +21,7 @@ enum DeveloperGate {
 struct DeveloperCenterCard: View {
     var body: some View {
         NavigationLink {
-            AdManagerView()
+            DeveloperCenterView()
         } label: {
             HStack {
                 Image(systemName: "wrench.and.screwdriver")
