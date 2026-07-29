@@ -195,12 +195,17 @@ struct SettingsView: View {
                     .foregroundStyle(.primary)
                 Spacer()
                 Button {
+                    print("[AIA] 恢复默认按钮被点击")
                     AppBackgroundStore.shared.reset()
                     bgEnabled = false
                     bgPreview = nil
                 } label: {
-                    Text("恢复默认").font(AIATheme.Font.footnote).foregroundStyle(AIATheme.blue)
+                    Text("恢复默认")
+                        .font(AIATheme.Font.footnote)
+                        .foregroundStyle(AIATheme.blue)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
                 .disabled(!bgEnabled)
             }
 
