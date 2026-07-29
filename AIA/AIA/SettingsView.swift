@@ -27,7 +27,7 @@ struct SettingsView: View {
     @State private var showOnboarding = false
     // 背景图选择
     @State private var bgPicker: PhotosPickerItem?
-    @State private var bgReload = false
+    @State private var bgPreview: UIImage?
     // 开发者模式口令
     @State private var showPasscode = false
     @State private var passcodeText = ""
@@ -179,13 +179,14 @@ struct SettingsView: View {
                 if AppBackgroundStore.shared.isEnabled {
                     Button {
                         AppBackgroundStore.shared.reset()
+                        bgPreview = nil
                     } label: {
                         Text("恢复默认").font(AIATheme.Font.footnote).foregroundStyle(AIATheme.blue)
                     }
                 }
             }
 
-            if AppBackgroundStore.shared.isEnabled, let img = AppBackgroundStore.shared.loadImage() {
+            if let img = bgPreview ?? AppBackgroundStore.shared.loadImage() {
                 Image(uiImage: img)
                     .resizable().scaledToFill()
                     .frame(height: 120).clipped()
@@ -215,8 +216,16 @@ struct SettingsView: View {
         }
         .padding(14)
         .card()
-        .onReceive(NotificationCenter.default.publisher(for: .aiaBackgroundChanged)) { _ in
-            bgReload.toggle()
+        .onChange(of: bgPicker) { _, newItem in
+            guard let newItem else { return }
+            Task {
+                if let data = try? await newItem.loadTransferable(type: Data.self),
+                   let img = UIImage(data: data) {
+                    AppBackgroundStore.shared.save(img)
+                    bgPreview = img
+                }
+                bgPicker = nil
+            }
         }
     }
 
