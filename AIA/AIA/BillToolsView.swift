@@ -13,9 +13,8 @@ struct BillToolsView: View {
             VStack(alignment: .leading, spacing: 10) {
                 SectionTitle(text: "周期记账")
 
-                NavigationLink {
-                    RecurringRuleListView()
-                        .environment(\.modelContext, context)
+                Button {
+                    NavigationRouter.shared.navigate(.recurringRuleList)
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "repeat.circle.fill")
@@ -41,9 +40,8 @@ struct BillToolsView: View {
 
                 SectionTitle(text: "数据导入")
 
-                NavigationLink {
-                    BillImportView()
-                        .environment(\.modelContext, context)
+                Button {
+                    NavigationRouter.shared.navigate(.billImport)
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "arrow.down.doc.fill")
@@ -69,9 +67,8 @@ struct BillToolsView: View {
 
                 SectionTitle(text: "智能归类")
 
-                NavigationLink {
-                    MerchantRuleListView()
-                        .environment(\.modelContext, context)
+                Button {
+                    NavigationRouter.shared.navigate(.merchantRuleList)
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "building.columns.fill")
@@ -98,7 +95,7 @@ struct BillToolsView: View {
                 SectionTitle(text: "自动记账")
 
                 Button {
-                    NavigationRouter.shared.path.append(HomeRoute.autoSetup)
+                    NavigationRouter.shared.navigate(HomeRoute.autoSetup)
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "wand.and.stars")

@@ -246,6 +246,53 @@ function normalizeCommandVerb(name) {
   return t;
 }
 
+// ---- 账单分类归一化（与 Swift BillCategoryHelpers.normalizedCategory 同步，方案2兜底） ----
+// 聊天路径(create_bill/set_merchant)不经过 App 端 RecognitionSaver，在云端落地前归一化。
+// 预设 27 大类：餐饮、交通、购物、住房、娱乐、医疗、教育、通讯、保险、运动、宠物、
+//              旅行、家居、服饰、美妆、数码、云服务、礼品、人情、投资、工资、办公、
+//              快递、母婴、慈善、其他
+const BILL_CATEGORY_MAP = (() => {
+  const map = {};
+  const groups = [
+    ['餐饮', '餐饮', '餐饮美食', '美食', '外卖', '中餐', '西餐', '日料', '韩料', '快餐', '火锅', '烧烤', '小吃', '甜品', '面包', '茶饮', '咖啡', '奶茶', '饮料', '食堂', '聚餐', '团建', '水果', '生鲜', '蔬菜', '零食', '坚果', '吃饭', '餐费', '食品'],
+    ['交通', '交通', '出行', '打车', '出租车', '网约车', '专车', '顺风车', '公交', 'uber', '滴滴', '轻轨', '高铁', '动车', '火车', '机票', '飞机', '轮船', '长途', '包车', '自驾', '租车', '代驾', '加油', '油费', '充电', '充电桩', '停车', '过路费', '罚款', '洗车', '养车', '汽车', '保养', '维修', '车险', '年检', '轮胎', '配件', '改装', '二手车'],
+    ['购物', '购物', '超市', '便利店', '网购', '电商', '百货', '日用百货', '日用品', '小商品', '杂货', '闲鱼', '二手'],
+    ['住房', '住房', '房租', '房贷', '物业', '水电', '水电煤', '燃气', '暖气', '供暖'],
+    ['娱乐', '娱乐', '游戏', '电影', '影视', '视频', '演出', '展览', '剧本杀', '密室', 'KTV', '酒吧', '夜店', '桌游', '会员', '订阅', '音乐', '演唱会', '乐器', '音频'],
+    ['医疗', '医疗', '医疗健康', '医院', '体检', '药品', '挂号', '治疗', '住院', '器械', '牙齿', '眼科', '眼镜', '心理咨询', '疫苗', '医保'],
+    ['教育', '教育', '学习', '培训', '课程', '书籍', '教材', '文具', '杂志', '考试', '考证', '辅导', '留学', '学校', '学费', '技能', '兴趣', '早教', '托班', '幼儿园'],
+    ['通讯', '通讯', '通信', '话费', '手机费', '宽带', '网络', '流量', '电信', '移动', '联通'],
+    ['保险', '保险', '保险理财', '社保', '公积金', '商业保险', '保险理赔'],
+    ['运动', '运动', '运动健身', '健身', '瑜伽', '游泳', '球类', '跑步', '骑行', '滑雪', '登山', '露营', '潜水', '攀岩'],
+    ['宠物', '宠物', '宠物食品', '宠物医疗', '宠物用品', '宠物美容', '宠物寄养', '宠物训练'],
+    ['旅行', '旅行', '旅游', '酒店', '民宿', '青旅', '门票', '导游', '签证', '换汇', '退税', '伴手礼'],
+    ['家居', '家居', '家具', '家电', '装修', '建材', '五金', '灯具', '床品', '收纳', '清洁', '厨具', '餐具', '软装', '硬装', '卫浴', '地板', '瓷砖', '油漆', '窗帘', '地毯', '壁纸', '绿植', '花卉'],
+    ['服饰', '服饰', '服装', '鞋帽', '箱包', '配饰', '首饰', '手表', '珠宝', '奢侈品', '潮牌'],
+    ['美妆', '美妆', '护肤', '化妆品', '彩妆', '香水', '美甲', '美发', '理发', '美容', 'SPA', '洗护', '洗衣', '干洗'],
+    ['数码', '数码', '电子', '手机', '电脑', '相机', '摄影', '软件', '域名', '带宽', '网站'],
+    ['云服务', '云服务', '云计算', '云服务器', '云存储'],
+    ['礼品', '礼品', '礼物', '鲜花', '蛋糕', '巧克力', '糖果', '玩具'],
+    ['人情', '人情', '红包', '社交', '请客', '烟酒', '酒水', '香烟', '烟草'],
+    ['投资', '投资', '理财', '股票', '基金', '期货', '外汇', '黄金', '数字货币', '债券', '分红', '利息', '租金'],
+    ['工资', '工资', '奖金', '收入', '津贴', '补贴', '慰问', '报销', '退款', '佣金', '提成', '稿酬', '版税', '收款', '兼职', '副业'],
+    ['办公', '办公', '打印', '复印', '会议', '商务', '出差', '招待', '客户', '采购', '库存', '营销', '广告', '推广'],
+    ['快递', '快递', '物流', '运费', '仓储', '包装', '印刷'],
+    ['母婴', '母婴', '亲子', '奶粉', '尿布', '童装'],
+    ['慈善', '慈善', '公益', '捐赠', '众筹', '打赏', '小费', '志愿者'],
+  ];
+  for (const [canonical, ...aliases] of groups) {
+    map[canonical] = canonical; // 预设大类名自身映射到自身
+    for (const alias of aliases) { map[alias] = canonical; }
+  }
+  return map;
+})();
+
+function normalizedBillCategory(raw) {
+  const c = (((raw || '').toString()).trim());
+  if (!c) return '其他';
+  return BILL_CATEGORY_MAP[c] || '其他';
+}
+
 async function create_bill(args = {}) {
   const merchant = normalizeCommandVerb((args.merchant || '').toString().trim());
   const amountRaw = Number(args.amount);
@@ -263,7 +310,7 @@ async function create_bill(args = {}) {
     const payload = Object.assign({}, ex, {
       merchant: merchant || ex.merchant,
       amount: (typeof args.amount === 'number' && amountRaw > 0) ? round2(amountRaw) : ex.amount,
-      category: (args.category || '').toString().trim() || ex.category || '其他',
+      category: (args.category ? normalizedBillCategory(args.category) : (ex.category || '其他')),
       isIncome: typeof args.isIncome === 'boolean' ? args.isIncome : ex.isIncome,
       time: typeof args.time === 'number' ? args.time : ex.time,
       note: typeof args.note === 'string' ? args.note : ex.note,
@@ -282,7 +329,7 @@ async function create_bill(args = {}) {
   const payload = {
     merchant,
     amount: round2(amountRaw),
-    category: (args.category || '').toString().trim() || '其他',
+    category: normalizedBillCategory(args.category),
     isIncome: !!args.isIncome,
     time: typeof args.time === 'number' ? args.time : nowSec,
     note: (args.note || '').toString(),
@@ -548,7 +595,7 @@ async function set_merchant(args = {}) {
   const base = existing ? existing.payload : {};
   const payload = Object.assign({}, base, {
     merchant,
-    category: (args.category || '').toString().trim() || base.category || '其他',
+    category: (args.category ? normalizedBillCategory(args.category) : (base.category || '其他')),
     isIncome: typeof args.isIncome === 'boolean' ? !!args.isIncome : (base.isIncome || false),
     hitCount: base.hitCount || 0,
     lastSeen: nowSec,
@@ -927,7 +974,7 @@ async function create_recurring(args = {}) {
   const payload = {
     merchant,
     amount,
-    category: (args.category || '').toString().trim() || '其他',
+    category: normalizedBillCategory(args.category),
     note: (args.note || '').toString().trim(),
     isIncome: !!args.isIncome,
     dayOfMonth: Math.min(Math.max(parseInt(args.dayOfMonth, 10) || 1, 1), 28),

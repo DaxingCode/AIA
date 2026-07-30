@@ -701,6 +701,8 @@ struct AddFoodManualView: View {
             in: context
         )
 
-        dismiss()
+        // 🐛 iOS 17+ fullScreenCover + context.save() + dismiss() 同帧死锁：
+        // @Query foods 重新发布与 cover 关闭动画争主线程布局周期 → UI 完全卡死。推迟 dismiss 一帧。
+        DispatchQueue.main.async { dismiss() }
     }
 }

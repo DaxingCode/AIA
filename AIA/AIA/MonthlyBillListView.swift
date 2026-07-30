@@ -6,8 +6,10 @@ import SwiftData
 struct MonthlyBillListView: View {
     let year: Int
     let month: Int
-    let bills: [Bill]
     @Environment(\.modelContext) private var context
+    /// 2026-07-29：改为 @Query 自动按 year/month 过滤 + 过滤 syncDeleted，
+    /// 让 NavigationRouter 路由推送（不带 bills 参数）也能拿到本月账单；以前靠外部传 bills，路由化后无法附带。
+    @Query private var monthBills: [Bill]
     /// 点击账单行 → 直接弹出「编辑账单」sheet（与主账单页 / 食物 / 待办 列表点击行为统一）
     @State private var editBill: Bill? = nil
 
@@ -16,12 +18,30 @@ struct MonthlyBillListView: View {
     @State private var selectedIDs = Set<PersistentIdentifier>()
     @State private var showDeleteConfirm = false
 
+    init(year: Int, month: Int, bills: [Bill] = []) {
+        self.year = year
+        self.month = month
+        // 计算本月时间窗，注入 @Query filter
+        let cal = Calendar.current
+        var comps = DateComponents()
+        comps.year = year
+        comps.month = month
+        let start = cal.date(from: comps) ?? .distantPast
+        let end = cal.date(byAdding: .month, value: 1, to: start) ?? .distantFuture
+        _monthBills = Query(
+            filter: #Predicate<Bill> { $0.time >= start && $0.time < end && !$0.syncDeleted },
+            sort: \Bill.time,
+            order: .reverse
+        )
+        // bills 入参保留以兼容旧调用，但实际数据走 @Query（自动响应 syncDeleted 等变更）
+    }
+
     private var monthTitle: String {
         "\(String(year))年\(month)月"
     }
 
     private var sortedBills: [Bill] {
-        bills.sorted { $0.time > $1.time }
+        monthBills
     }
 
     private var totalIncome: Double {

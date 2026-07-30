@@ -107,8 +107,8 @@ struct SettingsView: View {
 
     // MARK: - 我的账号入口（聚合昵称 + 账号信息 + 退出登录）
     private var myAccountEntry: some View {
-        NavigationLink {
-            MyAccountView()
+        Button {
+            NavigationRouter.shared.navigate(.myAccount)
         } label: {
             HStack(spacing: 14) {
                 ZStack {
@@ -254,8 +254,8 @@ struct SettingsView: View {
 
     // MARK: - 首页布局（模块排序 / 显示隐藏）
     private var homeLayoutEntry: some View {
-        NavigationLink {
-            HomeLayoutSettingsView()
+        Button {
+            NavigationRouter.shared.navigate(.homeLayoutSettings)
         } label: {
             HStack {
                 Label("首页布局", systemImage: "square.grid.2x2")
@@ -326,8 +326,8 @@ struct SettingsView: View {
 
     // MARK: - 自动同步设置
     private var autoSyncSettingsCard: some View {
-        NavigationLink {
-            AutoSyncSettingsView()
+        Button {
+            NavigationRouter.shared.navigate(.autoSyncSettings)
         } label: {
             HStack {
                 Label("自动同步设置", systemImage: "arrow.triangle.2.circlepath")
@@ -389,8 +389,8 @@ struct SettingsView: View {
     // MARK: - 图片自动识别（按类别 自动保存 / 自动弹出）
     private var imageAutoRecogCard: some View {
         VStack(spacing: 0) {
-            NavigationLink {
-                ImageAutoRecogSettingsView()
+            Button {
+                NavigationRouter.shared.navigate(.imageAutoRecogSettings)
             } label: {
                 HStack {
                     Label("图片自动识别", systemImage: "photo.badge.checkmark")
@@ -417,8 +417,8 @@ struct SettingsView: View {
     // MARK: - 待办提醒
     private var reminderCard: some View {
         VStack(spacing: 0) {
-            NavigationLink {
-                DefaultReminderSettingsView()
+            Button {
+                NavigationRouter.shared.navigate(.defaultReminderSettings)
             } label: {
                 HStack {
                     Label("默认提醒时间", systemImage: "bell.badge")
@@ -481,8 +481,8 @@ struct SettingsView: View {
     // MARK: - 关于
     private var aboutCard: some View {
         VStack(spacing: 0) {
-            NavigationLink {
-                RecognitionRecordsView()
+            Button {
+                NavigationRouter.shared.navigate(.recognitionRecords)
             } label: {
                 HStack {
                     Label("识别记录", systemImage: "doc.text.magnifyingglass")

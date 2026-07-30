@@ -10,6 +10,7 @@ struct MyAccountView: View {
     @EnvironmentObject private var auth: AuthManager
 
     @AppStorage("userNickname") private var userNickname = "阿宝的朋友"
+    @State private var showLinkSheet = false
 
     var body: some View {
         ScrollView {
@@ -17,10 +18,15 @@ struct MyAccountView: View {
                 profileHeader
                 nicknameEditCard
                 accountInfoCard
+                accountLinkCard
                 logoutCard
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+        }
+        .sheet(isPresented: $showLinkSheet) {
+            AccountLinkView()
+                .environmentObject(auth)
         }
         .scrollDismissesKeyboard(.immediately)
         .onTapGesture { hideKeyboard() }
@@ -28,10 +34,11 @@ struct MyAccountView: View {
         .navigationTitle("我的账号")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: userNickname) { _, _ in
-            // 记录修改时间并触发增量同步：昵称随后经 aia_records(type:"profile") 上云，
-            // 下次登录 pull 会自动回写。未登录时不推送（CloudSyncManager 内部已守卫）。
+            // 记录修改时间并触发增量同步。昵称同时经 backupIdentityProfile 冗余备份到「登录账号分区」
+            // （与小程序绑定码合并为同一 profile 记录），重装后重登同一账号即自动回写，避免分区错位丢失。
             UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "userNicknameUpdatedAt")
             CloudSyncManager.shared.syncAfterLocalChange(context: modelContext)
+            CloudSyncManager.backupIdentityProfile()
         }
     }
 
@@ -141,6 +148,39 @@ struct MyAccountView: View {
                         .foregroundStyle(.primary)
                 }
             }
+        }
+        .padding(14)
+        .card()
+    }
+
+    // MARK: - 账号关联
+    private var accountLinkCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "link")
+                    .font(AIATheme.Font.callout.weight(.medium))
+                    .foregroundStyle(AIATheme.blue)
+                Text("账号关联")
+                    .font(AIATheme.Font.subhead.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            Text("把手机号、Apple 账号等其他登录方式关联到当前账号，合并各自云端数据；之后用任意一种已关联方式登录，都能看到全部记录。")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+                .lineSpacing(2)
+            Button {
+                showLinkSheet = true
+            } label: {
+                Text("管理账号关联")
+                    .font(AIATheme.Font.callout.weight(.medium))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(AIATheme.blue)
+                    .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+            }
+            .buttonStyle(.plain)
         }
         .padding(14)
         .card()

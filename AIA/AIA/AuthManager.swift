@@ -34,6 +34,21 @@ final class AuthManager: ObservableObject {
         if let phone { KeychainHelper.set(phone, for: KeychainHelper.kPhone) }
         if let name, !name.isEmpty { KeychainHelper.set(name, for: KeychainHelper.kName) }
         AppDelegate.switchToMainInterface()
+        // 登录后立即全量同步：把登录前本地已录入（此前因 syncAfterLocalChange 的 isLoggedIn
+        // 守卫从未上云）的数据回推上去，并拉回云端已有数据。否则这些数据只留本地，
+        // 删除 App 重装后 restoreFromKeychain 拉回的是云端那份（本就为空）→ 主页空白。
+        if let ctx = AppDelegate.sharedMainContext {
+            Task { @MainActor in
+                // Phase 2 账号关联：若该身份已关联到某主账号，统一落到主账号分区再同步。
+                // 离线/出错时 resolvePrimary 回落原始 userId，不影响既有登录体验。
+                let effective = await CloudSyncManager.resolvePrimary(userId)
+                if effective != userId {
+                    self.userId = effective
+                    KeychainHelper.set(effective, for: KeychainHelper.kUserId)
+                }
+                CloudSyncManager.shared.syncAfterLogin(context: ctx)
+            }
+        }
     }
 
     func logout() {

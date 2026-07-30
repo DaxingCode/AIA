@@ -82,6 +82,7 @@ struct WeightTrendView: View {
                             .foregroundStyle(AIATheme.health)
                     }
                     .frame(height: 120)
+                    .chartYScale(domain: safeYDomain(recent7.map(\.value)))
                     .chartYAxis(.hidden).chartXAxis(.hidden)
                     // 曲线进入：透明度 + 轻微缩放淡入。iOS 26 下 Swift Charts 路径描边动画不可靠，
                     // 用淡入替代真·描边生长，稳定且观感一致；「减弱动态效果」下直接显示。

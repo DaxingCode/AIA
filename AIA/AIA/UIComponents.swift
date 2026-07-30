@@ -7,6 +7,28 @@ import SwiftData
 import UIKit
 import Combine
 
+/// 把进度值（可能为 NaN/Infinity/负数，例如除零 0/0、退款导致负数占比）钳成 [0,1] 的安全 CGFloat。
+/// 注意：Swift 的 min/max 对 NaN 会**原样返回 NaN**；负数会直接变成负宽度。
+/// 两者进 `.frame(width:)` 都会触发 "Invalid frame dimension (negative or non-finite)" 运行时崩溃。
+/// 一切进度环 / 进度条 / 占比条的 width 都走这里，确保任何非有限值或负值都回退为 0。
+func safeFraction(_ v: Double) -> CGFloat {
+    guard v.isFinite else { return 0 }
+    return CGFloat(min(max(v, 0), 1))
+}
+
+/// 为 Swift Charts 生成安全的 Y 轴域，避免数据点全相等 / 全为 0 时内部比例除零，
+/// 触发 "Invalid frame dimension (negative or non-finite)" 运行时告警。
+func safeYDomain(_ values: [Double], fallback: ClosedRange<Double> = 0...100) -> ClosedRange<Double> {
+    let finite = values.filter { $0.isFinite }
+    guard let maxV = finite.max(), let minV = finite.min() else { return fallback }
+    if maxV == minV {
+        let pad = max(1, abs(maxV) * 0.05)
+        return (minV - pad)...(maxV + pad)
+    }
+    let pad = (maxV - minV) * 0.12
+    return (minV - pad)...(maxV + pad)
+}
+
 // MARK: - 自适应颜色（跟随系统浅/深）
 extension UIColor {
     convenience init(hex: UInt64) {
@@ -169,6 +191,8 @@ enum AIATheme {
         static let draw     = Animation.easeOut(duration: 0.8)
         /// 进度条 / 数值增长
         static let progress = Animation.easeOut(duration: 0.6)
+        /// 进度条填充淡出（热启动专用）：颜色褪去而非宽度收缩，避免「变短」观感。
+        static let progressFade = Animation.easeOut(duration: 0.16)
     }
 }
 
@@ -308,15 +332,28 @@ struct RingView: View {
         ZStack {
             Circle().stroke(AIATheme.track, lineWidth: lineWidth)
             Circle()
-                .trim(from: 0, to: CGFloat(min(max(drawn, 0), 1)))
+                .trim(from: 0, to: safeFraction(drawn))
                 .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
             VStack(spacing: 2) {
-                Text(value).font(AIATheme.Font.body.weight(.medium))
+                // 2026-07-30：圆环内文字在窄直径（74px）下，"目标 10000" 这类长串会被推到第二行。
+                // 统一单行 + 自动缩字号兜底：保证圆环内数字/副行一行显示，绝不换行。
+                Text(value)
+                    .font(AIATheme.Font.body.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                 if let secondary {
-                    Text(secondary).font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
+                    Text(secondary)
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.sub)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                 }
-                Text(caption).font(AIATheme.Font.micro).foregroundStyle(AIATheme.muted)
+                Text(caption)
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
         }
         .frame(width: size, height: size)
@@ -389,7 +426,7 @@ struct MacroCard: View {
                 Capsule().fill(AIATheme.track)
                     .overlay(alignment: .leading) {
                         Capsule().fill(color)
-                            .frame(width: geo.size.width * CGFloat(min(max(drawn, 0), 1)), height: 4)
+                            .frame(width: geo.size.width * safeFraction(drawn), height: 4)
                     }
             }
             .frame(height: 4)
@@ -413,19 +450,59 @@ struct MiniBar: View {
     var value: Double = 0           // 0..1
     var color: Color = AIATheme.green
     var height: CGFloat = 8
+    /// 2026-07-30 动画触发令牌（方案 C）：统一覆盖「返回首页 + 热启动（后台回前台）」两种场景。
+    /// 外部每次进入首页 / App 回前台递增此值，MiniBar 监听后走 replayMini()：
+    /// 先让填充淡出（宽度保持 value 不变 → 只觉颜色褪去、不觉得变短），
+    /// 由动画 completion 回调在淡出结束后归零并淡入生长——无 Task.sleep 竞态，
+    /// 快速连续触发只让最新一代（replayGen）落位。
+    /// 其他场景（饮食记录/账单分类等普通页面）不传，保持默认 0，行为不变。
+    var resetToken: Int = 0
     @State private var drawn: Double = 0   // 进度条生长动画的当前进度（0→value）
+    @State private var fillOpacity: Double = 1   // 重播路径：先让颜色褪去（宽度不变）
+    @State private var replayGen: Int = 0        // 重播世代：快速连续触发只让最新一代落位
 
     var body: some View {
         GeometryReader { geo in
             RoundedRectangle(cornerRadius: height / 2).fill(AIATheme.fillSoft)
                 .overlay(alignment: .leading) {
                     RoundedRectangle(cornerRadius: height / 2).fill(color)
-                        .frame(width: geo.size.width * CGFloat(min(max(drawn, 0), 1)), height: height)
+                        .frame(width: geo.size.width * safeFraction(drawn), height: height)
+                        .opacity(fillOpacity)
                 }
         }
         .frame(height: height)
-        .onAppear { animateMini() }
+        .onAppear {
+            // 2026-07-30 修复：首页宫格卡片有入场动画（animateTiles 延迟 16ms 才淡入），
+            // .onAppear 在卡片仍隐藏(opacity=0)时即触发，生长动画在幕后跑完，用户只见终点。
+            // 延迟 ~50ms 等卡片可见后再生长，确保「从左到右变长」动画可见。
+            Task {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                animateMini()
+            }
+        }
         .onChange(of: value) { _, _ in animateMini() }
+        .onChange(of: resetToken) { _, _ in replayMini() }   // 单令牌覆盖：返回首页 + 热启动
+    }
+
+    /// 2026-07-30（方案 C）：统一重播路径，覆盖「返回首页」与「热启动」两种场景。
+    /// 先让填充淡出（宽度保持 value 不变，只觉颜色褪去、不觉得变短），由动画 completion
+    /// 回调在淡出结束后归零并淡入生长——精确零竞态，无需 Task.sleep 去猜动画时长。
+    /// 「减弱动态效果」下退化为即时落位。
+    private func replayMini() {
+        let gen = replayGen + 1
+        replayGen = gen
+        guard !AIATheme.motionReduce else {
+            drawn = 0
+            withAnimation(AIATheme.Motion.progressFade) { fillOpacity = 1 }
+            animateMini()
+            return
+        }
+        withAnimation(AIATheme.Motion.progressFade) { fillOpacity = 0 } completion: {
+            guard replayGen == gen else { return }   // 已被更新的重播取代，跳过
+            drawn = 0
+            withAnimation(AIATheme.Motion.progressFade) { fillOpacity = 1 }
+            animateMini()
+        }
     }
 
     /// 进入 / 数据刷新时，进度条从左到右生长；「减弱动态效果」下直接落位。
@@ -441,7 +518,13 @@ struct StatCard: View {
     let caption: String
     var body: some View {
         VStack(spacing: 2) {
-            Text(value).font(AIATheme.Font.body.weight(.medium))
+            // 2026-07-30：身高 / 体重这类数字在 4 列窄卡片里"165.0cm"会被推到第二行只留个"m"。
+            // 单行 + 自动缩字号兜底：保证数字一行内显示，宁可变小也不换行。
+            Text(value)
+                .font(AIATheme.Font.body.weight(.medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .frame(maxWidth: .infinity)
             Text(caption).font(AIATheme.Font.micro).foregroundStyle(AIATheme.muted)
         }
         .frame(maxWidth: .infinity)
@@ -760,7 +843,7 @@ struct AIBottomBar: View {
             // 语音按钮（不再有独立圆背景，图标直接浮在胶囊玻璃底色上）
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                router.chatEntrySource = "voice"; router.path.append(.chatVoice)
+                router.chatEntrySource = "voice"; router.navigate(.chatVoice)
             } label: {
                 Image(systemName: "mic.fill")
                     .font(AIATheme.Font.title3.weight(.medium))
@@ -770,7 +853,7 @@ struct AIBottomBar: View {
             .buttonStyle(.plain)
 
             // 中间滚动文案区（浅灰填充的小胶囊，与外部大胶囊形成双层视觉层次）
-            Button { router.chatEntrySource = entrySource; router.path.append(.chat) } label: {
+            Button { router.chatEntrySource = entrySource; router.navigate(.chat) } label: {
                 HStack {
                     Spacer()
                     ZStack(alignment: .center) {

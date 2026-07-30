@@ -12,8 +12,8 @@ struct TodoToolsView: View {
             VStack(alignment: .leading, spacing: 10) {
                 SectionTitle(text: "提醒设置")
 
-                NavigationLink {
-                    DefaultReminderSettingsView()
+                Button {
+                    NavigationRouter.shared.navigate(.defaultReminderSettings)
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "bell.badge.fill")
@@ -40,7 +40,7 @@ struct TodoToolsView: View {
                 SectionTitle(text: "自动记待办")
 
                 Button {
-                    NavigationRouter.shared.path.append(HomeRoute.autoSetup)
+                    NavigationRouter.shared.navigate(HomeRoute.autoSetup)
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "wand.and.stars")

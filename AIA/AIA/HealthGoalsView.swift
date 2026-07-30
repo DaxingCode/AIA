@@ -56,6 +56,16 @@ struct HealthGoalsView: View {
         context.insert(HealthMetric(metric: "BMI", value: String(format: "%.1f", bmi), unit: "", date: now))
     }
 
+    /// 编辑任意健康目标字段后调用：打本地时间戳锚点并触发增量云同步（3s 防抖）。
+    /// 同时标脏 setting 通道，确保目标体重（weightGoalKg，走 setting 通道）一并上云。
+    /// 未登录时 syncAfterLocalChange 内部 guard 会跳过，但本地已存 @AppStorage，登录后全量同步会把它们推上去。
+    private func markProfileChanged() {
+        let now = Date().timeIntervalSince1970
+        UserDefaults.standard.set(now, forKey: "userProfileUpdatedAt")
+        UserDefaults.standard.set(now, forKey: "userSettingUpdatedAt")
+        CloudSyncManager.shared.syncAfterLocalChange(context: context)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -64,15 +74,20 @@ struct HealthGoalsView: View {
                     DoubleGoalRow(title: "当前身高", unit: "cm", sub: "用于计算 BMI / 基础代谢",
                                   range: 100...230, value: $heightCm,
                                   onCommit: recordBodyData)
+                        .onChange(of: heightCm) { _, _ in markProfileChanged() }
                     DoubleGoalRow(title: "当前体重", unit: "kg", sub: "当前体重",
                                   range: 30...250, value: $weightKg,
                                   onCommit: recordBodyData)
+                        .onChange(of: weightKg) { _, _ in markProfileChanged() }
                     IntGoalRow(title: "年龄", unit: "岁", sub: "用于计算基础代谢",
                                range: 10...120, value: $age)
+                        .onChange(of: age) { _, _ in markProfileChanged() }
                     SegmentRow(title: "性别", sub: "用于计算基础代谢",
                                options: [(1, "男"), (0, "女")], selection: $bioSex)
+                        .onChange(of: bioSex) { _, _ in markProfileChanged() }
                     SegmentRow(title: "活动水平", sub: "每周运动频率",
                                options: activityLevelOptions, selection: $activityLevel)
+                        .onChange(of: activityLevel) { _, _ in markProfileChanged() }
                     if let b = bmi {
                         HStack {
                             Text("BMI").font(AIATheme.Font.footnote.weight(.medium))
@@ -107,8 +122,10 @@ struct HealthGoalsView: View {
                     SectionTitle(text: "目标身材")
                     DoubleGoalRow(title: "目标身高", unit: "cm", sub: "理想身高",
                                   range: 100...230, value: $targetHeightCm)
+                        .onChange(of: targetHeightCm) { _, _ in markProfileChanged() }
                     DoubleGoalRow(title: "目标体重", unit: "kg", sub: "理想体重（与体重趋势页共用）",
                                   range: 30...250, value: $weightGoalKg)
+                        .onChange(of: weightGoalKg) { _, _ in markProfileChanged() }
                     if weightKg > 0, weightGoalKg > 0 {
                         let diff = weightGoalKg - weightKg
                         HStack {
@@ -124,12 +141,15 @@ struct HealthGoalsView: View {
                     SectionTitle(text: "每日目标")
                     IntGoalRow(title: "步数目标", unit: "步", sub: "每日步行目标",
                                range: 2000...30000, value: $stepGoal)
+                        .onChange(of: stepGoal) { _, _ in markProfileChanged() }
                     DoubleGoalRow(title: "睡眠目标", unit: "小时", sub: "每日睡眠时长",
                                   range: 4...12, value: $sleepGoalHours)
+                        .onChange(of: sleepGoalHours) { _, _ in markProfileChanged() }
                     DoubleGoalRow(title: "运动时长目标", unit: "分钟", sub: "每日运动时长",
                                   range: 5...240, value: $exerciseGoalMin)
+                        .onChange(of: exerciseGoalMin) { _, _ in markProfileChanged() }
 
-                    Text("目标仅保存在本机，用于个性化健康圆环与达标提示，不会上传云端。")
+                    Text("已同步到云端，换设备登录同一账号（手机号 / 苹果）即可自动恢复。")
                         .font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
                         .padding(.horizontal, 4)
                 }

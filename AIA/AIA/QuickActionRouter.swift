@@ -43,6 +43,56 @@ final class NavigationRouter: ObservableObject {
         } else {
             self.chatEntrySource = "home"
         }
-        self.path.append(.chat)
+        self.navigate(.chat)
+    }
+
+    // MARK: - 帧合并导航
+    /// 修复 "Update NavigationRequestObserver tried to update multiple times per frame"。
+    /// 根因：多个入口（四宫格 Button、底部栏、滚动气泡 .onTapGesture、autoSetup、快捷操作）以及
+    /// 各页面的 pop（如 AutoRecognitionSetupView 的「完成」）都在主线程改写 `path`，
+    /// 若同一渲染帧内发生两次 path 变更（例如某次异步 flush 与一次同步 removeLast 并发），
+    /// SwiftUI 的 _NavigationRequestObserver 会在同一帧被更新两次而断言失败。
+    /// 这里把同帧内的所有跳转 / pop 请求合并为「仅最后一次」，在下一个 runloop turn 用一次 path
+    /// 变更统一提交，保证任何情况下每帧至多一次 path 改写。
+    private enum NavOp {
+        case push(HomeRoute)
+        case replace(HomeRoute)
+        case pop
+    }
+    private var pendingOp: NavOp?
+    private var flushScheduled = false
+
+    /// 追加式跳转（首页四宫格、底部栏、气泡、autoSetup 等常用）。
+    func navigate(_ route: HomeRoute) {
+        enqueue(.push(route))
+    }
+
+    /// 替换式跳转（冷启动快捷操作 / 通知：需把整条 path 重置为目标路由）。
+    func replaceWith(_ route: HomeRoute) {
+        enqueue(.replace(route))
+    }
+
+    /// 出栈一次（AutoRecognitionSetupView「完成」等，替代直接 router.path.removeLast()）。
+    func pop() {
+        enqueue(.pop)
+    }
+
+    /// 同帧内无论 navigate / replaceWith / pop 调用多少次，只排一个主线程 flush，
+    /// 下一 turn 统一提交一次 path 变更，从机制上杜绝同帧多次 update。
+    private func enqueue(_ op: NavOp) {
+        pendingOp = op
+        guard !flushScheduled else { return }
+        flushScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.flushScheduled = false
+            guard let op = self.pendingOp else { return }
+            self.pendingOp = nil
+            switch op {
+            case .push(let r):    if self.path.last != r { self.path.append(r) }
+            case .replace(let r): self.path = [r]
+            case .pop:            if !self.path.isEmpty { self.path.removeLast() }
+            }
+        }
     }
 }

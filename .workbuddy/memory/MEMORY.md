@@ -1,57 +1,43 @@
 # AI 助理原生 App · 长期记忆
 
-## 定位/技术栈
-原生 iOS App（饮食/健康/账单/待办），核心差异化=截屏无感识别。纯 Swift+SwiftUI+SwiftData(iOS17+)。截图无感=快捷指令+App Intents(`ProcessScreenshotIntent`)，兜底分享扩展。视觉模型主力商汤sensenova，API Key 走 CloudBase 云函数代理，不硬编码前端。
+## 技术栈/环境
+纯 Swift+SwiftUI+SwiftData(iOS17+)。Xcode `/Volumes/MacBook/Applications/Xcode.app`（非默认）。build：`/Volumes/MacBook/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project AIA/AIA.xcodeproj -scheme AIA -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build CODE_SIGNING_ALLOWED=NO`。部署目标 iOS 26.5 / Xcode 26.6；`SWIFT_DEFAULT_ACTOR_ISOLATION=MainActor`，新代码默认 MainActor。Toolbar 用 `.topBarLeading`/`.topBarTrailing`（`cancellation`/`confirmation` 已移除）。工程用 `PBXFileSystemSynchronizedRootGroup` → `AIA/AIA/` 下新建 .swift 自动进编译，无需改 pbxproj。
 
-## 环境/工具链
-- Xcode：`/Volumes/MacBook/Applications/Xcode.app`（非默认）。`xcodebuild` 用绝对路径：`/Volumes/MacBook/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project AIA/AIA.xcodeproj -scheme AIA -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build CODE_SIGNING_ALLOWED=NO`。
-- 沙箱内可正常构建验证（含 @Model/@Query 宏，2026-07-25 实测 SUCCEEDED），无需真机/解除沙箱。
-
-## 关键工程约定
-- Schema 闸门：@Model 变更必须 `AIAApp.schemaVersion`+1，集中责任人管，禁多对话各自+1（否则旧 store 白屏）。
-- App Intents 短语须含 `\(.applicationName)` token。
-- 聊天分流：含饮食词不含账单词→先 food；兜底仅当用户含「记一下/添加」等创建动词才入库。
-- 绝不静默入库：图片→识别→JSON→确认页→用户改后入库；原图仅本地，`imageName` 不上传。
+## 关键约定
+- Schema 闸门：@Model 变更 `AIAApp.schemaVersion`+1，集中管，禁多对话各自+1。
+- 绝不静默入库：图片→识别→JSON→确认页→用户改后入库；原图仅本地不上传。
+- 并行协作：动手前读 `多团队协作分工表.md` §3/§4；§3 高危=Models/AppPersistence/AIAMigrationPlan/AIATheme/UIComponents/RecognizeService。空闲先占 §4，commit 后清除。
+- 用户：微信小程序开发者，无 Swift 经验，无 Apple 付费账号。
 
 ## SwiftData 铁律
-- 不主动 `context.save()`（autosave）；不用 `withAnimation` 包模型变更。
-- 副作用延后 `DispatchQueue.main.async`/`Task{@MainActor}`。
-- 详情页删/完成：先 `dismiss()`，`.onDisappear` 延迟 600ms 再执行。
-- 延迟闭包禁直接捕获 SwiftData 对象→只存 `persistentModelID`，执行时 `context.model(for:)` 取活对象（`SafeDelete` 已提供）。
-- 非 NavigationLink 的列表 cell 直接 `withAnimation{context.delete(obj)}` 硬删。
+不主动 save（autosave）；不用 withAnimation 包模型变更；副作用延后 main.async/Task@MainActor；详情页删/完成先 dismiss 再 .onDisappear 延迟 600ms；延迟闭包只存 persistentModelID 现场取活对象；非 NavigationLink cell 直接 withAnimation{delete}。
 
-## SwiftUI 铁律（崩溃/编译坑）
-- 单 `NavigationStack(path: $router.path)+.navigationDestination(for:HomeRoute.self)` 全 App 通用。从首页列表进详情必须 value-based（`ValueSelectableCard(value: HomeRoute.xxx(记录))` + HomeRoute 加 case）；严禁 `SelectableCard(destination:)` 闭包式嵌根层（AnyNavigationPath try! comparisonTypeMismatch 死锁白屏）。闭包 destination 仅限 .sheet 内。
-- view 若会被 navigationDestination 推入父级 NavigationStack，自身**绝不能**包 NavigationStack；双调用点（push+sheet）必须拆 `XxxSheet` wrapper。历史崩过的 view（EditTodoView）即使只剩 sheet 调用也永留 wrapper。
-- Swift struct 带默认属性（如 `let isAdding: Bool = false`）必须显式写 init，否则调用方报 extra argument。
-- 加 toolbar+多 sheet+多层 ZStack 报 type-check timeout → 拆 `@ViewBuilder private func` helper，body 只调 helper。
-- **`ScrollViewReader` 包裹大 body 同样会触发 type-check timeout**（如饮食记录页把整段 `if/else` 食物列表留在 body + Reader 包裹 → `unable to type-check this expression in reasonable time`）。把条件分支区抽成 `@ViewBuilder private var xxx: some View`（必须标 `@ViewBuilder`，否则 `if/else` 两分支类型不一致报 `branches have mismatching types`；`@ViewBuilder` 走 `buildEither` 统一为 `_ConditionalContent`，同原内联在 `body` 效果），body 内只调 `xxx.id("anchor")` 供 `proxy.scrollTo` 用。
-- push 一致性：全编程式 `path.append` 或全闭包 `NavigationLink`，混用会绕过中间页。
-- Button 不能嵌 NavigationLink.label；行内多交互用 ZStack 分层。禁 `ForEach(0..<n)+数组[i]` 遍历 @Query 派生数组→`ForEach(Array(x.enumerated()),id:\.offset)`。
-- **监听 SegmentedPicker/Picker/Stepper/Toggle 等用户控件的 Binding 写入做副作用时，别用 `.onChange(of: state)`**——首次渲染/状态恢复存在边界误触发（即使 iOS 17+ 文档说 default `initial:false`）。**正确做法：自定义 `Binding(get:set:)`**——getter 直返 `@State`，setter 同步写状态 + 副作用（SegmentedPicker 的 `selection = opt.value` 只在 Button 内被调，首次渲染只读不写，零误触发）。
-- **跨日期共享 UI（日期选择器下的卡片）写入层用 `selectedDate`，禁 `Date()` 替代**（2026-07-26 踩坑）：统计查询天然按 `selectedDate` 过滤（已落库的历史数据各自归属日期），写入只要落到 `selectedDate` 即可与统计对齐；用 `Date()` 会让"选历史日期点 tap"产生错觉——数据进了今天但 UI 显示的是昨天（不增加）→ 用户体感"按了没反应"。**卡片视觉/可点性也应跟统计对齐**，不要单独加 `disabled/opacity(isToday)` 之类的"只今天"门控，除非业务上确实禁止补录。饮食记录页饮水卡（`addWaterTap` + `WaterFlipCard.disabled(!isToday)`）是反例标准修复场景。
-- **大段删除前先数清闭合链再删**（2026-07-26 踩坑）：删 `LazyVStack` 内一张卡片末尾的 `.padding(12).card(...)` 时，**`.padding/.card` 修饰后面就是 `LazyVStack` 的 `}`**——一并删掉 → `ScrollViewReader/ScrollView/LazyVStack` 三层闭合错位，后续 `AIBottomBar/.background/.navigationTitle` 全部被推到 ScrollView 外，编译报 `extraneous '}' at top level`。**安全流程**：① 删前 `Grep` 父级 `ScrollViewReader / ScrollView / LazyVStack / switch` 起点行号；② 数 `}` 数 → 确认要删的边界；③ 删完先跑 `xcodebuild` 再 commit；④ 出错撤销用 `git checkout -- <file>` 精准还原单文件（不要 `git checkout .`，会清掉其他并行对话的未提交改动）。
+## SwiftUI 铁律
+- 单 NavigationStack(path:)+.navigationDestination(for:HomeRoute.self)；进详情用 value-based `ValueSelectableCard(value:)`；闭包 destination 仅限 .sheet。被 push 的 view 自身绝不包 NavigationStack（双调用点拆 XxxSheet）。
+- 禁 `ForEach(0..<n)+数组[i]` 及**含重复元素数组用 `id:\.self`**（日历 `[Date?]` 月首月尾 nil 重复 id→diff 错乱、月末选中不重绘）→ 一律 `ForEach(Array(enumerated()),id:\.offset)`。
+- SegmentedPicker/Picker/Stepper/Toggle 写 Binding 做副作用**别用 `.onChange`**（首次渲染误触发）→ 用自定义 `Binding(get:set:)`，setter 里写状态+副作用。
+- 跨日期共享 UI 写入用 `selectedDate` 禁 `Date()`；视觉/可点性跟统计对齐，勿加「只今天」门控。
+- 大段删除前先 Grep 父级 ScrollViewReader/ScrollView/LazyVStack 起点、数 `}` 边界，删完先 build 再 commit；出错 `git checkout -- <file>` 精准还原（勿 `git checkout .`）。
+- toolbar+多 sheet+多层 ZStack 或 ScrollViewReader 包大 body 报 type-check timeout → 条件分支抽 `@ViewBuilder private var xxx: some View`，body 只调 helper。
+- ScrollView 动态列表用 LazyVStack（VStack 结构变化会复位滚动到顶）；`scrollTo` 贴顶不足时 content 末尾加 `Color.clear.frame(minHeight:1000)` 撑高。
+- PhotosPicker 必须配 `.onChange(of: picker)` 消费选中项并保存；`UIImage` 非 Transferable，用 `loadTransferable(type: Data.self)` 再 `UIImage(data:)`。
+- `ScrollView` 上的 `.onTapGesture` 会与子视图按钮点击手势竞争、吞掉按钮点击——收起键盘用 `.scrollDismissesKeyboard` 即可，勿再叠 `.onTapGesture { hideKeyboard() }`（2026-07-29 踩坑：设置页『恢复默认』按钮因此始终点不动）。
+- **iOS 26.5 / Xcode 26.6 + `SWIFT_DEFAULT_ACTOR_ISOLATION=MainActor` 环境下，自定义 `Button(action:) { }` 闭包可能不被派发**（控制台 action 内 print 不出现、UI 无响应），而 PhotosPicker/NavigationLink 等系统控件正常。兜底方案：改用 `Text/View + .onTapGesture { }`、`Menu` 或 `.contextMenu` 触发（2026-07-29 设置页『恢复默认』验证）。
+- **同环境下 `.task` 修饰符闭包同样可能不派发**（即便挂在永远存在的 Group 上，body 被求值却 task 闭包不跑，2026-07-29 广告位 `AdBannerView` 验证：只有 `[AdBannerView] body 被调用`、无 `[AdBannerView] task 触发`）。兜底：① 首拉/首屏副作用放 `ContentView.onAppear` 内用裸 `Task { }` 异步派发；② 周期任务用 `@State Timer.publish(...).autoconnect()` + `.onReceive(timer)`（`.onReceive` 已验证可靠）；③ 切页/出现定位用 `.onAppear`。勿把关键 fetch 挂 `.task`。
+- **进度条/进度环/占比条必走 `safeFraction`（2026-07-29 两次"Invalid frame dimension"坑）**：`RingView`(trim)/`MacroCard`(frame width)/`MiniBar`(frame width) 的占比一律用 `UIComponents.swift` 的**模块级** `func safeFraction(_:)`（非有限值/负数回退 0，即 `guard v.isFinite else {return 0}; return CGFloat(min(max(v,0),1))`）。**禁止**直接 `CGFloat(min(max(drawn,0),1))`——Swift 的 min/max 遇 NaN 原样返回 NaN、`geo.size.width * 负数` 得负宽度，二者进 `.frame()` 都会抛 `Invalid frame dimension (negative or non-finite)`。`safeFraction` 已改 `internal` 跨文件复用。两类根因：① 除零 `0/0=NaN`/`x/0=±inf`（`goal/monthlyBudget/calorieGoal/stepGoal/budget` 等分母为 0 时先判 `> 0` 守卫）；② **退款/负金额**使占比为负（`item.sum<0` → `geo.size.width * 负占比` 负宽度，如 `BillDashboardView.swift:380` 分类条）。任何 `geo.size.width * 占比` 的 width 一律走 `safeFraction`，负数退款钳 0（进度条不显示，合理），文本可保留负号如实展示。
+- **NavigationStack 的 `path` 改写必须走单帧合并（2026-07-29 导航观察者报错坑）**：全 App 程控跳转统一经 `NavigationRouter.navigate(_:)`（追加）/ `replaceWith(_:)`（替换，冷启动/通知），二者共用 `scheduleFlush()`——同帧多次调用只留最后一次、`DispatchQueue.main.async` 下一帧提交**一次** path 变更，从机制上杜绝 `Update NavigationRequestObserver tried to update multiple times per frame`。**禁止**在 `Button`/`.onTapGesture`/各页入口直接 `router.path.append(...)`/`path = [...]`（手势导航与同帧其它 push 并发会触发断言）。入口清单：`ContentView.swift`(格子/气泡/设置/我的账号/`jump`)、`UIComponents.swift`(底部栏)、`RecordsViews.swift`(autoSetup×3/billTools/todoTools)、`RecurringRuleViews/BillToolsView/TodoToolsView`(autoSetup)、`QuickActionRouter.navigateToChat`。
 
-## 图片识别链路（2026-07-22 单一入口）
-`recognizeWithLocalPriority`：①本地 OCR 仅判营养成分表+视觉失败兜底；②营养成分表→本地版面解析；③其它图片统一走视觉模型；④失败本地兜底，无则抛错绝不返 0 空账单。营养库匹配：精确→别名→子串(头名词靠后优先)→调料前缀护栏。
+## 图片识别链路
+`recognizeWithLocalPriority`：本地OCR(仅营养成分表+视觉失败兜底)→营养成分表本地版面解析→其它图走视觉模型(商汤sensenova，API Key 走 CloudBase 云函数代理不硬编码前端)→失败本地兜底，无则抛错绝不返 0 空账单。营养匹配：精确→别名→子串(头名词靠后优先)→调料前缀护栏。
 
 ## 云同步/CloudBase
-- pull 把 `_id` 映射 `id`；登录/重装先全量 pull 再 push。启动 60s 定时同步；改后 3s 防抖 `syncAfterLocalChange`。
-- 环境 `cloud1-d1ga55pizf294dbe9`；recognize 主目录 `云函数/recognize/`，脚本 `package-recognize.sh`，zip 随 FN_VERSION，gitignored，需手动部署。
+环境 `cloud1-d1ga55pizf294dbe9`。pull 把 `_id` 映射 `id`；启动 60s 定时同步；改后 3s 防抖。recognize 主目录 `云函数/recognize/`（需手动部署）。
 
-## UI/视觉约定
-- **深色模式强制适配（最高优先级）**：新建/修改任何 UI 必须同时验证浅色与深色两套配色，禁止只按浅色设计。具体：① 颜色一律走 `AIATheme` 自适应令牌（`food`/`dietBG`/`billBG`/`todoBG`/`healthBG`/`surface`/`hairline`/`sub` 等均已深浅双值），不要写死 hex；② 文字/图标**禁止用 `AIATheme.ink` 当前景色**——`ink` 深色值 `0x2c2c2e` 近黑，深色下会直接隐形，深色可读文字用 `Color.primary` 或 `AIATheme.sub`；③ 有色淡底在深色下要用 `dietBG`/`billBG`/`todoBG`/`healthBG` 这类自适应淡底，不要用 `food.opacity(0.08)` 等低透明度叠深色（深色下近乎不可见）；④ 改完在模拟器切深色模式肉眼核对一次再 commit。
-- 颜色走 `AIATheme` 令牌：food(琥珀)/health(紫)/bill(绿)/todo(蓝)/expense(红)/warning(琥珀)。动效走 `AIATheme.Motion`+`PressableCardStyle`，禁散写 `Animation.xxx`。
-- 空态垂直居中；底部栏 `AIBottomBar` 箭头由 `iconOrder` 推导。
-- 账单行间 hairline 3 处（groupedByDate/billCalendarView/MonthlyBillListView）必一起改：`ForEach(enumerated)`+`Rectangle().fill(AIATheme.hairline).frame(height:0.7).padding(.leading,62)`。
-- 深色 hairline 标准 dark `0x636366` + 宽度≥0.7pt（light `0xe6e9ec` 不动）。按字段分组列表相邻组间插 hairline 0.7pt。
-- **hairline vs iconInactive 分工（2026-07-26 踩坑）**：`AIATheme.hairline` light `0xe6e9ec` vs `fillSoft` light `0xeef1f4` 色差仅 ~6 级，**作"容器边框/控件分隔"在浅色下几乎不可见**。「**全行/全段分隔细线**」用 hairline（克制、深色对）；「**需可见但克制的容器描边/控件分隔**」（如 SegmentedPicker 外层描边 + 页签间分隔）改用 `AIATheme.iconInactive`（light `0xc9ced3`、dark `0x5a5a5e`，双模式色差都 ~38-46 级清晰）。
-- **HStack/VStack 内 Rectangle/Divider 控高/控宽必须用显式 `frame(width:height:)`**（2026-07-26 踩坑）：`Rectangle` 在父容器默认被拉满到「最高子项」尺寸，`.padding(.vertical/horizontal, ...)` 只缩**内部**内容、**不影响外部撑满**。要控高必须 `frame(width: 0.7, height: 18)` 这种显式指定。SegmentedPicker 竖线高度 ≈ 60% 容器高 = 18pt 是 iOS 标准克制比例。
-- **ScrollView 内动态列表用 LazyVStack 不用 VStack**（2026-07-26 踩坑）：`VStack` eager 渲染全部子项；content 结构变化时（如 `EmptyStateView` ↔ `ForEach` 互换、`@Query` 触发重排）SwiftUI 会**复位 scroll position 到 top**，用户体感「点 tab/chip 跳回顶部」。`LazyVStack` 只渲染可见项，content 尺寸变化时 scroll position 保持稳定。饮食记录页（FoodListView 主 ScrollView）是该铁律的标准应用场景。
-- **`scrollTo(anchor:)` 要让某锚点稳定贴顶，必须保证 content 总高足够**（2026-07-26 踩坑）：SwiftUI 的最大可滚偏移 = max(0, content总高 − 视口高)。若某餐次/某状态下内容过短（空态 `EmptyStateView` 在 `LazyVStack` 塌缩、条目少），content 总高 < 视口高 → 最大偏移被钳制到很小值 → `scrollTo(anchor:.top)` 贴不了顶，体感「这个 tab 没滚够」（早餐内容高正常、午餐/加餐内容短不足）。**根治：在 `LazyVStack`/content 末尾加 `Color.clear.frame(minHeight: N)`（N 取大于一屏余量的常值，本例 1000pt）占位**——`Color.clear` 不渲染、不占可见空间，仅撑高 content，使各状态锚点都能落到位。
-- 列表图标用语义色 SF Symbol 直显，避开 iOS 新版复杂 symbol（如 `sparkles.rectangle.portrait.fill` 渲染退化）。经典：`wand.and.stars`/`bell.badge.fill`/`viewfinder.circle`。
+## UI/深色模式（最高优先级）
+颜色走 `AIATheme` 自适应令牌（深色模式必须双套验证）。禁写死 hex；禁 `AIATheme.ink` 当前景色(深近黑隐形)→用 `Color.primary`/`AIATheme.sub`；有色淡底用 `dietBG/billBG/todoBG/healthBG` 自适应淡底，勿低透明度叠深色。hairline(深色 `0x636366`)用于全行分隔；容器描边/控件分隔用 `iconInactive`(light `0xc9ced3`/dark `0x5a5a5e`)。Rectangle/Divider 控高宽须显式 `frame`。列表图标用 `wand.and.stars`/`bell.badge.fill`/`viewfinder.circle` 等经典 SF Symbol。
 
-## 协作/用户/营养库
-- 多对话并行改同仓，协调中枢=`多团队协作分工表.md`：动手前读 §3/§4，占则停下，空闲先写 §4 再动手，commit 后清除。§3 高危：Models/AppPersistence/AIAMigrationPlan/AIATheme/UIComponents/RecognizeService。
-- 用户：微信小程序开发者，无 Swift 经验，无 Apple 付费账号。
-- 营养三级校正：① NutritionLibrary → ② FoodMetaStore → ③ 联网查落库；新增别名走 `aliases` 不塞 `rows`；`source==.local` 绝不被覆盖。
+## 三件套（2026-07-29）
+- 背景图 `AppBackground.swift`：`AppBackgroundStore` 单例存 Documents/app_background.jpg(压缩)+`aia.customBackground`+`aia.backgroundMask`(默认0.35)；`AppBackgroundView` 有图缩放填充+自适应遮罩，无图 systemGroupedBackground。仅首页/聊天页根 `.background`。图片只存本机。选择后由 `.onChange(of: bgPicker)` 调 `save` 并广播 `aiaBackgroundChanged` 刷新。
+- 广告位 `AdBanner.swift`：云端 `aia_ads`（逻辑并入 `aia-sync` /sync 路由，action: list/listAll/upsert/delete/reorder），`AdStore` 拉取+容错解码(`AdItemRaw`)+缓存+时间窗过滤，`AdBannerView` 放 syncHeaderIndicator 后/homeModules 前。轮播：`ScrollView(.horizontal)+scrollTargetBehavior(.paging)+scrollPosition(id:)` 单向从右往左循环(尾部克隆页无动画瞬移)，多广告 4s `@State Timer+.onReceive` 推进，空→EmptyView。首拉触发点：`ContentView.onAppear` 内 `Task{ AdStore.shared.fetchIfNeeded() }`（本环境 .task 不派发，勿挂 .task）。
+- 开发者入口 `DeveloperTools.swift`：`DeveloperGate` 口令 `Daxing@0329`+`aia.devModeUnlocked`；设置「版本」行长按1.2s解锁→开发者中心→`AdManagerView`(PhotosPicker 选图转 base64)。写操作 `云函数/ads/index.js` 校验 `DEV_PASSCODE`(环境变量优先)。云函数需手动部署(`package-ads.sh`)。
+- 全局配置 `GlobalConfigStore.swift`（2026-07-29）：智能问答开关/AI 模型**云端全局权威**——`aia_config` 集合固定文档 `global`，开发者中心切换后 `saveConfig`(带 `DeveloperGate.passcode`) 写云端，所有用户 `fetchConfig`(公开 getConfig) 自动跟随；本地 UserDefaults 仅缓存(键 `aia.agentEnabled`/`aia.modelProvider`/`aia.visionModelProvider`)。`ContentView.onAppear` 首拉 + 30s `Timer+.onReceive` 周期拉；`DeveloperCenterView`/`ChatView` 经 `@ObservedObject GlobalConfigStore.shared` 观察。`RecognizeService.textCurrent/visionCurrent` 读 UserDefaults 缓存即自动跟随。普通用户看不到开发者中心、无法改（入口受口令保护）。

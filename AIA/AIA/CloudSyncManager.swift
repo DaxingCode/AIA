@@ -33,7 +33,7 @@ final class CloudSyncManager: ObservableObject {
     /// 已登录时绑定到登录账号（aia.userId），实现「同账号登录 = 同一份云数据」；
     /// 未登录时回退到设备级随机账号（aia_sync_user_id），仅本机使用。
     /// 只访问 UserDefaults（线程安全）。
-    static var userId: String {
+    nonisolated static var userId: String {
         get {
             // 1) 已绑定小程序：直接用小程序共享码（"wx_<openid>"）作为同步分区键，
             //    使 App 与小程序落到 aia_records 的同一分区，实现数据互通。
@@ -82,6 +82,9 @@ final class CloudSyncManager: ObservableObject {
         guard Self.validateSharedCode(c) else { return false }
         UserDefaults.standard.set(c, forKey: "aia_bound_user_id")
         print("[sync] 绑定小程序 sharedCode=\(c)，重置 lastSyncAt 触发全量重同步")
+        // 把身份资料（昵称+绑定码）冗余备份到「登录账号分区」，供重装后重登同一账号时自动恢复
+        // （UserDefaults 会因删 App 被清除，但 Keychain 登录态可恢复，届时即可拉到该备份）。
+        Self.backupIdentityProfile()
         lastSyncAt = nil
         UserDefaults.standard.removeObject(forKey: "aia_last_sync")
         Task { @MainActor in
@@ -93,11 +96,47 @@ final class CloudSyncManager: ObservableObject {
     /// 解绑小程序：清掉 aia_bound_user_id，回到登录态/设备级账号分区，并触发全量重同步拉回原分区数据。
     func unbindMiniProgram(context: ModelContext) {
         UserDefaults.standard.removeObject(forKey: "aia_bound_user_id")
+        // 重新备份身份资料（绑定码清空）到登录分区 + 清除本地 pending，避免重装后误自动重绑。
+        Self.backupIdentityProfile()
+        UserDefaults.standard.removeObject(forKey: "aia_pending_mini_bind_code")
         print("[sync] 解绑小程序，重置 lastSyncAt 触发全量重同步")
         lastSyncAt = nil
         UserDefaults.standard.removeObject(forKey: "aia_last_sync")
         Task { @MainActor in
             await self.sync(context: context)
+        }
+    }
+
+    /// 把身份资料（昵称 + 小程序绑定码）冗余备份到「登录账号分区」的 profile 记录，
+    /// 供重装后重登同一账号自动恢复（UserDefaults 会因删 App 被清空，但 Keychain 登录态可恢复）。
+    /// 关键：必须用**登录账号** userId 写入（而非 Self.userId，否则绑小程序后备份会进小程序分区，
+    /// 重装重登前读不到）。昵称与绑定码合并进同一条 profile，避免分区分裂导致任意一项丢失。
+    /// 仅已登录时有意义（未登录无「跨重装稳定的分区」可存，跳过）。
+    static func backupIdentityProfile() {
+        guard UserDefaults.standard.bool(forKey: "aia.isLoggedIn"),
+              let loginId = UserDefaults.standard.string(forKey: "aia.userId"), !loginId.isEmpty else {
+            return
+        }
+        let nick = UserDefaults.standard.string(forKey: "userNickname") ?? ""
+        let bound = UserDefaults.standard.string(forKey: "aia_bound_user_id") ?? ""
+        let body: [String: Any] = [
+            "action": "push",
+            "userId": loginId,
+            "records": [[
+                "id": profileRecordId.uuidString,
+                "type": "profile",
+                "updatedAt": Date().timeIntervalSince1970,
+                "deleted": false,
+                "payload": ["nickname": nick, "miniBindCode": bound]
+            ]]
+        ]
+        Task {
+            do {
+                _ = try await postJSON(body)
+                print("[sync] 已备份身份资料（昵称+绑定码）到登录分区")
+            } catch {
+                print("[sync] 备份身份资料失败：\(error.localizedDescription)")
+            }
         }
     }
 
@@ -126,8 +165,21 @@ final class CloudSyncManager: ObservableObject {
     /// doc id 由当前同步账号(userId) 派生确定性 UUID，确保同一用户（App 绑定后与小程序同分区）落到同一条文档，
     /// 且不同用户互不冲突（避免全局固定 id 被 userId 冻结导致跨端 pull 不到）。
     /// 算法须与小程序 saveData/loadData 的 settingDocId（MD5 of "wx_"+openid+":setting"）保持一致。
-    private static func settingRecordId(for userId: String) -> UUID {
+    private nonisolated static func settingRecordId(for userId: String) -> UUID {
         let input = Data((userId + ":setting").utf8)
+        let digest = Insecure.MD5.hash(data: input)
+        let b = Array(digest)
+        return UUID(uuid: (b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+                           b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]))
+    }
+
+    /// 健康目标（身高/体重/年龄/性别/活动水平/目标身高/步数/睡眠/运动）走 aia_records type:"profile"，
+    /// 与「昵称 + 小程序绑定码」备份（profileRecordId，固定全局 UUID）**分属不同 doc id**——
+    /// 因为云端 push 对 payload 是整文档覆盖（非字段级合并），若共用 id 二者会互相清空对方字段。
+    /// 此处按当前同步账号 userId 派生确定性 UUID，与 settingRecordId 同策略：同账号跨设备落到同一文档、不同账号互不冲突。
+    /// 仅含健康目标字段，weightGoalKg 已由 setting 通道覆盖，避免双通道重复责任。
+    private nonisolated static func profileHealthRecordId(for userId: String) -> UUID {
+        let input = Data((userId + ":profileHealth").utf8)
         let digest = Insecure.MD5.hash(data: input)
         let b = Array(digest)
         return UUID(uuid: (b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
@@ -146,18 +198,21 @@ final class CloudSyncManager: ObservableObject {
             return
         }
         let uid = Self.userId
-        print("[sync] syncAfterLogin 开始，userId=\(uid)，重置 lastSyncAt")
+        print("[sync] syncAfterLogin 开始，userId=\(uid)，重置 lastSyncAt 触发全量重同步")
         lastSyncAt = nil
-        Task {
-            // 1) 先全量拉取云端（since=0），把历史数据写回本地
-            do {
-                let pulled = try await pull(context: context)
-                print("[sync] login 首次拉取完成，pulled=\(pulled)")
-            } catch {
-                print("[sync] login 首次拉取失败：\(error.localizedDescription)")
-            }
-            // 2) 再把本地数据推上去（此时本地已含云端数据，不会丢）
+        // push/pull 已静态化并从 UserDefaults 读取增量游标，这里必须同步清掉该键，
+        // 否则后台 push 会读到旧游标导致本次只做增量而非全量。
+        UserDefaults.standard.removeObject(forKey: "aia_last_sync")
+        Task { @MainActor in
             await sync(context: context)
+            // 登录后自动恢复小程序绑定（重装后重登 Apple/微信 场景）：
+            // pull 时已把云端备份的绑定码写入 aia_pending_mini_bind_code，这里消费并完成重绑 + 全量重同步。
+            if let pending = UserDefaults.standard.string(forKey: "aia_pending_mini_bind_code"),
+               !pending.isEmpty, Self.boundMiniProgramCode == nil {
+                UserDefaults.standard.removeObject(forKey: "aia_pending_mini_bind_code")
+                _ = bindMiniProgram(code: pending, context: context)
+                print("[sync] 已自动恢复小程序绑定：\(pending)")
+            }
         }
     }
 
@@ -192,12 +247,23 @@ final class CloudSyncManager: ObservableObject {
         let uid = Self.userId
         print("[sync] 开始同步 userId=\(uid)")
         do {
-            let pushed = try await push(context: context)
-            let pulled = try await pull(context: context)
-            // 清理本地已同步删除的墓碑（cloud 已收到 deleted=true）。
-            // 涵盖 Bill / FoodEntry / Reminder / HealthMetric / RecognitionRecord /
-            // ChatMessage / MerchantMeta / WaterLog / RecurringRule 等所有通过 buildPushItems 同步的类型。
-            cleanupSyncedTombstones(context: context)
+            // 在后台 ModelContext 上完成全部 fetch/insert/网络，避免主线程被 416+ 条记录
+            // 的逐条 fetch + insert 占满，导致界面完全卡死（触摸事件排不进主线程）。
+            // 后台一次性 save 后，主上下文因 automaticallyMergesChangesFromParent=true 自动合并，
+            // @Query 只重渲一次，不再每条插入触发一次重渲。
+            let (pushed, pulled) = try await Task.detached(priority: .userInitiated) { () -> ((sent: Int, upserted: Int, localTotal: Int), Int) in
+                guard let container = AppDelegate.sharedContainer else { return ((sent: 0, upserted: 0, localTotal: 0), 0) }
+                let bg = ModelContext(container)
+                bg.autosaveEnabled = false
+                let pushed = try await Self.push(context: bg)
+                let pulled = try await Self.pull(context: bg)
+                // 清理本地已同步删除的墓碑（cloud 已收到 deleted=true）。
+                // 涵盖 Bill / FoodEntry / Reminder / HealthMetric / RecognitionRecord /
+                // ChatMessage / MerchantMeta / WaterLog / RecurringRule 等所有通过 buildPushItems 同步的类型。
+                Self.cleanupSyncedTombstones(context: bg)
+                try bg.save()
+                return (pushed, pulled)
+            }.value
             let now = Date()
             lastSyncAt = now
             UserDefaults.standard.set(now, forKey: "aia_last_sync")
@@ -220,8 +286,8 @@ final class CloudSyncManager: ObservableObject {
 
     // MARK: - 上传
     /// 返回 (sent: 本次增量发送的记录条数, upserted: 云端实际落库的条数, localTotal: 本地各类型总条数)。
-    private func push(context: ModelContext) async throws -> (sent: Int, upserted: Int, localTotal: Int) {
-        let since = lastSyncAt?.timeIntervalSince1970
+    private static nonisolated func push(context: ModelContext) async throws -> (sent: Int, upserted: Int, localTotal: Int) {
+        let since = (UserDefaults.standard.object(forKey: "aia_last_sync") as? Date)?.timeIntervalSince1970
         let result = buildPushItems(context: context, since: since)
         let items = result.items
         print("[sync] push 准备上传 items 数量 = \(items.count)（增量 since=\(String(describing: since))），userId = \(Self.userId)")
@@ -253,7 +319,7 @@ final class CloudSyncManager: ObservableObject {
     /// - 软删记录（syncDeleted == true）在本地删除时会同步刷新 syncUpdatedAt，因此仍会被纳入本次上传，
     ///   确保云端收到 deleted=true 墓碑；push 成功后才由 cleanupSyncedTombstones 清本地墓碑。
     /// 返回 (items: 增量筛选后的上传记录, localTotal: 本地各类型记录总条数）。
-    private func buildPushItems(context: ModelContext, since: Double?) -> (items: [[String: Any]], localTotal: Int) {
+    private static nonisolated func buildPushItems(context: ModelContext, since: Double?) -> (items: [[String: Any]], localTotal: Int) {
         // 注意：payload 故意不包含 imageName —— 识别原图仅存本地（Documents/attachments），
         // 绝不上云。新增字段时请勿把 imageName 加进任何 payload。
         var items: [[String: Any]] = []
@@ -334,6 +400,16 @@ final class CloudSyncManager: ObservableObject {
                                   ]))
             }
         }
+        // 手动健康数据（步数/睡眠/运动/活动热量）：独立 type="manualHealth"，不进 HealthMetric 表
+        // 以免污染健康记录列表；按天快照增量上传，重装后 pull 回填 ManualHealthStore。
+        for s in ManualHealthStore.shared.exportModified(since: sinceDate) {
+            var payload: [String: Any] = ["date": Double(s.dayTs)]
+            if let v = s.steps { payload["steps"] = v }
+            if let v = s.sleep { payload["sleep"] = v }
+            if let v = s.exercise { payload["exercise"] = v }
+            if let v = s.calories { payload["calories"] = v }
+            items.append(item(id: s.id, type: "manualHealth", updatedAt: s.updatedAt, deleted: false, payload: payload))
+        }
         if let recognitions = try? context.fetch(FetchDescriptor<RecognitionRecord>(predicate: #Predicate { $0.syncUpdatedAt > sinceDate })) {
             totalFetched += (try? context.fetchCount(FetchDescriptor<RecognitionRecord>())) ?? 0
             print("[sync] 本地 recognitions 增量(脏) = \(recognitions.count)")
@@ -406,18 +482,6 @@ final class CloudSyncManager: ObservableObject {
                                   ]))
             }
         }
-        // 昵称（profile）：仅在本地修改过（userNicknameUpdatedAt 超过增量边界）时上传，
-        // 走与业务记录相同的 aia_records 通道（type:"profile"），登录后 pull 自动回写。
-        let nickUpdated = UserDefaults.standard.double(forKey: "userNicknameUpdatedAt")
-        if nickUpdated > sinceTime {
-            let nick = UserDefaults.standard.string(forKey: "userNickname") ?? ""
-            items.append(item(id: Self.profileRecordId,
-                              type: "profile",
-                              updatedAt: Date(timeIntervalSince1970: nickUpdated),
-                              deleted: false,
-                              payload: ["nickname": nick]))
-        }
-
         // 用户目标设置（setting）：仅在本地修改过（userSettingUpdatedAt 超过增量边界）时上传，
         // 走 aia_records type:"setting" 通道，与小程序 userSettings 同格式，绑定后自动合并。
         let settingUpdated = UserDefaults.standard.double(forKey: "userSettingUpdatedAt")
@@ -435,11 +499,34 @@ final class CloudSyncManager: ObservableObject {
                               payload: payload))
         }
 
+        // 健康目标（profile.health）：身高/体重/年龄/性别/活动水平/目标身高/步数/睡眠/运动。
+        // 不含 weightGoalKg（已随 setting 通道同步）。与昵称备份（profileRecordId）分属不同 doc id，
+        // 避免各自全量 payload 互相覆盖；type 同为 "profile"，pull 统一由 applyProfile 处理。
+        let profileUpdated = UserDefaults.standard.double(forKey: "userProfileUpdatedAt")
+        if profileUpdated > sinceTime {
+            let payload: [String: Any] = [
+                "heightCm":       UserDefaults.standard.double(forKey: "aia.heightCm"),
+                "weightKg":       UserDefaults.standard.double(forKey: "aia.weightKg"),
+                "age":            UserDefaults.standard.integer(forKey: "aia.age"),
+                "bioSex":         UserDefaults.standard.integer(forKey: "aia.bioSex"),
+                "activityLevel":  UserDefaults.standard.integer(forKey: "aia.activityLevel"),
+                "targetHeightCm": UserDefaults.standard.double(forKey: "aia.targetHeightCm"),
+                "stepGoal":       UserDefaults.standard.integer(forKey: "aia.stepGoal"),
+                "sleepGoalHours": UserDefaults.standard.double(forKey: "aia.sleepGoalHours"),
+                "exerciseGoalMin":UserDefaults.standard.double(forKey: "aia.exerciseGoalMin")
+            ]
+            items.append(item(id: Self.profileHealthRecordId(for: Self.userId),
+                              type: "profile",
+                              updatedAt: Date(timeIntervalSince1970: profileUpdated),
+                              deleted: false,
+                              payload: payload))
+        }
+
         print("[sync] push 本地共 \(totalFetched) 条，增量筛选后上传 \(items.count) 条（跳过未变更 \(totalFetched - items.count) 条）")
         return (items: items, localTotal: totalFetched)
     }
 
-    private func item(id: UUID, type: String, updatedAt: Date, deleted: Bool, payload: [String: Any]) -> [String: Any] {
+    private static nonisolated func item(id: UUID, type: String, updatedAt: Date, deleted: Bool, payload: [String: Any]) -> [String: Any] {
         return [
             "id": id.uuidString,
             "type": type,
@@ -450,8 +537,8 @@ final class CloudSyncManager: ObservableObject {
     }
 
     // MARK: - 拉取并合并
-    private func pull(context: ModelContext) async throws -> Int {
-        let since = lastSyncAt?.timeIntervalSince1970 ?? 0
+    private static nonisolated func pull(context: ModelContext) async throws -> Int {
+        let since = (UserDefaults.standard.object(forKey: "aia_last_sync") as? Date)?.timeIntervalSince1970 ?? 0
         let body: [String: Any] = [
             "action": "pull",
             "userId": Self.userId,
@@ -496,6 +583,8 @@ final class CloudSyncManager: ObservableObject {
                 merged += applyProfile(remoteDate: remoteDate, payload: payload)
             case "setting":
                 merged += applySetting(remoteDate: remoteDate, payload: payload)
+            case "manualHealth":
+                merged += applyManualHealth(id: id, remoteDate: remoteDate, deleted: deleted, payload: payload)
             default:
                 break
             }
@@ -503,7 +592,7 @@ final class CloudSyncManager: ObservableObject {
         return merged
     }
 
-    private func applyMerchantMeta(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
+    private static nonisolated func applyMerchantMeta(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
         let merchant = (payload["merchant"] as? String ?? "").trimmingCharacters(in: .whitespaces).lowercased()
         guard !merchant.isEmpty else { return 0 }
 
@@ -535,7 +624,7 @@ final class CloudSyncManager: ObservableObject {
         }
     }
 
-    private func applyBill(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
+    private static nonisolated func applyBill(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
         if let existing = (try? context.fetch(FetchDescriptor<Bill>(predicate: #Predicate { $0.syncId == id })))?.first {
             if deleted { context.delete(existing); return 1 }
             guard existing.syncUpdatedAt < remoteDate else { return 0 }
@@ -565,7 +654,7 @@ final class CloudSyncManager: ObservableObject {
         }
     }
 
-    private func applyReminder(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
+    private static nonisolated func applyReminder(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
         if let existing = (try? context.fetch(FetchDescriptor<Reminder>(predicate: #Predicate { $0.syncId == id })))?.first {
             if deleted { context.delete(existing); return 1 }
             guard existing.syncUpdatedAt < remoteDate else { return 0 }
@@ -600,7 +689,7 @@ final class CloudSyncManager: ObservableObject {
         }
     }
 
-    private func applyFood(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
+    private static nonisolated func applyFood(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
         let name = payload["name"] as? String ?? ""
         let calories = payload["calories"] as? Double ?? 0
         let protein = payload["protein"] as? Double ?? 0
@@ -727,7 +816,7 @@ final class CloudSyncManager: ObservableObject {
         return 1
     }
 
-    private func applyWater(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
+    private static nonisolated func applyWater(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
         if let existing = (try? context.fetch(FetchDescriptor<WaterLog>(predicate: #Predicate { $0.syncId == id })))?.first {
             if deleted { context.delete(existing); return 1 }
             guard existing.syncUpdatedAt < remoteDate else { return 0 }
@@ -745,7 +834,7 @@ final class CloudSyncManager: ObservableObject {
         }
     }
 
-    private func applyRecurring(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
+    private static nonisolated func applyRecurring(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
         if let existing = (try? context.fetch(FetchDescriptor<RecurringRule>(predicate: #Predicate { $0.syncId == id })))?.first {
             if deleted { context.delete(existing); return 1 }
             guard existing.syncUpdatedAt < remoteDate else { return 0 }
@@ -785,7 +874,7 @@ final class CloudSyncManager: ObservableObject {
         }
     }
 
-    private func applyHealth(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
+    private static nonisolated func applyHealth(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
         if let existing = (try? context.fetch(FetchDescriptor<HealthMetric>(predicate: #Predicate { $0.syncId == id })))?.first {
             if deleted { context.delete(existing); return 1 }
             guard existing.syncUpdatedAt < remoteDate else { return 0 }
@@ -807,7 +896,27 @@ final class CloudSyncManager: ObservableObject {
         }
     }
 
-    private func applyRecognition(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
+    /// 手动健康数据（type="manualHealth"）：直接回填 ManualHealthStore（UserDefaults），
+    /// 不写 SwiftData，因此不会污染健康记录列表。云端按天快照存储，本地按日期还原。
+    private static nonisolated func applyManualHealth(id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
+        guard let dayTs = payload["date"] as? Double else { return 0 }
+        if deleted {
+            ManualHealthStore.shared.clearDay(Int(dayTs))
+            return 1
+        }
+        ManualHealthStore.shared.importSnapshot(ManualHealthStore.ManualHealthSnapshot(
+            dayTs: Int(dayTs),
+            id: id,
+            updatedAt: remoteDate,
+            steps: payload["steps"] as? Int,
+            sleep: payload["sleep"] as? Double,
+            exercise: payload["exercise"] as? Int,
+            calories: payload["calories"] as? Int
+        ))
+        return 1
+    }
+
+    private static nonisolated func applyRecognition(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
         if let existing = (try? context.fetch(FetchDescriptor<RecognitionRecord>(predicate: #Predicate { $0.syncId == id })))?.first {
             if deleted { context.delete(existing); return 1 }
             guard existing.syncUpdatedAt < remoteDate else { return 0 }
@@ -831,19 +940,46 @@ final class CloudSyncManager: ObservableObject {
     // MARK: - 昵称（profile）
     /// 把云端昵称写回本地 userNickname。仅当云端更新时间晚于本地时才覆盖（后写胜出），
     /// 避免把本次登录刚拉到的旧值又写回、或覆盖本地更新的编辑。
-    private func applyProfile(remoteDate: Date, payload: [String: Any]) -> Int {
-        guard let nick = payload["nickname"] as? String, !nick.isEmpty else { return 0 }
-        let localUpdated = UserDefaults.standard.double(forKey: "userNicknameUpdatedAt")
-        guard remoteDate.timeIntervalSince1970 > localUpdated else { return 0 }
-        UserDefaults.standard.set(nick, forKey: "userNickname")
-        UserDefaults.standard.set(remoteDate.timeIntervalSince1970, forKey: "userNicknameUpdatedAt")
-        return 1
+    private static nonisolated func applyProfile(remoteDate: Date, payload: [String: Any]) -> Int {
+        var merged = 0
+        // 昵称：云端更新时间晚于本地才覆盖（后写胜出）。
+        if let nick = payload["nickname"] as? String, !nick.isEmpty {
+            let localUpdated = UserDefaults.standard.double(forKey: "userNicknameUpdatedAt")
+            if remoteDate.timeIntervalSince1970 > localUpdated {
+                UserDefaults.standard.set(nick, forKey: "userNickname")
+                UserDefaults.standard.set(remoteDate.timeIntervalSince1970, forKey: "userNicknameUpdatedAt")
+                merged += 1
+            }
+        }
+        // 自动恢复小程序绑定：云端备份了绑定码且本地尚未绑定时，写入 pending 待登录流程消费。
+        // 备份只写在登录账号分区，因此重装后重登同一账号拉到后才会触发；
+        // 解绑时的墓碑备份 miniBindCode 为空串，不会写 pending。
+        if let code = payload["miniBindCode"] as? String, !code.isEmpty,
+           UserDefaults.standard.string(forKey: "aia_bound_user_id") == nil {
+            UserDefaults.standard.set(code, forKey: "aia_pending_mini_bind_code")
+            print("[sync] 检测到云端备份的小程序绑定码，待登录流程自动重绑")
+        }
+        // 健康目标：云端更新时间晚于本地整组锚点才覆盖（后写胜出），避免覆盖本地更新的编辑。
+        if remoteDate.timeIntervalSince1970 > UserDefaults.standard.double(forKey: "userProfileUpdatedAt") {
+            if let v = payload["heightCm"]        as? Double { UserDefaults.standard.set(v, forKey: "aia.heightCm") }
+            if let v = payload["weightKg"]        as? Double { UserDefaults.standard.set(v, forKey: "aia.weightKg") }
+            if let v = payload["age"]             as? Int    { UserDefaults.standard.set(v, forKey: "aia.age") }
+            if let v = payload["bioSex"]          as? Int    { UserDefaults.standard.set(v, forKey: "aia.bioSex") }
+            if let v = payload["activityLevel"]   as? Int    { UserDefaults.standard.set(v, forKey: "aia.activityLevel") }
+            if let v = payload["targetHeightCm"]  as? Double { UserDefaults.standard.set(v, forKey: "aia.targetHeightCm") }
+            if let v = payload["stepGoal"]        as? Int    { UserDefaults.standard.set(v, forKey: "aia.stepGoal") }
+            if let v = payload["sleepGoalHours"]  as? Double { UserDefaults.standard.set(v, forKey: "aia.sleepGoalHours") }
+            if let v = payload["exerciseGoalMin"] as? Double { UserDefaults.standard.set(v, forKey: "aia.exerciseGoalMin") }
+            UserDefaults.standard.set(remoteDate.timeIntervalSince1970, forKey: "userProfileUpdatedAt")
+            merged += 1
+        }
+        return merged
     }
 
     // MARK: - 用户目标设置（setting）
     /// 把云端设置写回本地 UserDefaults。仅当云端更新时间晚于本地时才覆盖（后写胜出），
     /// 避免把本次刚拉到的旧值又写回、或覆盖本地更新的编辑。
-    private func applySetting(remoteDate: Date, payload: [String: Any]) -> Int {
+    private static nonisolated func applySetting(remoteDate: Date, payload: [String: Any]) -> Int {
         let localUpdated = UserDefaults.standard.double(forKey: "userSettingUpdatedAt")
         guard remoteDate.timeIntervalSince1970 > localUpdated else { return 0 }
         // 目标热量：>0 视为自定义并写入；0/未设置标记为自动（不覆盖本地 override 数值）。
@@ -866,7 +1002,7 @@ final class CloudSyncManager: ObservableObject {
         return 1
     }
 
-    private func applyChat(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
+    private static nonisolated func applyChat(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
         if let existing = (try? context.fetch(FetchDescriptor<ChatMessage>(predicate: #Predicate { $0.syncId == id })))?.first {
             if deleted { context.delete(existing); return 1 }
             guard existing.syncUpdatedAt < remoteDate else { return 0 }
@@ -892,7 +1028,7 @@ final class CloudSyncManager: ObservableObject {
     /// 删除所有已成功推送到云端的软删记录（syncDeleted == true）。
     /// 在 push 成功后调用——云端已收到 deleted=true 标志，后续 pull 不会返回这些记录。
     /// 覆盖所有通过 buildPushItems 同步的模型类型。
-    private func cleanupSyncedTombstones(context: ModelContext) {
+    private static nonisolated func cleanupSyncedTombstones(context: ModelContext) {
         var total = 0
 
         if let bills = try? context.fetch(FetchDescriptor<Bill>(predicate: #Predicate { $0.syncDeleted == true })) {
@@ -927,7 +1063,7 @@ final class CloudSyncManager: ObservableObject {
     }
 
     // MARK: - 网络
-    private func postJSON(_ body: [String: Any]) async throws -> [String: Any] {
+    private static nonisolated func postJSON(_ body: [String: Any]) async throws -> [String: Any] {
         var req = URLRequest(url: Self.syncEndpoint)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -949,5 +1085,68 @@ final class CloudSyncManager: ObservableObject {
                           userInfo: [NSLocalizedDescriptionKey: json["error"] as? String ?? "同步失败"])
         }
         return json
+    }
+
+    // MARK: - Phase 2 账号关联（跨身份提供方合并：手机号 / Apple / 微信同步码）
+
+    /// 解析某原始 userId 对应的「主账号」userId。
+    /// 已关联则返回主账号；未关联/出错/离线则回落为该 userId 自身，保证登录必然可用。
+    static func resolvePrimary(_ rawUserId: String) async -> String {
+        let body: [String: Any] = ["action": "resolve", "userId": rawUserId]
+        do {
+            let resp = try await postJSON(body)
+            if let pid = resp["primaryUserId"] as? String, !pid.isEmpty {
+                return pid
+            }
+        } catch {
+            print("[sync] resolvePrimary 失败，回落原始 userId: \(error.localizedDescription)")
+        }
+        return rawUserId
+    }
+
+    /// 关联：把 secondary 账号的云数据并入 primary 账号分区。成功后返回主账号 userId。
+    /// 调用方（UI）应在成功后：把 AuthManager.userId 设为返回的 primaryUserId，并触发一次全量 syncAfterLogin。
+    static func linkAccounts(primary: String, secondary: String) async -> String? {
+        let body: [String: Any] = [
+            "action": "link",
+            "primaryUserId": primary,
+            "secondaryUserId": secondary
+        ]
+        do {
+            let resp = try await postJSON(body)
+            guard (resp["ok"] as? Bool) == true else {
+                print("[sync] link 失败: \(resp["error"] as? String ?? "未知")")
+                return nil
+            }
+            return resp["primaryUserId"] as? String
+        } catch {
+            print("[sync] link 失败: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// 解除关联（仅删映射；已并入主账号的数据不会自动回退，MVP 已知限制）。
+    static func unlinkAccount(secondary: String) async -> Bool {
+        let body: [String: Any] = ["action": "unlink", "secondaryUserId": secondary]
+        do {
+            let resp = try await postJSON(body)
+            return (resp["ok"] as? Bool) == true
+        } catch {
+            print("[sync] unlink 失败: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// 列出已关联到指定主账号的所有 secondary 身份（不含主账号自身）。
+    /// 用于「账号关联」页展示「已关联的方式」列表。
+    static func listLinkedAccounts(primary: String) async -> [String] {
+        let body: [String: Any] = ["action": "resolve", "userId": primary]
+        do {
+            let resp = try await postJSON(body)
+            return (resp["linkedMethods"] as? [String]) ?? []
+        } catch {
+            print("[sync] listLinkedAccounts 失败: \(error.localizedDescription)")
+            return []
+        }
     }
 }

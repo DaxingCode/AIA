@@ -169,8 +169,8 @@ struct AutoRecognitionSetupView: View {
                     .buttonStyle(.plain)
                     .padding(.top, 4)
 
-                    NavigationLink {
-                        TriggerTutorialView(trigger: trigger)
+                    Button {
+                        NavigationRouter.shared.navigate(.triggerTutorial(trigger))
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "play.circle.fill")
@@ -213,11 +213,12 @@ struct AutoRecognitionSetupView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { showToast = false }
     }
 
-    /// 统一退出：从 path 驱动进入则 pop path；从 NavigationLink 等场景进入则 dismiss。
+    /// 统一退出：从 path 驱动进入则 pop path（走 NavigationRouter 帧合并，避免与未执行的 flush 同帧冲突）；
+    /// 从 NavigationLink 等场景进入则 dismiss。
     private func finish() {
         let router = NavigationRouter.shared
         if router.path.last == .autoSetup {
-            router.path.removeLast()
+            router.pop()
         } else {
             dismiss()
         }

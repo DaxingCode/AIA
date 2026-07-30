@@ -58,6 +58,7 @@ struct BillCategoryView: View {
                         .foregroundStyle(AIATheme.bill.opacity(0.7))
                 }
                 .frame(height: 56)
+                .chartYScale(domain: safeYDomain(weekData.map(\.value)))
                 .chartYAxis(.hidden).chartXAxis(.hidden)
                 Text("近 7 日\(category)支出").font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
 
@@ -68,7 +69,9 @@ struct BillCategoryView: View {
                 } else {
                     ForEach(catBills) { b in
                         HStack {
-                            NavigationLink { BillDetailView(bill: b) } label: {
+                            Button {
+                                NavigationRouter.shared.navigate(.billDetail(b))
+                            } label: {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(b.merchant).font(AIATheme.Font.footnote.weight(.medium))
@@ -104,9 +107,9 @@ struct BillCategoryView: View {
                 HStack {
                     Text(String(format: "%@预算 ¥%.0f", category, budget)).font(AIATheme.Font.caption).foregroundStyle(AIATheme.sub)
                     Spacer()
-                    Text(String(format: "已用 %.0f%%", min(total / budget, 1) * 100)).font(AIATheme.Font.caption.weight(.medium))
+                    Text(String(format: "已用 %.0f%%", budget > 0 ? min(total / budget, 1) * 100 : 0)).font(AIATheme.Font.caption.weight(.medium))
                 }
-                MiniBar(value: min(total / budget, 1), color: AIATheme.warning)
+                MiniBar(value: budget > 0 ? min(total / budget, 1) : 0, color: AIATheme.warning)
 
                 Button { toast = "调整分类预算" } label: {
                     HStack {

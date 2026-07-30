@@ -20,6 +20,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UIWindowSceneDelegate, UN
     /// 全局共享容器：application delegate 与 scene delegate 是 AppDelegate 的两个不同实例，
     /// 靠实例属性注入无法跨实例传递。静态变量让两者都能取到 AIAApp 创建的容器。
     static var sharedContainer: ModelContainer?
+    /// 与 SwiftUI 注入界面（ContentView/LoginView）绑定的主上下文同一实例；
+    /// 已开启 automaticallyMergesChangesFromParent，使后台同步落盘后首页 @Query 自动刷新。
+    static var sharedMainContext: ModelContext?
     /// 冷启动时用户点击通知，ContentView 尚未创建，先把路由存在这里，onAppear 时消费。
     static var pendingNotificationRoute: String?
 
@@ -100,6 +103,24 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UIWindowSceneDelegate, UN
         // 通过静态变量取容器，避免 application delegate / scene delegate 实例不一致问题。
         let container = Self.sharedContainer
 
+        // 主上下文：与 SwiftUI 注入的 @Query 绑定同一实例。
+        // 新版 SwiftData（iOS 26）中 ModelContext 为具体类，上下文间写入自动同步/合并，
+        // 无需（也不存在）automaticallyMergesChangesFromParent 开关——后台 ModelContext 落盘后，
+        // 首页 @Query 会自动刷新，主线程无需参与写库。
+        // 必须在首次使用 .modelContext(Self.sharedMainContext!) 之前完成赋值，否则强制解包崩溃 → 白屏。
+        if let container = container {
+            Self.sharedMainContext = ModelContext(container)
+        }
+
+        // 手动健康数据（步数/睡眠/运动/活动热量）录入后触发防抖增量同步，
+        // 以便重装重登后能从小程序同分区拉回并恢复展示。未登录时不触发（syncAfterLocalChange 内部已守卫）。
+        ManualHealthStore.shared.syncTrigger = {
+            guard let ctx = AppDelegate.sharedMainContext else { return }
+            Task { @MainActor in
+                CloudSyncManager.shared.syncAfterLocalChange(context: ctx)
+            }
+        }
+
         // 首启一次性把内置营养表灌进 FoodMetaStore（source:"builtin"），实现单库单查询路径。
         // 已存在（含 cloud 沉淀）则跳过，不覆盖用户数据；UserDefaults 守卫保证仅执行一次。
         if !UserDefaults.standard.bool(forKey: "foodMetaSeeded"), let container = container {
@@ -122,7 +143,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UIWindowSceneDelegate, UN
         if isLoggedIn, let container = container {
             window.rootViewController = UIHostingController(
                 rootView: ContentView()
-                    .modelContainer(container)
+                    .modelContext(Self.sharedMainContext!)
                     .accentColor(AIATheme.blue)
                     .environmentObject(AuthManager.shared)
             )
@@ -130,7 +151,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UIWindowSceneDelegate, UN
             // 未登录：展示登录页；容器同时注入，便于登录成功后无缝切换。
             window.rootViewController = UIHostingController(
                 rootView: LoginView()
-                    .modelContainer(container)
+                    .modelContext(Self.sharedMainContext!)
                     .environmentObject(AuthManager.shared)
             )
         } else {
@@ -257,7 +278,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UIWindowSceneDelegate, UN
             if let ws = UIApplication.shared.connectedScenes.first as? UIWindowScene {
                 let w = UIWindow(windowScene: ws)
                 w.rootViewController = UIHostingController(
-                    rootView: ContentView().modelContainer(container).environmentObject(AuthManager.shared)
+                    rootView: ContentView().modelContext(Self.sharedMainContext!).environmentObject(AuthManager.shared)
                 )
                 w.makeKeyAndVisible()
             }
@@ -265,7 +286,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UIWindowSceneDelegate, UN
         }
         window.rootViewController = UIHostingController(
             rootView: ContentView()
-                .modelContainer(container)
+                .modelContext(Self.sharedMainContext!)
                 .accentColor(AIATheme.blue)
                 .environmentObject(AuthManager.shared)
         )

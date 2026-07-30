@@ -59,6 +59,16 @@
 - 脚本会安装 `@cloudbase/cli`、打开浏览器让你扫码登录、然后部署函数。
 - 部署完成后，**集合 `aia_records` 与 HTTP 触发 `/sync` 仍需按方式一步骤 5、6 在控制台手动建**（CLI 不易一步到位，已在脚本末尾提示）。
 
+⚠️ **CLI 直接 `cloudbase fn deploy` 的坑（2026-07-29 已踩并解决）**：不要**无配置**直接跑 `cloudbase fn deploy aia-sync --force`。该命令在**缺少 `cloudbaserc.json`** 时，会把运行时**误判为 `Python3.9`**（实际函数是 `Nodejs20.19`），并弹出交互式选择（`Update with merged config` / `Enter config manually` / `Exit`）。若直接选「Update with merged config」，会把 Node 代码塞进 Python 运行时，**立刻搞挂 `/sync`**（所有用户同步失效）。
+
+- **已修复 + 已实测可部署**：仓库 `云函数/cloudbaserc.json`（`注意在 云函数/ 根目录，不在 aia-sync/ 子目录——CLI 只在当前工作目录找它`）钉死 `runtime: Nodejs20.19` + `handler: index.main`。有它后 `fn deploy` 不再误判运行时、也不弹交互提示，可安全执行：
+  ```bash
+  cd 云函数
+  cloudbase fn deploy aia-sync --env-id cloud1-d1ga55pizf294dbe9 --force
+  ```
+  （在 `云函数/` 目录运行，让它找到 `aia-sync/` 子目录；`--envId` 已弃用，新 CLI 用 `--env-id`。）2026-07-29 22:02 实测部署成功：`fn list` 显示运行时 Nodejs20.19、修改时间更新，curl `list`/`push`/`pull` 全部正常，**HTTP 触发 `/sync` 原样保留**。
+- **方式一控制台上传 zip 仍是 equally safe 的备选**（只换代码，Node 运行时 / HTTP 触发 `/sync` / 集成响应关闭 全部原样保留）。当前最新 zip 为 `云函数/aia-sync/aia-sync-20260729.zip`（含 P0/P1/P2 优化）。两种方式二选一即可。
+
 ---
 
 ## 验证（部署后必做）
@@ -108,6 +118,7 @@ curl -X POST https://cloud1-d1ga55pizf294dbe9-1445590522.ap-shanghai.app.tcloudb
 | `pull failed: ...` 或 push 全失败 | 集合 `aia_records` 没建。去云数据库新建该集合。 |
 | 同步后其它设备看不到 | 多设备「同步账号」没填成同一个值；或删除暂不跨设备传播（MVP 已知限制，墓碑同步待做）。 |
 | `wx-server-sdk` 报错 require 失败 | 函数依赖没装。控制台「在线安装依赖」或本地 `npm install` 后重传 zip。 |
+| `cloudbase fn deploy` 弹交互选择且合并配置显示 `Runtime: Python3.9` | CLI 在无 `cloudbaserc.json` 时把 Node 函数误判为 Python。**切勿选「Update with merged config」**（会切到 Python 运行时、搞挂 `/sync`）。先确认 `云函数/aia-sync/cloudbaserc.json` 存在（已钉 `Nodejs20.19`），或干脆改用方式一控制台上传 zip。 |
 
 ---
 

@@ -131,7 +131,7 @@ struct AIAAppShortcuts: AppShortcutsProvider {
                 "跟\(.applicationName)记一笔",
                 "记账用\(.applicationName)"
             ],
-            shortTitle: "用阿宝记",
+            shortTitle: "快速记录",
             systemImageName: "mic.fill"
         )
     }

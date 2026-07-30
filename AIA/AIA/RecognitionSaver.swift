@@ -139,15 +139,15 @@ enum RecognitionSaver {
                 // 时间解析失败时用今天零点（绝不 .now，否则截图时间 15:41 会污染支付记录）
                 let fallbackTime = Calendar.current.date(bySettingHour: 0, minute: 0, second: 0, of: .now) ?? .now
                 let time = RecognitionResult.date(from: b.time) ?? fallbackTime
-                let income = isIncomeCategory(b.category ?? "")
+                // 方案2：模型自由文本分类归并到预设大类，保证分类明细页聚合一致
+                let rawCategory = b.category ?? ""
+                let normalizedCat = BillCategoryHelpers.normalizedCategory(rawCategory)
+                // 收入判定基于原始分类（归一化可能把"报销"等并入"工资"，丢失关键词子串）
+                let income = isIncomeCategory(rawCategory)
                 let bill = Bill(merchant: merchant, amount: amt,
-                                category: b.category ?? "", time: time,
+                                category: normalizedCat, time: time,
                                 isIncome: income, imageName: imageName)
                 context.insert(bill)
-                // 沉淀商户经验：下次同类账单本地直接复用分类，减少 AI 调用
-                if let cat = b.category, !cat.isEmpty {
-                    MerchantMetaStore.upsert(merchant: merchant, category: cat, isIncome: income, in: context)
-                }
                 session.bills.append(bill)
             }
         }

@@ -712,7 +712,7 @@ struct FoodListView: View {
                             .buttonStyle(.plain)
                         }
 
-                        MiniBar(value: selectedCalories / goal, color: AIATheme.food)
+                        MiniBar(value: goal > 0 ? selectedCalories / goal : 0, color: AIATheme.food)
 
                         // 3 列热量指标：净热量 / TDEE / 今日消耗（等宽 + 细竖线分隔）
                         HStack(spacing: 8) {
@@ -791,6 +791,7 @@ struct FoodListView: View {
                                     .interpolationMethod(.monotone)
                             }
                             .frame(height: 64)
+                            .chartYScale(domain: safeYDomain(weekData.map(\.value)))
                             .chartYAxis(.hidden).chartXAxis(.hidden)
                         }
                         .padding(12)
@@ -1149,7 +1150,14 @@ struct HealthListView: View {
         weightKg > 0 ? String(format: "%.1fkg", weightKg) : stat("体重")
     }
     private var heightDisplay: String {
-        heightCm > 0 ? String(format: "%.0fcm", heightCm) : stat("身高")
+        // 2026-07-30：身高保留一位小数会被截断成 "165.0cm" 在窄卡片里换行；统一取整 + 自动去 ".0"
+        // 与体重 ("58.0kg") 风格统一，且更稳。同时回退到健康记录时也剥掉 ".0"。
+        if heightCm > 0 {
+            let rounded = heightCm.rounded()
+            return rounded == floor(rounded) ? "\(Int(rounded))cm" : String(format: "%.1fcm", rounded)
+        }
+        let raw = stat("身高")
+        return raw.replacingOccurrences(of: ".0cm", with: "cm")
     }
     private var bmiDisplay: String {
         guard heightCm > 0, weightKg > 0 else { return stat("BMI") }
@@ -1185,6 +1193,39 @@ struct HealthListView: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    // 2026-07-30：重装后若云端本就没有健康数据（当初录入时未登录导致未上云），
+                    // 页面会静默空白。这里在「已登录却全空」时给出明确引导：一键从云端恢复；
+                    // 若恢复后仍为空，则说明云端无备份，需重新录入（本次会自动上云）。
+                    if UserDefaults.standard.bool(forKey: "aia.isLoggedIn") && healths.isEmpty && stepsCurrentValue == 0 {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 10) {
+                                Image(systemName: "icloud.and.arrow.down")
+                                    .font(.title2)
+                                    .foregroundStyle(AIATheme.blue)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("云端还没有你的健康数据")
+                                        .font(AIATheme.Font.body.weight(.semibold))
+                                    Text("可能当初录入时还未登录，数据没能备份。点下方按钮从云端恢复；若恢复后仍为空，请重新录入一次（这次会自动上云）。")
+                                        .font(AIATheme.Font.micro)
+                                        .foregroundStyle(AIATheme.muted)
+                                }
+                            }
+                            Button {
+                                CloudSyncManager.shared.syncAfterLogin(context: context)
+                            } label: {
+                                Text("从云端恢复数据")
+                                    .font(AIATheme.Font.body.weight(.medium))
+                                    .foregroundStyle(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(10)
+                                    .background(AIATheme.blue)
+                                    .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+                            }
+                        }
+                        .padding(12)
+                        .background(AIATheme.surfaceSecondary)
+                        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+                    }
                     // Card A · 今日概览（圆环 + 关键指标）
                     VStack(alignment: .leading, spacing: 12) {
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
@@ -1234,15 +1275,15 @@ struct HealthListView: View {
                         }
 
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                            NavigationLink { BodyDataView() } label: {
+                            Button { NavigationRouter.shared.navigate(.bodyData) } label: {
                                 StatCard(value: weightDisplay, caption: NSLocalizedString("health.stat.weight", comment: ""))
                             }
                             .buttonStyle(.plain)
-                            NavigationLink { BodyDataView() } label: {
+                            Button { NavigationRouter.shared.navigate(.bodyData) } label: {
                                 StatCard(value: heightDisplay, caption: NSLocalizedString("health.stat.height", comment: ""))
                             }
                             .buttonStyle(.plain)
-                            NavigationLink { BodyDataView() } label: {
+                            Button { NavigationRouter.shared.navigate(.bodyData) } label: {
                                 StatCard(value: bmiDisplay, caption: NSLocalizedString("health.stat.bmi", comment: ""))
                             }
                             .buttonStyle(.plain)
@@ -1253,7 +1294,7 @@ struct HealthListView: View {
                     .card(radius: AIATheme.rMD)
 
                     // Card · 健康目标（点击进入可编辑）
-                    NavigationLink { HealthGoalsView() } label: {
+                    Button { NavigationRouter.shared.navigate(.healthGoals) } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "target")
                                 .font(AIATheme.Font.title3)
@@ -1287,6 +1328,7 @@ struct HealthListView: View {
                                     .foregroundStyle(AIATheme.health.opacity(0.7))
                             }
                             .frame(height: 70)
+                            .chartYScale(domain: safeYDomain(weekSteps.map(\.value)))
                             .chartYAxis(.hidden).chartXAxis(.hidden)
                         }
                     }
@@ -1601,7 +1643,7 @@ struct BillListView: View {
     private func summaryDonutCard(titleKey: String, bills: [Bill], mode: BillDashboardMode) -> some View {
         let categories = expenseByCategory(for: bills)
         let total = bills.reduce(0) { $0 + $1.amount }
-        return NavigationLink { BillDashboardView(mode: mode) } label: {
+        return Button { NavigationRouter.shared.navigate(.billDashboard(mode)) } label: {
             VStack(spacing: 6) {
                 Text(LocalizedStringKey(titleKey))
                     .font(AIATheme.Font.footnote.weight(.medium))
@@ -1658,7 +1700,7 @@ struct BillListView: View {
                         // 但 BillToolsView 内部 path.append(.autoSetup) 改的是根栈 → BillToolsView 从根栈消失，
                         // 自动截屏识别返回时直接回 BillListView，绕过了「记账工具」。
                         Button {
-                            NavigationRouter.shared.path.append(HomeRoute.billTools)
+                            NavigationRouter.shared.navigate(HomeRoute.billTools)
                         } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: "wand.and.stars")
@@ -1697,10 +1739,10 @@ struct BillListView: View {
                                         .font(AIATheme.Font.micro)
                                         .foregroundStyle(AIATheme.muted)
                                     Spacer()
-                                    Text(String(format: NSLocalizedString("bill.budgetUsed", comment: ""), Int(monthExpenseTotal / monthlyBudget * 100)))
+                                    Text(String(format: NSLocalizedString("bill.budgetUsed", comment: ""), monthlyBudget > 0 ? Int(monthExpenseTotal / monthlyBudget * 100) : 0))
                                         .font(AIATheme.Font.caption.weight(.medium))
                                 }
-                                MiniBar(value: monthExpenseTotal / monthlyBudget, color: AIATheme.bill)
+                                MiniBar(value: monthlyBudget > 0 ? monthExpenseTotal / monthlyBudget : 0, color: AIATheme.bill)
                             }
                             .contentShape(Rectangle())
                         }
@@ -1758,9 +1800,8 @@ struct BillListView: View {
                     } else if filter == .month {
                         VStack(alignment: .leading, spacing: 8) {
                             // 月报 / 数据导出入口：按月导出 CSV、生成月报图片分享
-                            NavigationLink {
-                                MonthlyReportView()
-                                    .environment(\.modelContext, context)
+                            Button {
+                                NavigationRouter.shared.navigate(.monthlyReport)
                             } label: {
                                 HStack(spacing: 10) {
                                     Image(systemName: "chart.bar.fill")
@@ -1787,9 +1828,8 @@ struct BillListView: View {
                             // 同理：monthlyGroups 派生自 @Query，用元素遍历避免下标越界。
                             // 用 enumerated() 取 offset 作 id，避免 tuple 需 Hashable 且保证单次 render 内稳定。
                             ForEach(Array(monthlyGroups.enumerated()), id: \.offset) { idx, group in
-                                NavigationLink {
-                                    MonthlyBillListView(year: group.year, month: group.month, bills: group.bills)
-                                        .environment(\.modelContext, context)
+                                Button {
+                                    NavigationRouter.shared.navigate(.monthlyBillList(year: group.year, month: group.month))
                                 } label: {
                                     monthlySummaryRow(group)
                                 }
@@ -1811,7 +1851,7 @@ struct BillListView: View {
                                 title: "自动记账",
                                 message: "设置快捷指令，自动记账",
                                 actionTitle: "查看教程",
-                                action: { NavigationRouter.shared.path.append(.autoSetup) }
+                                action: { NavigationRouter.shared.navigate(.autoSetup) }
                             )
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
@@ -1834,7 +1874,7 @@ struct BillListView: View {
                                 title: "",
                                 message: "",
                                 actionTitle: "查看自动记账教程",
-                                action: { NavigationRouter.shared.path.append(.autoSetup) },
+                                action: { NavigationRouter.shared.navigate(.autoSetup) },
                                 footer: "点击底部拍照、相册上传小票、账单\n或点击文字输入、语音输入\n也可使用AI快速记账哦"
                             )
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2468,7 +2508,7 @@ struct ReminderListView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     // 提醒设置 / 自动记待办 入口
                     Button {
-                        NavigationRouter.shared.path.append(HomeRoute.todoTools)
+                        NavigationRouter.shared.navigate(HomeRoute.todoTools)
                     } label: {
                         HStack(spacing: 10) {
                             Image(systemName: "gearshape.2.fill")
@@ -2507,7 +2547,7 @@ struct ReminderListView: View {
                                 title: emptyTitle,
                                 message: "设置快捷指令，自动记录待办",
                                 actionTitle: "查看教程",
-                                action: { NavigationRouter.shared.path.append(.autoSetup) }
+                                action: { NavigationRouter.shared.navigate(.autoSetup) }
                             )
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else {

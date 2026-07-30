@@ -22,14 +22,37 @@ enum HomeRoute: Hashable {
     // 注意：「编辑待办」**不再走 navigationDestination**——2026-07-24 改为 .sheet 弹起（与「编辑账单」一致），
     // 入口在 ReminderListView 内的 @State editTodo + .sheet(item:)。这里只保留 .healthDetail。
     case healthDetail(HealthMetric)
+    // 2026-07-29：将所有闭包式 NavigationLink { BillDetailView / BodyDataView / HealthGoalsView /
+    // BillDashboardView } 改为 router.navigate 路径推送，消除 NavigationLink 直接写 path 绑定
+    // 与 router 异步 flush 同帧触发的 "Update NavigationRequestObserver tried to update multiple times per frame"。
+    case billDetail(Bill)
+    case bodyData
+    case healthGoals
+    case billDashboard(BillDashboardMode)
+    case recognitionRecords
+    // Settings 子页（2026-07-29 从 SettingsView 闭包式 NavigationLink 改造为路由推送）
+    case homeLayoutSettings
+    case autoSyncSettings
+    case imageAutoRecogSettings
+    case defaultReminderSettings
+    // 工具页子页（BillToolsView / TodoToolsView / DeveloperCenterView 闭包式 NavigationLink）
+    case developerCenter
+    case recurringRuleList
+    case billImport
+    case merchantRuleList
+    case adManager
+    // 月报 / 月账单 / 触发教程（RecordsViews / AutoRecognitionSetupView 闭包式 NavigationLink）
+    case monthlyReport
+    case monthlyBillList(year: Int, month: Int)
+    case triggerTutorial(TriggerType)
 }
 
 struct ContentView: View {
     @Environment(\.modelContext) private var context
-    @Query(filter: #Predicate { !$0.syncDeleted }, sort: \FoodEntry.date, order: .reverse) private var foods: [FoodEntry]
-    @Query(filter: #Predicate { !$0.syncDeleted }, sort: \Bill.time, order: .reverse) private var bills: [Bill]
-    @Query(filter: #Predicate<Reminder> { !$0.syncDeleted }) private var reminders: [Reminder]
-    @Query(filter: #Predicate { !$0.syncDeleted }, sort: \HealthMetric.date, order: .reverse) private var healths: [HealthMetric]
+    @Query({ var d = FetchDescriptor<FoodEntry>(predicate: #Predicate<FoodEntry> { !$0.syncDeleted }, sortBy: [SortDescriptor(\FoodEntry.date, order: .reverse)]); d.fetchLimit = 1000; return d }()) private var foods: [FoodEntry]
+    @Query({ var d = FetchDescriptor<Bill>(predicate: #Predicate<Bill> { !$0.syncDeleted }, sortBy: [SortDescriptor(\Bill.time, order: .reverse)]); d.fetchLimit = 1000; return d }()) private var bills: [Bill]
+    @Query({ var d = FetchDescriptor<Reminder>(predicate: #Predicate<Reminder> { !$0.syncDeleted }, sortBy: []); d.fetchLimit = 1000; return d }()) private var reminders: [Reminder]
+    @Query({ var d = FetchDescriptor<HealthMetric>(predicate: #Predicate<HealthMetric> { !$0.syncDeleted }, sortBy: [SortDescriptor(\HealthMetric.date, order: .reverse)]); d.fetchLimit = 1000; return d }()) private var healths: [HealthMetric]
 
     @StateObject private var health = HealthManager.shared
     @ObservedObject private var quickAction = QuickActionRouter.shared
@@ -49,6 +72,10 @@ struct ContentView: View {
     @State private var showCamera = false
     @State private var showPicker = false
     @State private var animateTiles = false
+    /// 2026-07-30 新增：首页进入计数器。LazyVGrid 项在导航返回时被复用，
+    /// .onAppear 不会再触发；此值每次进入首页 +1，下传给 MiniBar.resetToken，
+    /// 强制把 drawn 重置为 0 并重画「从左到右变长」动画。
+    @State private var homeEnterToken: Int = 0
     /// 阿宝头像呼吸脉冲动画开关
     @State private var abaoPulse = false
     /// 账单宫格隐私遮罩：@AppStorage 自动持久化到 UserDefaults，重启 App 保持
@@ -57,6 +84,10 @@ struct ContentView: View {
     // 气泡转轴滚动调度：每 2 秒只让「当前轮到的那一条」滚动，四条依次轮流。
     @State private var rollSlot = 0
     @State private var rollTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
+
+    // 全局配置定时拉取：开发者在「开发者中心」切换智能问答 / AI 模型后，所有用户的 App 自动跟随。
+    // 本环境 .task 不派发，故用 Timer + .onReceive（已验证可靠）；每 30s 拉一次，App 常驻也能近实时跟随。
+    @State private var configTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     @StateObject private var sync = CloudSyncManager.shared
 
@@ -173,7 +204,7 @@ struct ContentView: View {
                         .allowsHitTesting(toolbarExpanded)
 
                         // 设置
-                        Button { router.path.append(.settings) } label: {
+                        Button { router.navigate(.settings) } label: {
                             Image(systemName: "gearshape")
                                 .font(AIATheme.Font.body.weight(.medium))
                                 .rotationEffect(.degrees(toolbarExpanded ? -90 : 0))  // 打开往左滚，关闭往右滚
@@ -224,6 +255,41 @@ struct ContentView: View {
                     case .myAccount:    MyAccountView()
                     case .healthDetail(let m):
                         HealthDetailView(metric: m)
+                    case .billDetail(let b):
+                        BillDetailView(bill: b)
+                    case .bodyData:
+                        BodyDataView()
+                    case .healthGoals:
+                        HealthGoalsView()
+                    case .billDashboard(let mode):
+                        BillDashboardView(mode: mode)
+                    case .recognitionRecords:
+                        RecognitionRecordsView()
+                    case .homeLayoutSettings:
+                        HomeLayoutSettingsView()
+                    case .autoSyncSettings:
+                        AutoSyncSettingsView()
+                    case .imageAutoRecogSettings:
+                        ImageAutoRecogSettingsView()
+                    case .defaultReminderSettings:
+                        DefaultReminderSettingsView()
+                    case .developerCenter:
+                        DeveloperCenterView()
+                    case .recurringRuleList:
+                        RecurringRuleListView().environment(\.modelContext, context)
+                    case .billImport:
+                        BillImportView().environment(\.modelContext, context)
+                    case .merchantRuleList:
+                        MerchantRuleListView().environment(\.modelContext, context)
+                    case .adManager:
+                        AdManagerView()
+                    case .monthlyReport:
+                        MonthlyReportView().environment(\.modelContext, context)
+                    case .monthlyBillList(let year, let month):
+                        MonthlyBillListView(year: year, month: month, bills: [])
+                            .environment(\.modelContext, context)
+                    case .triggerTutorial(let trigger):
+                        TriggerTutorialView(trigger: trigger)
                     }
                 }
             }
@@ -255,6 +321,10 @@ struct ContentView: View {
             health.requestAuthorization()
             // 冷启动首拉：0.3s 后从云端拉一次（之后不再周期轮询，靠 3s 防抖推送 + 回前台拉取）
             coldStartSync()
+            // 首页广告位首拉：本环境 .task 闭包不派发，改由 onAppear（已验证触发）兜底拉取广告
+            Task { await AdStore.shared.fetchIfNeeded() }
+            // 全局配置首拉：开发者切换智能问答/AI模型后，所有用户自动跟随（云端权威，本地缓存）
+            Task { await GlobalConfigStore.shared.fetchConfig() }
             // 冷启动同步指示器：仅当已登录才亮起（本地无数据才真正可见）
             if UserDefaults.standard.bool(forKey: "aia.isLoggedIn") {
                 showSyncIndicator = true
@@ -268,6 +338,11 @@ struct ContentView: View {
             #endif
             guard let action else { return }
             consume(action)
+        }
+        // 全局配置定时拉取：开发者在「开发者中心」切换智能问答 / AI 模型后，所有用户的 App 自动跟随。
+        // 云端权威、本地缓存；本环境 .task 不派发，故用 Timer + .onReceive（已验证可靠）。
+        .onReceive(configTimer) { _ in
+            Task { await GlobalConfigStore.shared.fetchConfig() }
         }
         // 通知兜底消费：热启动时 $pending 的 onReceive 可能因 SwiftUI 后台视图订阅的时序竞态而错过本次发射，
         // 导致偶尔不跳转。这里收到通知后主动消费 pending（或通知携带的 action），确保跳转必定发生。
@@ -290,6 +365,10 @@ struct ContentView: View {
             #if DEBUG
             print("[ContentView] didBecomeActive, pending=\(quickAction.pending?.rawValue ?? "nil")")
             #endif
+            // 2026-07-30 热启动（方案 C）：App 从后台回前台时，递增 homeEnterToken 让首页两个
+            // MiniBar 监听 resetToken 统一走 replayMini()（填充淡出→归零→淡入生长），彻底无「变短」观感。
+            // 卡片本身已可见，无需再让 animateTiles 重新淡入（避免回前台整屏闪动）。
+            homeEnterToken &+= 1
             // 截图无感识别：无论是否有快捷操作 pending，只要后台留了识别结果就弹确认页
             checkScreenshotPending()
             // 回到前台时也补生成周期账单（长期未开 App 会补齐中间月份）
@@ -420,7 +499,7 @@ struct ContentView: View {
     /// 阿宝头像：app icon (AIAvatar) 圆形裁剪 + 呼吸脉冲动画（2.5s 循环胀缩）
     private var abaoAvatar: some View {
         Button {
-            router.path.append(.myAccount)
+            router.navigate(.myAccount)
         } label: {
             Image("AIAvatar")
                 .resizable()
@@ -537,7 +616,18 @@ struct ContentView: View {
                                         .simultaneousGesture(longPressToEnterEdit)
                                 }
                             }
-                            .task { animateTiles = true }
+                            // 极短延迟（≈1 帧）：确保首帧以「隐藏态」(opacity0/下移/微缩) 渲染，
+                            // 给入场动画一个起点。否则 .task 在同事务内立即置 true，SwiftUI 会把它
+                            // 当作初始布局而非状态变化 → 弹簧动画被吞掉（即「之前有动画现在没有了」的根因）。
+                            // 早期用 60ms + 0.55s 弹簧 + 索引延迟≈0.8s，用户嫌「加载那么久才显示」，
+                            // 故这里只留 1 帧级延迟，配合下方更快的弹簧，既恢复动画又几乎无等待感。
+                            // 2026-07-30 同步递增 homeEnterToken：让两个 MiniBar.resetToken 监听后
+                            // 把 drawn 强制归 0 并重新播放生长动画，覆盖「从其他页面返回首页」场景。
+                            .task {
+                                homeEnterToken &+= 1
+                                try? await Task.sleep(nanoseconds: 16_000_000)
+                                animateTiles = true
+                            }
                         } else {
                             ForEach(chunk.1, id: \.self) { m in
                                 fullRowView(for: m)
@@ -745,8 +835,8 @@ struct ContentView: View {
             .offset(y: animateTiles ? 0 : 20)
             .scaleEffect(animateTiles ? 1 : 0.96)
             .animation(
-                .spring(response: 0.55, dampingFraction: 0.72)
-                    .delay(Double(idx) * 0.06),
+                .spring(response: 0.4, dampingFraction: 0.8)
+                    .delay(Double(idx) * 0.04),
                 value: animateTiles
             )
     }
@@ -759,7 +849,7 @@ struct ContentView: View {
              number: "\(Int(todayCalories))", unit: "kcal",
              isEmpty: foods.isEmpty) {
             VStack(alignment: .leading, spacing: 8) {
-                MiniBar(value: todayCalories / calorieGoal, color: AIATheme.food, height: 5)
+                MiniBar(value: calorieGoal > 0 ? todayCalories / calorieGoal : 0, color: AIATheme.food, height: 5, resetToken: homeEnterToken)
                 VStack(alignment: .leading, spacing: 5) {
                     calSummaryRow("目标", "\(Int(calorieGoal)) kcal", AIATheme.sub)
                     calSummaryRow(todayCalories > calorieGoal ? "已超" : "待摄入",
@@ -986,7 +1076,7 @@ struct ContentView: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
             .onTapGesture {
-                NavigationRouter.shared.path.append(route)
+                NavigationRouter.shared.navigate(route)
             }
             .onAppear { if active { roll() } }
             .onChange(of: active) { _, isActive in
@@ -1037,7 +1127,7 @@ struct ContentView: View {
                 longPressEnteredEditAt = nil
                 return
             }
-            router.path.append(route)
+            router.navigate(route)
         } label: {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -1144,9 +1234,10 @@ struct ContentView: View {
 
     // MARK: - 健康步数进度条（今日步数 / 目标步数，与饮食 MiniBar 同高）
     private var sparkBars: some View {
-        MiniBar(value: Double(homeSteps) / Double(stepGoal),
+        MiniBar(value: stepGoal > 0 ? Double(homeSteps) / Double(stepGoal) : 0,
                 color: AIATheme.health,
-                height: 5)
+                height: 5,
+                resetToken: homeEnterToken)
     }
 
     // MARK: - 定时同步器（首次 0.3s 触发让首页先渲染，之后 60s 一次）
@@ -1191,9 +1282,9 @@ struct ContentView: View {
             #if DEBUG
             print("[ContentView] jump to \(route), path was: \(self.router.path)")
             #endif
-            if self.router.path != [route] {
-                router.path = [route]
-            }
+            // 走 NavigationRouter 的帧合并，避免冷启动多入口同帧重置 path 触发
+            // "Update NavigationRequestObserver tried to update multiple times per frame"
+            NavigationRouter.shared.replaceWith(route)
         }
     }
 

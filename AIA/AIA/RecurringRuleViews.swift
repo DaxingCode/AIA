@@ -110,7 +110,7 @@ struct RecurringRuleListView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 260)
             Button {
-                NavigationRouter.shared.path.append(.autoSetup)
+                NavigationRouter.shared.navigate(.autoSetup)
             } label: {
                 Text("查看教程")
                     .font(AIATheme.Font.subhead.weight(.medium))

@@ -1014,6 +1014,10 @@ struct ResultConfirmView: View {
                     b.time = eb.date
                     b.isIncome = RecognitionSaver.isIncomeCategory(eb.category)
                     b.imageName = session.imageName
+                    // 用户手动点「保存」→ 确认后的商户分类才沉淀为经验
+                    if !eb.merchant.isEmpty {
+                        MerchantMetaStore.upsert(merchant: eb.merchant, category: eb.category, isIncome: b.isIncome, in: context)
+                    }
                 } else {
                     // 类别未预存（该类别「自动保存」=关，混合识别时确认页仍展示）：点保存此刻才建账单。
                     // 与 autoSave 同口径：仅金额缺失才跳过；空商户兜底类别名。

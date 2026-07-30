@@ -377,7 +377,7 @@ struct BillDashboardView: View {
                             .overlay(alignment: .leading) {
                                 RoundedRectangle(cornerRadius: 3)
                                     .fill(BillCategoryHelpers.color(for: item.cat))
-                                    .frame(width: geo.size.width * CGFloat(percent), height: 6)
+                                    .frame(width: geo.size.width * safeFraction(percent), height: 6)
                             }
                     }
                     .frame(height: 6)

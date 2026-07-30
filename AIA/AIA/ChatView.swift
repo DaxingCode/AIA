@@ -46,8 +46,9 @@ struct ChatView: View {
 
     @State private var input = ""
 
-    // 智能问答 Agent 总开关（与「云同步」同组，在设置页控制）。默认关，零污染。
-    @AppStorage("aia.agentEnabled") private var agentEnabled: Bool = false
+    // 智能问答 Agent 总开关：云端全局配置（开发者中心切换，所有用户自动跟随）。
+    // 用 @ObservedObject 观察 GlobalConfigStore，开发者改完云端后正在看对话页的用户也会即时响应。
+    @ObservedObject private var globalConfig = GlobalConfigStore.shared
     @AppStorage("aia.greetingLLM") private var greetingLLM: Bool = true
     /// 招呼变体轮换索引（周一至周日自然循环，避免同一天相同变体）
     @AppStorage("aia.greetingVariant") private var greetingVariant = 0
@@ -224,11 +225,11 @@ struct ChatView: View {
                 // 快捷意图 chips
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
-                        chip("记饮食") { FoodListView() }
-                        chip("看健康") { HealthListView() }
-                        chip("查账单") { BillListView() }
-                        chip("加待办") { ReminderListView() }
-                        chip("识别记录") { RecognitionRecordsView() }
+                        chip("记饮食", route: .diet)
+                        chip("看健康", route: .health)
+                        chip("查账单", route: .bill)
+                        chip("加待办", route: .todo)
+                        chip("识别记录", route: .recognitionRecords)
                         feedbackChip
                     }
                     .padding(.horizontal)
@@ -985,8 +986,11 @@ struct ChatView: View {
         }
     }
 
-    private func chip(_ title: String, @ViewBuilder destination: () -> some View) -> some View {
-        NavigationLink { destination() } label: {
+    private func chip(_ title: String, route: HomeRoute) -> some View {
+        Button {
+            isInputFocused = false
+            NavigationRouter.shared.navigate(route)
+        } label: {
             Text(title)
                 .font(AIATheme.Font.micro)
                 .foregroundStyle(AIATheme.sub)
@@ -995,10 +999,6 @@ struct ChatView: View {
                 .clipShape(Capsule())
         }
         .buttonStyle(.plain)
-        .simultaneousGesture(TapGesture().onEnded {
-            // 点击快捷意图跳转时自动收起键盘
-            isInputFocused = false
-        })
     }
 
     private var feedbackChip: some View {
@@ -2468,7 +2468,7 @@ struct ChatView: View {
                 } else {
                     // —— 仅本地兜不住才走云端 LLM ——
                     let dataContext = buildContext()
-                    let agentReply = agentEnabled
+                    let agentReply = globalConfig.agentEnabled
                         ? try? await RecognizeService.agentChat(text: t, context: dataContext, userId: agentUserId)
                         : try? await RecognizeService.chat(text: t, context: dataContext)
                     if let r = agentReply, !r.isEmpty {

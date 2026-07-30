@@ -14,11 +14,11 @@ import UIKit
 
 @available(iOS 17, *)
 struct TellAIAIntent: AppIntent {
-    static var title: LocalizedStringResource = "用阿宝记"
+    static var title: LocalizedStringResource = "快速记录"
     static var description = IntentDescription("一句话记账或设提醒：如「午饭35」「25日提醒我交报表」。")
     static var openAppWhenRun: Bool = false   // 后台静默运行，直接记一笔、不弹 UI
     static var parameterSummary: some ParameterSummary {
-        Summary("用阿宝记 \(\.$phrase)")
+        Summary("快速记录 \(\.$phrase)")
     }
 
     @Parameter(title: "内容", description: "想记录的内容，如 午饭35 / 25日提醒我交报表")

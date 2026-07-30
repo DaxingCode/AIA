@@ -5,12 +5,34 @@ import SwiftUI
 struct DeveloperCenterView: View {
     @Environment(\.dismiss) private var dismiss
 
-    // 智能问答 Agent 总开关（原在设置页，现移到开发者中心）
-    @AppStorage("aia.agentEnabled") private var agentEnabled = false
-    // 模型供应商选择（原在设置页，现移到开发者中心）
-    @AppStorage("aia.modelProvider") private var modelProvider = "glm"
-    // 视觉识别模型单独选择
-    @AppStorage("aia.visionModelProvider") private var visionModelProvider = "glm"
+    // 全局配置改为云端权威：开发者切换后写入云端，所有用户自动跟随。
+    // 不再用 @AppStorage 直写本地，统一走 GlobalConfigStore（写云端 + 本地缓存）。
+    @ObservedObject private var global = GlobalConfigStore.shared
+
+    // 智能问答开关（写云端）
+    private var agentBinding: Binding<Bool> {
+        Binding(get: { global.agentEnabled },
+                set: { nv in
+                    global.agentEnabled = nv
+                    Task { await global.saveConfig(agentEnabled: nv, modelProvider: global.modelProvider, visionModelProvider: global.visionModelProvider) }
+                })
+    }
+    // 问答 / Agent 文本模型（写云端）
+    private var modelBinding: Binding<String> {
+        Binding(get: { global.modelProvider },
+                set: { nv in
+                    global.modelProvider = nv
+                    Task { await global.saveConfig(agentEnabled: global.agentEnabled, modelProvider: nv, visionModelProvider: global.visionModelProvider) }
+                })
+    }
+    // 截图识别视觉模型（写云端）
+    private var visionBinding: Binding<String> {
+        Binding(get: { global.visionModelProvider },
+                set: { nv in
+                    global.visionModelProvider = nv
+                    Task { await global.saveConfig(agentEnabled: global.agentEnabled, modelProvider: global.modelProvider, visionModelProvider: nv) }
+                })
+    }
 
     var body: some View {
         ScrollView {
@@ -70,8 +92,8 @@ struct DeveloperCenterView: View {
 
     // MARK: - 广告管理入口
     private var adManagerEntry: some View {
-        NavigationLink {
-            AdManagerView()
+        Button {
+            NavigationRouter.shared.navigate(.adManager)
         } label: {
             HStack(spacing: 14) {
                 ZStack {
@@ -113,7 +135,7 @@ struct DeveloperCenterView: View {
                     .font(AIATheme.Font.subhead.weight(.medium))
                     .foregroundStyle(.primary)
                 Spacer()
-                Toggle("智能问答 Agent", isOn: $agentEnabled)
+                Toggle("智能问答 Agent", isOn: agentBinding)
                     .labelsHidden()
             }
             Text("开启后，对话页的问答由 AI 基于你的记录智能回答（只读，不会改动任何数据）。")
@@ -146,7 +168,7 @@ struct DeveloperCenterView: View {
                 Text("问答 / Agent 模型")
                     .font(AIATheme.Font.micro.weight(.medium))
                     .foregroundStyle(AIATheme.muted)
-                Picker("问答模型", selection: $modelProvider) {
+                Picker("问答模型", selection: modelBinding) {
                     ForEach(AIAModelProvider.allCases) { p in
                         Text(p.displayName).tag(p.rawValue)
                     }
@@ -159,7 +181,7 @@ struct DeveloperCenterView: View {
                 Text("截图识别模型")
                     .font(AIATheme.Font.micro.weight(.medium))
                     .foregroundStyle(AIATheme.muted)
-                Picker("识别模型", selection: $visionModelProvider) {
+                Picker("识别模型", selection: visionBinding) {
                     ForEach(AIAModelProvider.visionCases) { p in
                         Text(p.displayName).tag(p.rawValue)
                     }
