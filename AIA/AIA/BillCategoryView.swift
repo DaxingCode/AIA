@@ -15,7 +15,7 @@ private let bFmt: DateFormatter = {
 
 struct BillCategoryView: View {
     let category: String
-    @Query(sort: \Bill.time, order: .reverse) private var bills: [Bill]
+    @Query(filter: #Predicate<Bill> { !$0.syncDeleted }, sort: \Bill.time, order: .reverse) private var bills: [Bill]
     @Environment(\.modelContext) private var context
     @State private var toast: String?
     @State private var previewImage: UIImage?

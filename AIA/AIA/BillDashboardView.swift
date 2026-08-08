@@ -18,7 +18,7 @@ enum BillDashboardMode: String, CaseIterable {
 
 struct BillDashboardView: View {
     @Environment(\.modelContext) private var context
-    @Query(sort: \Bill.time, order: .reverse) private var allBills: [Bill]
+    @Query(filter: #Predicate<Bill> { !$0.syncDeleted }, sort: \Bill.time, order: .reverse) private var allBills: [Bill]
 
     @State var mode: BillDashboardMode
     @State private var anchorDate: Date = Date()

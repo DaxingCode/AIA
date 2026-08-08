@@ -4,7 +4,7 @@
 // 注意：iOS 不允许 App 直接静默安装快捷指令，最后一步「添加」需用户在系统页亲手点。
 //
 // 重要：本 View 不再内嵌 NavigationStack——外层 NavigationStack 已 push 进来，再嵌一个会冲突卡死。
-// 「完成」按钮直接 router.path.removeLast() pop 出栈。
+// 「完成」按钮走 router.pop() 出栈（内部经帧合并，避免同帧多次改 path）。
 import SwiftUI
 
 @available(iOS 16, *)
@@ -51,7 +51,7 @@ struct AutoRecognitionSetupView: View {
                     .foregroundStyle(.primary)
             }
 
-            Text("添加「阿宝AI自动记账、记待办、记饮食」快捷指令；已安装同名指令时，请选择「替换」操作。")
+            Text("添加「小记自动记账、记待办、记饮食」快捷指令；已安装同名指令时，请选择「替换」操作。")
                 .font(AIATheme.Font.footnote)
                 .foregroundStyle(AIATheme.sub)
                 .lineSpacing(3)

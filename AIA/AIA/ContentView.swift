@@ -4,7 +4,7 @@
 //
 // 导航策略（避坑，重要）：
 //   全 App 统一用单个 NavigationStack(path:) + 单个 .navigationDestination(for:)。
-//   四宫格卡片、齿轮、快捷操作都走 path 编程式跳转（Button { path.append(...) }）。
+//   四宫格卡片、齿轮、快捷操作都走 router.navigate(...) 编程式跳转（经 QuickActionRouter 帧合并，避免同帧多次改 path）。
 //   —— 不用 NavigationLink(value:)（iOS 26 首屏会白屏的已知 bug）；
 //   —— 不用多个 .navigationDestination(isPresented:)（会互相冲突导致「点了没反应」）。
 //   子页面（记录页/详情页）内部继续用闭包式 NavigationLink { Dest() }，与本栈共存无冲突。
@@ -34,6 +34,7 @@ enum HomeRoute: Hashable {
     case homeLayoutSettings
     case autoSyncSettings
     case imageAutoRecogSettings
+    case backgroundSettings
     case defaultReminderSettings
     // 工具页子页（BillToolsView / TodoToolsView / DeveloperCenterView 闭包式 NavigationLink）
     case developerCenter
@@ -41,6 +42,7 @@ enum HomeRoute: Hashable {
     case billImport
     case merchantRuleList
     case adManager
+    case dataStatsExport
     // 月报 / 月账单 / 触发教程（RecordsViews / AutoRecognitionSetupView 闭包式 NavigationLink）
     case monthlyReport
     case monthlyBillList(year: Int, month: Int)
@@ -53,19 +55,42 @@ struct ContentView: View {
     @Query({ var d = FetchDescriptor<Bill>(predicate: #Predicate<Bill> { !$0.syncDeleted }, sortBy: [SortDescriptor(\Bill.time, order: .reverse)]); d.fetchLimit = 1000; return d }()) private var bills: [Bill]
     @Query({ var d = FetchDescriptor<Reminder>(predicate: #Predicate<Reminder> { !$0.syncDeleted }, sortBy: []); d.fetchLimit = 1000; return d }()) private var reminders: [Reminder]
     @Query({ var d = FetchDescriptor<HealthMetric>(predicate: #Predicate<HealthMetric> { !$0.syncDeleted }, sortBy: [SortDescriptor(\HealthMetric.date, order: .reverse)]); d.fetchLimit = 1000; return d }()) private var healths: [HealthMetric]
+    // 首页饮食宫格「饮水量」所需：与饮食记录页今日饮水口径一致，仅取手动加水 WaterLog
+    @Query({ var d = FetchDescriptor<WaterLog>(predicate: #Predicate<WaterLog> { !$0.syncDeleted }, sortBy: [SortDescriptor(\WaterLog.date, order: .reverse)]); d.fetchLimit = 1000; return d }()) private var waterLogs: [WaterLog]
+    // 首页健康管理宫格右上角睡眠状态切换：与健康管理页 SleepToggleButton 共用同一份 SleepSession，状态自动互通。
+    @Query({ var d = FetchDescriptor<SleepSession>(predicate: #Predicate<SleepSession> { !$0.syncDeleted }, sortBy: [SortDescriptor(\SleepSession.sleepStart, order: .reverse)]); d.fetchLimit = 200; return d }()) private var sleeps: [SleepSession]
 
     @StateObject private var health = HealthManager.shared
     @ObservedObject private var quickAction = QuickActionRouter.shared
     @ObservedObject private var router = NavigationRouter.shared
     @ObservedObject private var layout = HomeLayoutStore.shared
+    @ObservedObject private var ent = EntitlementManager.shared
     @State private var isEditing = false
     @State private var draggingModule: HomeModule? = nil
+
+    init() {}
+    // MARK: 睡眠模式遮罩
+    /// 首页宫格点 ☀️ 入睡后盖住整页；点「我醒了」或「先用一下 App」收起。
+    @State private var showSleepMask = false
+    /// 用户主动点「先用一下 App」收起遮罩的那次会话 syncId。
+    /// 记住它 → 同一次睡眠内不再自动盖回（从健康页 pop 回首页、回前台都不会反复打扰）；
+    /// 杀 App 重开时 @State 天然重置为 nil → 满足「只要没点醒来，每次开 App 都盖着」，无需持久化。
+    @State private var sleepMaskDismissedSessionID: UUID?
+    /// 冷启动恢复窗口：onAppear 打开、3s 后自动关闭。
+    /// 冷启动时 coldStartSync 还没把 SleepSession 拉回来，@Query 可能暂时为空，需等数据到位补盖一次。
+    /// 窗口关闭后 sleeps 变化不再自动盖——否则在健康页点「入睡」会把遮罩盖到健康页上。
+    @State private var sleepMaskRestoreWindowOpen = false
     /// 长按进入编辑态的瞬间时间戳：长按松手会连带触发宫格 Button 的 tap，借此在 0.5s 内吞掉这次跳转，避免"进了编辑又跳页"。
     @State private var longPressEnteredEditAt: Date? = nil
     /// 右上角工具栏是否展开：默认收起，仅露「展开」触发按钮；点开露出「首页编辑」+「设置」。
     @State private var toolbarExpanded = false
+    /// 非 Pro 用户退出首页布局编辑态时弹出的订阅页（已编辑但未落库，回滚）。
+    @State private var showPaywall = false
+    /// 进入首页布局编辑态瞬间拍下的布局快照；非 Pro 用户退出编辑时回滚到此，
+    /// 因为 setHidden/relocate 在编辑操作瞬间就已写入 UserDefaults，必须用进入前的快照才能还原。
+    @State private var preEditLayout: HomeLayoutStore.Snapshot? = nil
 
-    @AppStorage("userNickname") private var userNickname = "阿宝的朋友"
+    @AppStorage("userNickname") private var userNickname = "小记的朋友"
     @AppStorage("aia.calorieGoalOverride") private var calorieGoalOverride: Double = 0
     @AppStorage("aia.calorieGoalIsCustom") private var calorieGoalIsCustom: Bool = false
 
@@ -76,7 +101,7 @@ struct ContentView: View {
     /// .onAppear 不会再触发；此值每次进入首页 +1，下传给 MiniBar.resetToken，
     /// 强制把 drawn 重置为 0 并重画「从左到右变长」动画。
     @State private var homeEnterToken: Int = 0
-    /// 阿宝头像呼吸脉冲动画开关
+    /// 好好记头像呼吸脉冲动画开关
     @State private var abaoPulse = false
     /// 账单宫格隐私遮罩：@AppStorage 自动持久化到 UserDefaults，重启 App 保持
     @AppStorage("billHidden") private var billHidden = false
@@ -84,10 +109,6 @@ struct ContentView: View {
     // 气泡转轴滚动调度：每 2 秒只让「当前轮到的那一条」滚动，四条依次轮流。
     @State private var rollSlot = 0
     @State private var rollTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
-
-    // 全局配置定时拉取：开发者在「开发者中心」切换智能问答 / AI 模型后，所有用户的 App 自动跟随。
-    // 本环境 .task 不派发，故用 Timer + .onReceive（已验证可靠）；每 30s 拉一次，App 常驻也能近实时跟随。
-    @State private var configTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     @StateObject private var sync = CloudSyncManager.shared
 
@@ -97,6 +118,8 @@ struct ContentView: View {
 
     // 后台「无感截图识别」的结果：主 App 打开时先自动入库，再弹确认页（确认页只做覆盖修改）。
     @State private var pendingPresent: RecognitionPresent?
+    // 触发 pending 流程时是否跳转对话页（点通知进来=跳转；冷启/回前台=不跳，由闭包接管）。
+    @State private var pendingNavigate: Bool = false
     // 防止 checkScreenshotPending 被多个通知并发/重复触发时重复 present。
     @State private var isCheckingScreenshotPending = false
 
@@ -114,17 +137,37 @@ struct ContentView: View {
     @AppStorage("aia.age") private var age: Int = 30
     @AppStorage("aia.bioSex") private var bioSex: Int = 1   // 1 = 男, 0 = 女
     @AppStorage("aia.activityLevel") private var activityLevel: Int = 1
-    /// 与健康管理页一致：已接入 HealthKit 且真正读到过非零数据时才用真实数据，
-    /// 否则回退到本地手动录入（防止授权弹窗被点拒绝/无 entitlement 时显示全 0）。
-    private var usesHealthKit: Bool { health.authorized && health.isAvailable && health.hasHealthKitData }
-    private var homeSteps: Int { usesHealthKit ? Int(health.stepsToday) : ManualHealthStore.shared.steps(for: Date()) }
-    private var homeExerciseMin: Double {
-        usesHealthKit ? health.exerciseTimeToday : health.exerciseTimeToday + Double(ManualHealthStore.shared.exerciseMinutes(for: Date()))
+    // MARK: 健康指标数据来源（逐指标切换，与健康管理页设置联动）
+    // 每个指标独立选择「自动记录（HealthKit）/ 手动记录」，key 与健康页 @AppStorage 一致。
+    // 仅当「该指标设为 auto」且「HealthKit 真可用」才走 HealthKit，否则回退手动录入。
+    // 用户在健康页改数据来源，首页立即跟着变（@AppStorage 响应式广播）。
+    @AppStorage(HealthMetricKind.steps.sourceKey)     private var stepsSource: HealthSourceMode = .auto
+    @AppStorage(HealthMetricKind.sleep.sourceKey)     private var sleepSource: HealthSourceMode = .auto
+    @AppStorage(HealthMetricKind.exercise.sourceKey)  private var exerciseSource: HealthSourceMode = .auto
+    @AppStorage(HealthMetricKind.tdee.sourceKey)      private var tdeeSource: HealthSourceMode = .auto
+    @AppStorage(HealthMetricKind.heartRate.sourceKey) private var heartRateSource: HealthSourceMode = .auto
+
+    private var hkUsable: Bool { health.authorized && health.isAvailable && health.hasHealthKitData }
+    /// 某指标当前是否应走自动（HealthKit）记录。与健康管理页 isAuto(_:) 同源口径。
+    private func isAuto(_ kind: HealthMetricKind) -> Bool {
+        let mode: HealthSourceMode = {
+            switch kind {
+            case .steps: return stepsSource
+            case .sleep: return sleepSource
+            case .exercise: return exerciseSource
+            case .tdee: return tdeeSource
+            case .heartRate: return heartRateSource
+            }
+        }()
+        return mode == .auto && hkUsable
     }
-    /// 与健康管理页 TDEE 圆环同源：已接入 HealthKit 且读到数据 → 静息+活动能量；
-    /// 未接入 → 手动补录的活动热量。保证首页健康卡片/今日预览/管理页圆环三处一致。
+    private var homeSteps: Int { isAuto(.steps) ? Int(health.stepsToday) : ManualHealthStore.shared.steps(for: Date()) }
+    private var homeExerciseMin: Double {
+        isAuto(.exercise) ? health.exerciseTimeToday : health.exerciseTimeToday + Double(ManualHealthStore.shared.exerciseMinutes(for: Date()))
+    }
+    /// 与健康管理页 TDEE 圆环同源：自动 → 静息+活动能量；手动 → 手动补录活动热量。
     private var homeEnergyBurned: Double {
-        usesHealthKit ? health.restingEnergyToday + health.activeEnergyToday : Double(ManualHealthStore.shared.activeCalories(for: Date()))
+        isAuto(.tdee) ? health.restingEnergyToday + health.activeEnergyToday : Double(ManualHealthStore.shared.activeCalories(for: Date()))
     }
     /// 健康气泡消息：与首页健康卡片 / 健康管理页「今日概览」完全同源——
     /// 步数走 homeSteps（含手动回落）、目标走 @AppStorage stepGoal、运动时长走 homeExerciseMin（含手动回落）、
@@ -132,7 +175,16 @@ struct ContentView: View {
     /// 不再直读 raw health.stepsToday/exerciseTimeToday，也不再硬编码 10000 目标。
     private var healthBubbleMessages: [String] {
         let stat = { (key: String) -> String in
-            healths.first(where: { $0.metric.contains(key) }).map { "\($0.value)\($0.unit)" } ?? "—"
+            // 静息心率：自动模式 + HealthKit 已读到值 → 显示 bpm（与健康管理页 StatCard 同源，
+            // 否则仅依赖 healths 时气会一直显示 "—"，因 HealthKit 静息心率不回写 healths 表）。
+            if key == "心率" {
+                if isAuto(.heartRate), health.restingHeartRate > 0 {
+                    return "\(Int(health.restingHeartRate))bpm"
+                }
+                let manual = ManualHealthStore.shared.restingHeartRate(for: Date())
+                if manual > 0 { return "\(manual)bpm" }
+            }
+            return healths.first(where: { $0.metric.contains(key) }).map { "\($0.value)\($0.unit)" } ?? "—"
         }
         let energyText = homeEnergyBurned > 0 ? "\(Int(homeEnergyBurned)) kcal" : "—"
         return [
@@ -148,6 +200,219 @@ struct ContentView: View {
     @AppStorage("aia.appearance") private var appearanceRaw = "system"
     private var appearanceColorScheme: ColorScheme? {
         AppearanceMode(raw: appearanceRaw).colorScheme
+    }
+
+    // MARK: 顶部工具栏（折叠/展开卷帘式）：编辑·睡眠·设置·触发器
+    private var toolbarTrailingContent: some View {
+        // 按钮始终存在，用 frame 宽度 + opacity + scale 做"卷帘"式展开/收起。
+        // 不用 if+transition：toolbar 容器对 transition 支持差，会瞬间闪现不走动画。
+        HStack(spacing: 0) {
+            // 首页编辑 / 完成：图标 + 文字，最直观；编辑态不再旋转（文字配旋转会歪，且铅笔转 90° 像 bug）
+            Button {
+                // 进入编辑模式时给中等震动反馈；退出不震
+                if !isEditing {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    // 拍下进入编辑态前的布局快照：setHidden/relocate 在操作瞬间已写 UserDefaults，
+                    // 必须用进入前的快照才能在退出时回滚，仅 reload() 读不回旧值。
+                    preEditLayout = layout.snapshot()
+                }
+                // 非 Pro 用户：允许看/拖/改，但退出编辑态时回滚内存改动 + 弹订阅页，
+                // 布局永不被非 Pro 用户落库（首页布局自定义为 Pro 专属）。
+                if isEditing && !ent.isFullAccess {
+                    _ = rollbackNonProEditIfNeeded(showPaywallWhenRollback: true)
+                    return
+                }
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    isEditing.toggle()
+                    draggingModule = nil
+                    if !isEditing { preEditLayout = nil }
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: isEditing ? "checkmark.circle.fill" : "pencil.circle")
+                        .font(AIATheme.Font.body.weight(.medium))
+                        .contentTransition(.symbolEffect(.replace))
+                    Text(isEditing ? "完成" : "编辑")
+                        .font(AIATheme.Font.body.weight(.medium))
+                }
+            }
+            .frame(width: toolbarExpanded ? 66 : 0)
+            .opacity(toolbarExpanded ? 1 : 0)
+            .scaleEffect(toolbarExpanded ? 1 : 0.4, anchor: .trailing)
+            .padding(.trailing, toolbarExpanded ? 14 : 0)
+            .allowsHitTesting(toolbarExpanded)
+
+            // 入睡 / 醒来：与首页 sleepStatusButton、健康页 SleepToggleButton 共用
+            // 同一份 SleepSession（toggleSleepSession），状态在三个入口之间自动互通。
+            // 视觉：用图标形态区分（在睡 moon.fill / 空闲 moon），颜色保持胶囊默认色，
+            // 避免在一排小图标里强染色造成视觉跳跃。
+            Button {
+                // 与 sleepStatusButton 同口径：先抓点击前状态，toggle 后 @Query 还没刷新。
+                let wasSleeping = currentActiveSleepSession(in: sleeps) != nil
+                let start = currentActiveSleepSession(in: sleeps)?.sleepStart ?? Date()
+                toggleSleepSession(in: context, sleeps: sleeps)   // 模型变更不包 withAnimation
+                if wasSleeping {
+                    // 醒来：弹与首页/健康页同款的睡眠时长 toast
+                    ToastCenter.shared.showImportant(
+                        sleepSummaryText(start: start),
+                        icon: "🌙",
+                        accent: AIATheme.warning
+                    )
+                }
+                // 副作用延后一个 runloop，避免与 SwiftData 变更同帧触发布局重入
+                DispatchQueue.main.async {
+                    withAnimation(.easeOut(duration: 0.35)) {
+                        showSleepMask = !wasSleeping   // 刚入睡 → 盖遮罩；刚醒来 → 收遮罩
+                    }
+                }
+            } label: {
+                // 仅靠图标轮廓的厚薄区分在睡/空闲：moon=线稿，moon.fill=实心，一眼可读。
+                // .contentTransition(.symbolEffect(.replace)) 让切换有从下往上"升起"的过渡。
+                let isSleeping = currentActiveSleepSession(in: sleeps) != nil
+                Image(systemName: isSleeping ? "moon.fill" : "moon")
+                    .font(AIATheme.Font.body.weight(.medium))
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .frame(width: toolbarExpanded ? 30 : 0)
+            .opacity(toolbarExpanded ? 1 : 0)
+            .scaleEffect(toolbarExpanded ? 1 : 0.4, anchor: .trailing)
+            .padding(.trailing, toolbarExpanded ? 14 : 0)
+            .allowsHitTesting(toolbarExpanded)
+
+            // 设置
+            Button { router.navigate(.settings) } label: {
+                Image(systemName: "gearshape")
+                    .font(AIATheme.Font.body.weight(.medium))
+                    .rotationEffect(.degrees(toolbarExpanded ? -90 : 0))  // 打开往左滚，关闭往右滚
+            }
+            .frame(width: toolbarExpanded ? 30 : 0)
+            .opacity(toolbarExpanded ? 1 : 0)
+            .scaleEffect(toolbarExpanded ? 1 : 0.4, anchor: .trailing)
+            .padding(.trailing, toolbarExpanded ? 14 : 0)
+            .allowsHitTesting(toolbarExpanded)
+
+            // 展开 / 收起触发器
+            Button {
+                // 展开工具栏时给轻微震动反馈；收起不震
+                if !toolbarExpanded {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) {
+                    toolbarExpanded.toggle()
+                    // 收起时若在编辑态，一并退出，避免隐藏「完成」按钮后卡在编辑态
+                    if !toolbarExpanded && isEditing {
+                        // 非 Pro 用户：点 X 取消编辑 = 回滚进入编辑态后的内存改动 + 退出，
+                        // 布局绝不被非 Pro 用户落库（与「完成」按钮的回滚语义一致）。
+                        _ = rollbackNonProEditIfNeeded()
+                    }
+                }
+            } label: {
+                Image(systemName: toolbarExpanded ? "xmark.circle" : "gearshape")
+                    .font(AIATheme.Font.body.weight(.medium))
+                    .contentTransition(.symbolEffect(.replace))
+                    .rotationEffect(.degrees(toolbarExpanded ? 90 : 0))
+            }
+        }
+        .clipped()
+    }
+
+    // MARK: 路由目标视图：把 navigationDestination 的 switch 抽出来单独类型检查
+    @ViewBuilder
+    private func routeDestination(_ route: HomeRoute) -> some View {
+        switch route {
+        case .diet:         FoodListView()
+        case .health:       HealthListView()
+        case .bill:         BillListView()
+        case .billTools:    BillToolsView()
+        case .todo:         ReminderListView()
+        case .todoTools:    TodoToolsView()
+        case .chat:         ChatView(prefill: router.chatPrefill, entrySource: router.chatEntrySource, autofocusInput: router.chatAutoFocus)
+        case .chatVoice:    ChatView(autostartVoice: true, entrySource: "voice")
+        case .settings:     SettingsView()
+        case .autoSetup:    AutoRecognitionSetupView()
+        case .myAccount:    MyAccountView()
+        case .healthDetail(let m):
+            HealthDetailView(metric: m)
+        case .billDetail(let b):
+            BillDetailView(bill: b)
+        case .bodyData:
+            BodyDataView()
+        case .healthGoals:
+            HealthGoalsView()
+        case .billDashboard(let mode):
+            BillDashboardView(mode: mode)
+        case .recognitionRecords:
+            RecognitionRecordsView()
+        case .homeLayoutSettings:
+            HomeLayoutSettingsView()
+        case .autoSyncSettings:
+            AutoSyncSettingsView()
+        case .imageAutoRecogSettings:
+            ImageAutoRecogSettingsView()
+        case .backgroundSettings:
+            BackgroundSettingsView()
+        case .defaultReminderSettings:
+            DefaultReminderSettingsView()
+        case .developerCenter:
+            DeveloperCenterView()
+        case .recurringRuleList:
+            RecurringRuleListView().environment(\.modelContext, context)
+        case .billImport:
+            BillImportView().environment(\.modelContext, context)
+        case .merchantRuleList:
+            MerchantRuleListView().environment(\.modelContext, context)
+        case .adManager:
+            AdManagerView()
+        case .dataStatsExport:
+            DataStatsExportView()
+        case .monthlyReport:
+            MonthlyReportView().environment(\.modelContext, context)
+        case .monthlyBillList(let year, let month):
+            MonthlyBillListView(year: year, month: month, bills: [])
+                .environment(\.modelContext, context)
+        case .triggerTutorial(let trigger):
+            TriggerTutorialView(trigger: trigger)
+        }
+    }
+
+    /// 冷启动一次性逻辑（从 .onAppear 抽出单独类型检查，避免整段闭包卡住编译器）。
+    @MainActor
+    private func performOnAppear() {
+        #if DEBUG
+        print("[ContentView] onAppear, pending=\(quickAction.pending?.rawValue ?? "nil")")
+        #endif
+        // 一次性去重：清理重复记录（仅首次启动执行）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            DataDeduplicator.runOnce(context: context)
+        }
+        if let action = quickAction.pending { consume(action) }
+        if let route = AppDelegate.pendingNotificationRoute {
+            consumeNotificationRoute(route)
+        }
+        if !onboardingDone { showOnboarding = true }
+        checkScreenshotPending()
+        // 睡眠模式：只要还有没点「醒来」的会话，冷启动就把遮罩盖回来。
+        // 先立即试一次（本地库已有数据时即刻生效），再开 3s 窗口等云端同步补数据。
+        sleepMaskRestoreWindowOpen = true
+        restoreSleepMaskIfNeeded()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            sleepMaskRestoreWindowOpen = false
+        }
+        // 周期 / 订阅账单：App 打开时把已到期的账期自动入账（房租、会员费等）。
+        RecurringBillManager.generateDue(context: context)
+        // 打通 HealthKit：进入首页即尝试授权。付费账号+HealthKit entitlement 已配，真机会弹授权弹窗；未配则内部静默跳过。
+        HealthManager.shared.requestAuthorization()
+        // 冷启动首拉：0.3s 后从云端拉一次（之后不再周期轮询，靠 3s 防抖推送 + 回前台拉取）
+        coldStartSync()
+        // 首页广告位首拉：本环境 .task 闭包不派发，改由 onAppear（已验证触发）兜底拉取广告
+        Task { await AdStore.shared.fetchIfNeeded() }
+        // 全局配置首拉：开发者切换智能问答/AI模型后，所有用户自动跟随（云端权威，本地缓存）
+        Task { await GlobalConfigStore.shared.fetchConfig() }
+        // 冷启动同步指示器：仅当已登录才亮起（本地无数据才真正可见）
+        if UserDefaults.standard.bool(forKey: "aia.isLoggedIn") {
+            showSyncIndicator = true
+            hasFirstSyncStarted = false
+        }
     }
 
     var body: some View {
@@ -175,123 +440,11 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    // 按钮始终存在，用 frame 宽度 + opacity + scale 做"卷帘"式展开/收起。
-                    // 不用 if+transition：toolbar 容器对 transition 支持差，会瞬间闪现不走动画。
-                    HStack(spacing: 0) {
-                        // 首页编辑 / 完成：图标 + 文字，最直观；编辑态不再旋转（文字配旋转会歪，且铅笔转 90° 像 bug）
-                        Button {
-                            // 进入编辑模式时给中等震动反馈；退出不震
-                            if !isEditing {
-                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            }
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                                isEditing.toggle()
-                                draggingModule = nil
-                            }
-                        } label: {
-                            HStack(spacing: 3) {
-                                Image(systemName: isEditing ? "checkmark.circle.fill" : "pencil.circle")
-                                    .font(AIATheme.Font.body.weight(.medium))
-                                    .contentTransition(.symbolEffect(.replace))
-                                Text(isEditing ? "完成" : "编辑")
-                                    .font(AIATheme.Font.body.weight(.medium))
-                            }
-                        }
-                        .frame(width: toolbarExpanded ? 66 : 0)
-                        .opacity(toolbarExpanded ? 1 : 0)
-                        .scaleEffect(toolbarExpanded ? 1 : 0.4, anchor: .trailing)
-                        .padding(.trailing, toolbarExpanded ? 14 : 0)
-                        .allowsHitTesting(toolbarExpanded)
-
-                        // 设置
-                        Button { router.navigate(.settings) } label: {
-                            Image(systemName: "gearshape")
-                                .font(AIATheme.Font.body.weight(.medium))
-                                .rotationEffect(.degrees(toolbarExpanded ? -90 : 0))  // 打开往左滚，关闭往右滚
-                        }
-                        .frame(width: toolbarExpanded ? 30 : 0)
-                        .opacity(toolbarExpanded ? 1 : 0)
-                        .scaleEffect(toolbarExpanded ? 1 : 0.4, anchor: .trailing)
-                        .padding(.trailing, toolbarExpanded ? 14 : 0)
-                        .allowsHitTesting(toolbarExpanded)
-
-                        // 展开 / 收起触发器
-                        Button {
-                            // 展开工具栏时给轻微震动反馈；收起不震
-                            if !toolbarExpanded {
-                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            }
-                            withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) {
-                                toolbarExpanded.toggle()
-                                // 收起时若在编辑态，一并退出，避免隐藏「完成」按钮后卡在编辑态
-                                if !toolbarExpanded && isEditing {
-                                    isEditing = false
-                                    draggingModule = nil
-                                }
-                            }
-                        } label: {
-                            Image(systemName: toolbarExpanded ? "xmark.circle" : "ellipsis.circle")
-                                .font(AIATheme.Font.body.weight(.medium))
-                                .contentTransition(.symbolEffect(.replace))
-                                .rotationEffect(.degrees(toolbarExpanded ? 90 : 0))
-                        }
-                    }
-                    .clipped()
+                    toolbarTrailingContent
                 }
             }
             .navigationDestination(for: HomeRoute.self) { route in
-                Group {
-                    switch route {
-                    case .diet:         FoodListView()
-                    case .health:       HealthListView()
-                    case .bill:         BillListView()
-                    case .billTools:    BillToolsView()
-                    case .todo:         ReminderListView()
-                    case .todoTools:    TodoToolsView()
-                    case .chat:         ChatView(prefill: router.chatPrefill, entrySource: router.chatEntrySource)
-                    case .chatVoice:    ChatView(autostartVoice: true, entrySource: "voice")
-                    case .settings:     SettingsView()
-                    case .autoSetup:    AutoRecognitionSetupView()
-                    case .myAccount:    MyAccountView()
-                    case .healthDetail(let m):
-                        HealthDetailView(metric: m)
-                    case .billDetail(let b):
-                        BillDetailView(bill: b)
-                    case .bodyData:
-                        BodyDataView()
-                    case .healthGoals:
-                        HealthGoalsView()
-                    case .billDashboard(let mode):
-                        BillDashboardView(mode: mode)
-                    case .recognitionRecords:
-                        RecognitionRecordsView()
-                    case .homeLayoutSettings:
-                        HomeLayoutSettingsView()
-                    case .autoSyncSettings:
-                        AutoSyncSettingsView()
-                    case .imageAutoRecogSettings:
-                        ImageAutoRecogSettingsView()
-                    case .defaultReminderSettings:
-                        DefaultReminderSettingsView()
-                    case .developerCenter:
-                        DeveloperCenterView()
-                    case .recurringRuleList:
-                        RecurringRuleListView().environment(\.modelContext, context)
-                    case .billImport:
-                        BillImportView().environment(\.modelContext, context)
-                    case .merchantRuleList:
-                        MerchantRuleListView().environment(\.modelContext, context)
-                    case .adManager:
-                        AdManagerView()
-                    case .monthlyReport:
-                        MonthlyReportView().environment(\.modelContext, context)
-                    case .monthlyBillList(let year, let month):
-                        MonthlyBillListView(year: year, month: month, bills: [])
-                            .environment(\.modelContext, context)
-                    case .triggerTutorial(let trigger):
-                        TriggerTutorialView(trigger: trigger)
-                    }
-                }
+                routeDestination(route)
             }
         }
         .onChange(of: router.path) { old, new in
@@ -302,34 +455,13 @@ struct ContentView: View {
         // 冷启动兜底：didFinishLaunching 里写入的 pending 在 ContentView 订阅 onReceive 之前就已存在，
         // onReceive 不会回放初始值；通知又在订阅前发出会被直接丢弃。因此这里显式读一次 pending 消费冷启动快捷项。
         .onAppear {
-            #if DEBUG
-            print("[ContentView] onAppear, pending=\(quickAction.pending?.rawValue ?? "nil")")
-            #endif
-            // 一次性去重：清理重复记录（仅首次启动执行）
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                DataDeduplicator.runOnce(context: context)
-            }
-            if let action = quickAction.pending { consume(action) }
-            if let route = AppDelegate.pendingNotificationRoute {
-                consumeNotificationRoute(route)
-            }
-            if !onboardingDone { showOnboarding = true }
-            checkScreenshotPending()
-            // 周期 / 订阅账单：App 打开时把已到期的账期自动入账（房租、会员费等）。
-            RecurringBillManager.generateDue(context: context)
-            // 打通 HealthKit：进入首页即尝试授权。autoAuthEnabled=false（免费账号默认）时内部自动跳过，不会崩。
-            health.requestAuthorization()
-            // 冷启动首拉：0.3s 后从云端拉一次（之后不再周期轮询，靠 3s 防抖推送 + 回前台拉取）
-            coldStartSync()
-            // 首页广告位首拉：本环境 .task 闭包不派发，改由 onAppear（已验证触发）兜底拉取广告
-            Task { await AdStore.shared.fetchIfNeeded() }
-            // 全局配置首拉：开发者切换智能问答/AI模型后，所有用户自动跟随（云端权威，本地缓存）
-            Task { await GlobalConfigStore.shared.fetchConfig() }
-            // 冷启动同步指示器：仅当已登录才亮起（本地无数据才真正可见）
-            if UserDefaults.standard.bool(forKey: "aia.isLoggedIn") {
-                showSyncIndicator = true
-                hasFirstSyncStarted = false
-            }
+            performOnAppear()
+        }
+        // 冷启动时 SleepSession 可能还在云端同步途中，@Query 到位后在恢复窗口内补盖一次。
+        // 窗口外不响应，避免健康页点「入睡」时把遮罩盖到健康页上。
+        .onChange(of: sleeps.count) { _, _ in
+            guard sleepMaskRestoreWindowOpen else { return }
+            restoreSleepMaskIfNeeded()
         }
         // 热启动（App 后台时长按图标）：performActionFor 改 pending 时 ContentView 已订阅，onReceive 能收到。
         .onReceive(quickAction.$pending) { action in
@@ -338,11 +470,6 @@ struct ContentView: View {
             #endif
             guard let action else { return }
             consume(action)
-        }
-        // 全局配置定时拉取：开发者在「开发者中心」切换智能问答 / AI 模型后，所有用户的 App 自动跟随。
-        // 云端权威、本地缓存；本环境 .task 不派发，故用 Timer + .onReceive（已验证可靠）。
-        .onReceive(configTimer) { _ in
-            Task { await GlobalConfigStore.shared.fetchConfig() }
         }
         // 通知兜底消费：热启动时 $pending 的 onReceive 可能因 SwiftUI 后台视图订阅的时序竞态而错过本次发射，
         // 导致偶尔不跳转。这里收到通知后主动消费 pending（或通知携带的 action），确保跳转必定发生。
@@ -371,16 +498,27 @@ struct ContentView: View {
             homeEnterToken &+= 1
             // 截图无感识别：无论是否有快捷操作 pending，只要后台留了识别结果就弹确认页
             checkScreenshotPending()
+            // 回到前台兜底：编辑态中途切后台/被杀再回来时，非 Pro 用户的改动可能已落库在 UserDefaults，
+            // 这里回滚进入编辑前的快照，防止「关 App 再回来布局被改了」。（杀 App 前 didEnterBackground 已先回滚一次）
+            _ = rollbackNonProEditIfNeeded()
             // 回到前台时也补生成周期账单（长期未开 App 会补齐中间月份）
             RecurringBillManager.generateDue(context: context)
-            // 回到前台立即同步一次云端 → 4 宫格立刻显示最新数据，不再等 60s
-            if UserDefaults.standard.bool(forKey: "aia.isLoggedIn") {
-                sync.autoSyncIfEnabled(context: context)
-            }
+            // 全局配置回前台拉取：开发者切换智能问答/AI模型后，用户切回 App 即自动跟随云端
+            // （低频，生命周期驱动，不再常驻轮询占用云函数额度）
+            Task { await GlobalConfigStore.shared.fetchConfig() }
+            // 回前台云端同步统一交给 AppDelegate.sceneDidBecomeActive（系统 UISceneDelegate 保证触发，
+            // 且受 autoSync + isLoggedIn 双重守卫）。此处删除可避免与 AppDelegate 重复 spawn 同步 Task，
+            // 并修正「关掉 autoSync 的用户回前台仍被同步」的语义歧义。
             guard quickAction.pending != nil else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 if let p = quickAction.pending { consume(p) }
             }
+        }
+        // 进入后台 / 杀 App 前：非 Pro 用户在编辑态时立即回滚进入编辑前的布局快照。
+        // 此时 preEditLayout 仍在内存，是最可靠的回滚时机，避免布局被非 Pro 用户落库。
+        // 回前台时再兜底一次（见 didBecomeActive 块），双保险。
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+            _ = rollbackNonProEditIfNeeded()
         }
         // 冷启动同步指示器消失：检测到第一次 isSyncing 从 true → false
         // （即 0.3s 后首次同步完成，云端数据写入本地，@Query 自动刷新）
@@ -399,19 +537,37 @@ struct ContentView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .screenshotRecognitionReady)) { _ in
-            checkScreenshotPending()
+            checkScreenshotPending(navigateToChat: true)
         }
-        .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker)
+        .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker, navigateToChat: true)
         // 后台「无感截图识别」的结果确认页：App 打开且有 pending 时弹出（正常已入库 / 重复则警告不入库），
         // 关闭即清空，避免重复弹。
         .fullScreenCover(item: $pendingPresent) { present in
-            makeResultConfirmView(present)
-                .environment(\.modelContext, context)
-                .interactiveDismissDisabled(true)
-                .onDisappear {
-                    ScreenshotStore.clearPending()
-                    pendingPresent = nil
+            makeResultConfirmView(present,
+                onSaveAction: { session in
+                    // 「保存」→ 建真实模型实例（applyAndSave 已入库）+ 回插「已保存态」气泡
+                    RecognitionSaver.insertSavedBubble(session: session, context: context)
+                    if pendingNavigate {
+                        DispatchQueue.main.async { NavigationRouter.shared.navigate(.chat) }
+                    }
+                },
+                onCancelAction: {
+                    // 「返回 / 不保存」→ 仍生成「待确认态」气泡（syncId=nil 未入库），数据留在对话里
+                    if case .pending(let result, _, _, let source, _) = present {
+                        RecognitionSaver.insertPendingBubble(result: result, context: context,
+                                                             recogSource: RecogSource.raw(from: source))
+                    }
+                    if pendingNavigate {
+                        DispatchQueue.main.async { NavigationRouter.shared.navigate(.chat) }
+                    }
                 }
+            )
+            .environment(\.modelContext, context)
+            .interactiveDismissDisabled(true)
+            .onDisappear {
+                ScreenshotStore.clearPending()
+                pendingPresent = nil
+            }
         }
         // 首次启动引导：看完即标记完成，避免重复弹
         .fullScreenCover(isPresented: $showOnboarding) {
@@ -422,41 +578,135 @@ struct ContentView: View {
         }
         // 全局轻量 toast（静默保存提示等）：挂在 NavigationStack 上，push 进来的页面也能看到。
         // 静默路径不弹 fullScreenCover，不会被 cover 遮挡。
+        // 睡眠模式遮罩：挂在 NavigationStack 上覆盖整窗（含底部 AIBottomBar）；
+        // 放在 GlobalToastOverlay 之前，保证 toast 仍显示在遮罩之上。
+        .overlay {
+            if showSleepMask {
+                SleepMaskOverlay(
+                    session: currentActiveSleepSession(in: sleeps),
+                    onWake: {
+                        // 结束会话：写入 wakeAt + durationSeconds。先捕获 sleepStart 算本次时长
+                        // （toggle 会直接改同一 active 实例，但 @Query 此刻未必刷新，用本地 start 更稳）。
+                        let start = currentActiveSleepSession(in: sleeps)?.sleepStart ?? Date()
+                        toggleSleepSession(in: context, sleeps: sleeps)
+                        ToastCenter.shared.showImportant(
+                            sleepSummaryText(start: start),
+                            icon: "🌙",
+                            accent: AIATheme.warning
+                        )
+                        DispatchQueue.main.async {
+                            sleepMaskDismissedSessionID = nil       // 会话已结束，清掉收起标记
+                            withAnimation(.easeOut(duration: 0.3)) { showSleepMask = false }
+                        }
+                    },
+                    onDismiss: {
+                        // 记住这次会话已被用户主动收起 → 本次睡眠内不再自动盖回
+                        sleepMaskDismissedSessionID = currentActiveSleepSession(in: sleeps)?.syncId
+                        withAnimation(.easeOut(duration: 0.3)) { showSleepMask = false }
+                    }
+                )
+                .transition(.opacity)
+                .zIndex(50)
+            }
+        }
         .overlay(alignment: .top) { GlobalToastOverlay() }
         // 外观模式开关：system → 不覆盖（跟随系统）；light/dark → 强制浅/深。
         // 挂在 NavigationStack 上即可覆盖整个窗口（含 push 进来的设置页、sheet、fullScreenCover）。
         .preferredColorScheme(appearanceColorScheme)
+        // 非 Pro 用户退出首页布局编辑态时弹出订阅页（已编辑但未落库，已回滚）。
+        .sheet(isPresented: $showPaywall) {
+            PaywallView()
+        }
     }
 
     /// 检查后台识别留下的待确认结果（截图无感识别链路）：
-    /// 走 processRecognition —— 按「图片自动识别」设置（按类别 自动保存/自动弹出）分流：
-    /// - .present：弹确认页（预存类别可覆盖修改，未预存类别点「存入」才写库）；
-    /// - .silentlySaved：已静默入库 → 清 pending + 顶部 toast 引导去对应页面修改（原生「识别完成」通知不受影响）；
-    /// - .nothing：按设置丢弃 → 仅清 pending。
+    /// 走 processRecognition —— 按「来源 × 类别」二维设置分流，结果统一组装成一条对话气泡消息插入对话流：
+    /// - .inserted：已在对话流插入结果气泡（已保存态 / 待确认态卡片随设置而定）→ 清 pending；
+    ///   若用户是点系统通知进来的（navigateToChat=true），跳到对话页查看结果。
+    /// - .nothing：按设置丢弃、或未识别出任何类别 → 仅清 pending。
     @MainActor
-    private func checkScreenshotPending() {
+    private func checkScreenshotPending(navigateToChat: Bool = false, forceSave: Bool = false) {
         guard !isCheckingScreenshotPending, pendingPresent == nil else { return }
         guard let p = ScreenshotStore.loadPending() else { return }
         isCheckingScreenshotPending = true
         let img = ScreenshotStore.loadPendingImage()
-        let outcome = RecognitionSaver.processRecognition(result: p.result, rawText: p.rawText,
-                                                          image: img, context: context,
-                                                          source: p.source ?? .cloud)
-        isCheckingScreenshotPending = false
-        switch outcome {
-        case .present(let present):
-            // 推迟到下一个 runloop 呈现 cover，避免 SwiftUI 环境（NavigationStack/ModelContext）未完全就绪时
-            // 全屏 cover 闪烁/自动关闭再弹出。同一 runloop 中的后续 checkScreenshotPending 会被 isCheckingScreenshotPending 拦截。
-            DispatchQueue.main.async { [present] in
-                guard pendingPresent == nil else { return }
-                pendingPresent = present
+        // 招呼气泡定位锚点：必须打在插入「你发的图」气泡之前，
+        // 否则 ChatView.onAppear 会把这张截屏算成历史，招呼气泡排到图片后面。
+        NavigationRouter.shared.beginChatSession()
+        // 像微信一样：这张截屏先作为「你发的图」进对话流，好好记随后在同一段对话里回识别卡片。
+        // 返回的文件名给识别结果复用，同一张图不落盘两次。
+        let presavedName = appendUserImageMessage(image: img, context: context)
+
+        // 付费墙拦截分支：后台识别被免费版权益拦截（无云端视觉 + 本地覆盖不到），
+        // 不当作普通识别结果处理，而是回插「升级 Pro」引导气泡——与对话页付费墙做法一致。
+        if p.isPaywallBlocked {
+            ScreenshotStore.clearPending()
+            // 已开通 Pro/试用/白名单的用户本不该走这条分支；若因权益状态抖动误入，
+            // 不要再提示「升级 Pro」（会造成「已开通还让升级」的困惑），改提示重试/网络问题。
+            let text: String
+            if EntitlementManager.shared.isPro {
+                text = "这张图片的云端识别暂时没成功，可能是网络波动。你可以稍后重试，或手动记录～"
+            } else {
+                text = UPGRADE_PRO_PREFIX + "这张图用本地AI识别失败了，如果你想体验更好，可升级 Pro版会员后，使用云端大模型AI进行识别。"
             }
-        case .silentlySaved(let savedTypes):
-            // 数据已入库：立即清 pending，避免点通知回 App 时再弹确认页
+            context.insert(ChatMessage(role: .ai, text: text))
+            isCheckingScreenshotPending = false
+            if navigateToChat {
+                DispatchQueue.main.async { NavigationRouter.shared.navigate(.chat) }
+            }
+            return
+        }
+
+        // 普通识别失败分支（非权益类错误：本地解析/网络/云端异常）。
+        // 绝提示「升级 Pro」，避免已开通会员用户被误导；给友好提示即可。
+        if p.isRecognizeFailed {
             ScreenshotStore.clearPending()
-            ToastCenter.shared.show(ImageAutoRecogSettings.silentSaveToast(savedTypes: savedTypes))
-        case .nothing:
-            ScreenshotStore.clearPending()
+            context.insert(ChatMessage(role: .ai, text: "这张图片暂时没能识别成功，可能是网络或图片问题。你可以稍后重试，或手动记录～"))
+            isCheckingScreenshotPending = false
+            if navigateToChat {
+                DispatchQueue.main.async { NavigationRouter.shared.navigate(.chat) }
+            }
+            return
+        }
+
+        // 分流依据：若识别出的已知类别里任一设为「待确认」，整张图先弹确认页——
+        // 确认页只是待确认气泡的前置编辑入口，关掉后数据照样留在对话气泡里，之后在气泡点保存才入库。
+        // forceSave=true（来自通知「保存」Action）：即使用户设置是「确认后再保存」，本次也直接入库，
+        // 实现「锁屏点一下就记上」的无感体验，且仍走 processRecognition 同一套逻辑不绕弯。
+        let types = p.result.types ?? []
+        let known = ImageAutoRecogSettings.knownTypes.filter { types.contains($0) }
+        let hasPending = !forceSave && known.contains { ImageAutoRecogSettings.mode(for: $0, source: "image") == .pending }
+
+        if hasPending {
+            pendingNavigate = navigateToChat
+            pendingPresent = .pending(p.result, rawText: p.rawText,
+                                      image: img, source: p.source ?? .cloud,
+                                      presavedImageName: presavedName)
+            isCheckingScreenshotPending = false
+        } else {
+            let outcome = RecognitionSaver.processRecognition(result: p.result, rawText: p.rawText,
+                                                              image: img, context: context,
+                                                              source: p.source ?? .cloud,
+                                                              entryOrigin: "image",
+                                                              presavedImageName: presavedName)
+            isCheckingScreenshotPending = false
+            switch outcome {
+            case .inserted:
+                // 结果已进对话气泡：立即清 pending，避免点通知回 App 时重复处理
+                ScreenshotStore.clearPending()
+            case .nothing:
+                // 按设置丢弃或未识别：仅清 pending，不弹不存。
+                // 但图已经「发」出去了，好好记必须有回应，否则对话里只剩一张没人理的图。
+                ScreenshotStore.clearPending()
+                if presavedName != nil {
+                    context.insert(ChatMessage(role: .ai, text: "这张图我没识别到可记录的内容～可以在「设置 → 识别结果保存方式设置」里调整保存策略。"))
+                }
+            }
+            if navigateToChat {
+                DispatchQueue.main.async {
+                    NavigationRouter.shared.navigate(.chat)
+                }
+            }
         }
     }
 
@@ -496,7 +746,7 @@ struct ContentView: View {
         ["👋", "😊", "🌟", "☀️", "✨", "🎉", "💪", "🫡", "👍", "🔥", "🌸", "🍀", "🥳", "😎"].randomElement() ?? "👋"
     }()
 
-    /// 阿宝头像：app icon (AIAvatar) 圆形裁剪 + 呼吸脉冲动画（2.5s 循环胀缩）
+    /// 好好记头像：app icon (AIAvatar) 圆形裁剪 + 呼吸脉冲动画（2.5s 循环胀缩）
     private var abaoAvatar: some View {
         Button {
             router.navigate(.myAccount)
@@ -508,6 +758,7 @@ struct ContentView: View {
                 .clipShape(Circle())
                 .scaleEffect(abaoPulse ? 1.12 : 1.0)
         }
+        .proAvatarBadge(isPro: ent.isPro, badgeDiameter: 14)
         .frame(width: 44, height: 44)
         .buttonStyle(.plain)
         .onAppear {
@@ -591,12 +842,31 @@ struct ContentView: View {
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 // 记下此刻：松手时宫格 Button 的 tap 会随之触发，0.5s 内的这次跳转需吞掉
                 longPressEnteredEditAt = Date()
+                // 拍下进入编辑态前的布局快照，供退出时回滚（见编辑/完成按钮与 X 按钮逻辑）
+                preEditLayout = layout.snapshot()
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                     isEditing = true
                     toolbarExpanded = true   // 展开工具栏，让「完成」按钮可见，用户能退出编辑态
                     draggingModule = nil
                 }
             }
+
+    }
+
+    /// 非 Pro 用户在编辑态退出（点完成 / 点 X / 关闭 App）时，回滚进入编辑前的布局快照。
+    /// setHidden/relocate 在编辑操作瞬间已写 UserDefaults，必须用进入前的快照才能还原。
+    /// 返回是否发生了回滚（用于决定是否需要弹订阅页 / 退出编辑态）。
+    @discardableResult
+    private func rollbackNonProEditIfNeeded(showPaywallWhenRollback: Bool = false) -> Bool {
+        guard isEditing, !ent.isFullAccess else { return false }
+        if let snap = preEditLayout { layout.restore(snap) }
+        preEditLayout = nil
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+            isEditing = false
+            draggingModule = nil
+        }
+        if showPaywallWhenRollback { showPaywall = true }
+        return true
     }
 
     /// 正常态：按 order 分段渲染，连续 gridCard 合进一个 LazyVGrid，遇 fullRow 先渲网格再渲整行。
@@ -851,13 +1121,13 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 8) {
                 MiniBar(value: calorieGoal > 0 ? todayCalories / calorieGoal : 0, color: AIATheme.food, height: 5, resetToken: homeEnterToken)
                 VStack(alignment: .leading, spacing: 5) {
-                    calSummaryRow("目标", "\(Int(calorieGoal)) kcal", AIATheme.sub)
+                    calSummaryRow(NSLocalizedString("home.diet.calorieSuggestion", comment: ""), "\(Int(calorieGoal)) kcal", AIATheme.sub)
                     calSummaryRow(todayCalories > calorieGoal ? "已超" : "待摄入",
                                   "\(max(0, Int(abs(calorieGoal - todayCalories)))) kcal",
                                   todayCalories > calorieGoal ? AIATheme.over : AIATheme.sub)
-                    calSummaryRow("净热量",
-                                  "\(netCalories >= 0 ? "+" : "")\(Int(netCalories)) kcal",
-                                  netCalories >= 0 ? AIATheme.food : AIATheme.over)
+                    calSummaryRow("饮水量",
+                                  "\(Int(todayWater)) ml",
+                                  AIATheme.food)
                 }
             }
         }
@@ -875,36 +1145,59 @@ struct ContentView: View {
         .lineLimit(1)
     }
 
-    // MARK: 昨晚睡眠（替代原宫格的「静息心率」项）
+    // MARK: 睡眠时长（替代原宫格的「静息心率」项）
     @AppStorage("aia.sleepGoalHours") private var sleepGoalHours: Double = 8
-    /// 昨晚睡眠 = 最近一条睡眠记录（HealthKit 同步）+ 未接入时的手动增量，与记录页同源。
-    private var sleepLastNight: Double {
-        let stored = healths.first(where: { $0.metric.contains("睡眠") }).flatMap { Double($0.value) } ?? 0
-        return usesHealthKit ? stored : stored + ManualHealthStore.shared.sleepHours(for: Date())
+    /// 睡眠时长（小时）：与健康管理页睡眠圆环保持同源——
+    /// 自动模式 → HealthKit 数据（healths「睡眠」值，由 HealthKit 同步写入）；
+    /// 手动模式 → 睡眠圆环「总数值」（manualSleepTotalHours：历史残留 + 圆环点击累加 + 当天已醒 SleepSession 累计）。
+    /// 用户在健康页改睡眠数据来源会即时反映到此处。
+    private var sleepLastNightHours: Double {
+        if isAuto(.sleep) {
+            return healths.first(where: { $0.metric.contains("睡眠") }).flatMap { Double($0.value) } ?? 0
+        }
+        return manualSleepTotalHours(sleeps: sleeps, healths: healths, on: Date())
     }
     private var sleepRowText: String {
-        guard sleepLastNight > 0 else { return "—" }
-        let met = sleepGoalHours > 0 && sleepLastNight >= sleepGoalHours
-        return String(format: "%.1fh%@", sleepLastNight, met ? " · 达标" : "")
+        guard sleepLastNightHours > 0 else { return "—" }
+        let totalMin = Int(sleepLastNightHours * 60)
+        let h = totalMin / 60
+        let m = totalMin % 60
+        let met = sleepGoalHours > 0 && sleepLastNightHours >= sleepGoalHours
+        return String(format: "%dh%dm%@", h, m, met ? " · 达标" : "")
     }
     private var sleepRowColor: Color {
-        guard sleepLastNight > 0, sleepGoalHours > 0 else { return AIATheme.sub }
-        return sleepLastNight >= sleepGoalHours ? AIATheme.health : AIATheme.warning
+        guard sleepLastNightHours > 0, sleepGoalHours > 0 else { return AIATheme.sub }
+        return sleepLastNightHours >= sleepGoalHours ? AIATheme.health : AIATheme.warning
     }
 
     // MARK: 健康
+    /// 健康宫格是否为空：手动 HealthMetric 表为空，且宫格展示的四项指标（步数/运动时长/
+    /// 能量消耗/睡眠时长，自动模式下均来自 HealthKit）全为 0，才算真正无数据。
+    private var isHealthTileEmpty: Bool {
+        guard healths.isEmpty else { return false }
+        if homeSteps > 0 { return false }
+        if homeExerciseMin > 0 { return false }
+        if homeEnergyBurned > 0 { return false }
+        if sleepLastNightHours > 0 { return false }
+        return true
+    }
+
     private var healthTile: some View {
         tile(bg: AIATheme.healthBG, accent: AIATheme.health, icon: "heart.fill", route: .health,
              title: "健康管理",
              badge: TileBadge(text: homeSteps >= stepGoal ? "达标" : "今日", warn: false),
              number: "\(homeSteps)", unit: "步",
-             isEmpty: healths.isEmpty) {
+             // 空态口径必须与宫格实际展示内容对齐：自动源下步数/运动/能量/睡眠来自 HealthKit
+             // （homeSteps / homeExerciseMin / homeEnergyBurned / sleepLastNightHours），不经过 SwiftData
+             // 的手动 HealthMetric 表。只看 healths.isEmpty 会在自动模式下永远误显示「点击记录」空态。
+             isEmpty: isHealthTileEmpty,
+             titleTrailing: sleepStatusButton) {
             VStack(alignment: .leading, spacing: 8) {
                 sparkBars
                 VStack(alignment: .leading, spacing: 5) {
                     healthSummaryRow("运动时长", exerciseTimeText, AIATheme.sub)
                     healthSummaryRow("能量消耗", homeEnergyBurned > 0 ? "\(Int(homeEnergyBurned)) kcal" : "—", AIATheme.sub)
-                    healthSummaryRow("昨晚睡眠", sleepRowText, sleepRowColor)
+                    healthSummaryRow("睡眠时长", sleepRowText, sleepRowColor)
                 }
             }
         }
@@ -974,6 +1267,139 @@ struct ContentView: View {
         )
     }
 
+    /// 自动恢复睡眠遮罩：仅当「有进行中的睡眠会话」且「本次会话用户没主动收起过」时盖上。
+    /// 超过 maxAutoRestoreHours 的会话视为「忘了点醒来的孤儿数据」，不再盖遮罩打扰用户
+    /// （宫格图标仍是 🌙，用户可自行点它结束会话）。
+    private func restoreSleepMaskIfNeeded() {
+        guard !showSleepMask else { return }
+        guard let active = currentActiveSleepSession(in: sleeps) else { return }
+        guard sleepMaskDismissedSessionID != active.syncId else { return }
+        let maxAutoRestoreHours: Double = 14
+        guard Date().timeIntervalSince(active.sleepStart) < maxAutoRestoreHours * 3600 else { return }
+        withAnimation(.easeOut(duration: 0.35)) { showSleepMask = true }
+    }
+
+    /// 睡眠时长中文摘要（入睡时刻 → 现在），用于醒来后页面 toast 提示。
+    /// 直接基于 sleepStart 计算，避免依赖 @Query 此刻是否已刷新（toggle 后数组可能仍是旧引用）。
+    private func sleepSummaryText(start: Date) -> String {
+        let totalMin = Int(max(0, Date().timeIntervalSince(start)) / 60)
+        return totalMin >= 60
+            ? "本次睡眠 \(totalMin / 60) 小时 \(totalMin % 60) 分钟"
+            : "本次睡眠 \(totalMin) 分钟"
+    }
+
+    /// 健康管理宫格右上角睡眠状态切换按钮：在睡=moon（琥珀），空闲=sun（紫）。
+    /// 与 HealthListView 的 SleepToggleButton 共用 SleepSession 同一份数据，状态自动互通。
+    /// 仿照 privacyEyeButton：内层 Button + .buttonStyle(.plain) 吞掉 tap 不冒泡到外层"跳健康页"。
+    private var sleepStatusButton: AnyView {
+        let isSleeping = currentActiveSleepSession(in: sleeps) != nil
+        return AnyView(
+            SleepStatusToggleIcon(isSleeping: isSleeping) {
+                // 先存点击前状态：toggle 之后 @Query 尚未刷新，此刻再读 sleeps 会误判。
+                let wasSleeping = isSleeping
+                let start = currentActiveSleepSession(in: sleeps)?.sleepStart ?? Date()
+                toggleSleepSession(in: context, sleeps: sleeps)   // 模型变更不包 withAnimation（项目铁律）
+                // 醒来时页面提示本次睡眠时长（与遮罩「我醒了」同口径）。
+                if wasSleeping {
+                    ToastCenter.shared.showImportant(
+                        sleepSummaryText(start: start),
+                        icon: "🌙",
+                        accent: AIATheme.warning
+                    )
+                }
+                // 副作用延后一个 runloop，避免与 SwiftData 变更同帧触发布局重入
+                DispatchQueue.main.async {
+                    withAnimation(.easeOut(duration: 0.35)) {
+                        showSleepMask = !wasSleeping   // 刚入睡 → 盖遮罩；刚醒来 → 收遮罩
+                    }
+                }
+            }
+        )
+    }
+
+    /// 首页「健康管理」宫格右上角的睡眠切换图标。
+    /// 设计目标：既表达「当前是什么状态」，又持续暗示「这里可以点」。三层动效：
+    /// ① 常驻呼吸光环——2s 循环向外扩散并淡出（雷达波），最直观的"可交互"信号；
+    /// ② 每 4s 闪现一次对侧图标（☀︎ ⇄ ☾）停 0.9s 复位，预览态半透明 → 告诉用户"点我会切到那边"；
+    /// ③ 点击瞬间 symbolEffect(.bounce) + .replace.downUp 过渡，反馈干脆。
+    /// 颜色始终跟真实状态走（紫=醒着 / 琥珀=睡着），所以预览闪现不会让用户误判当前状态。
+    ///
+    /// 注意两点：
+    /// - 不用 TimelineView 驱动（每秒重建视图会打断 repeatForever 动画），改 Timer.publish + onReceive；
+    ///   .autoconnect() 的订阅在视图消失时自动取消，离开首页不会空转。
+    /// - 符号切换用 .animation(value:) 而非 withAnimation 包裹，
+    ///   这样点击导致的 isSleeping 变化（来自 SwiftData）也能有过渡，且不违反「不用 withAnimation 包模型变更」铁律。
+    private struct SleepStatusToggleIcon: View {
+        let isSleeping: Bool
+        let onToggle: () -> Void
+
+        /// 状态色：在睡=琥珀，空闲=紫（与健康页 SleepToggleButton 同源口径）
+        private var accent: Color { isSleeping ? AIATheme.warning : AIATheme.health }
+        /// 当前真实状态对应的符号
+        private var stateSymbol: String { isSleeping ? "moon.fill" : "sun.max.fill" }
+        /// 对侧符号（点一下会变成的样子）
+        private var peerSymbol: String { isSleeping ? "sun.max.fill" : "moon.fill" }
+        /// 此刻实际渲染的符号：预览期显示对侧，其余时间显示当前状态
+        private var shownSymbol: String { previewing ? peerSymbol : stateSymbol }
+
+        @State private var halo = false        // 呼吸光环是否已起振
+        @State private var previewing = false  // 是否正在闪现对侧图标
+        @State private var bounceTick = 0      // 点击弹跳触发器（值一变就 bounce 一次）
+
+        /// 预览闪现的节拍：4s 一轮
+        private let peek = Timer.publish(every: 4, on: .main, in: .common).autoconnect()
+
+        var body: some View {
+            Button {
+                previewing = false     // 立刻收起预览，避免和真实状态切换撞在一起
+                bounceTick += 1
+                onToggle()
+            } label: {
+                ZStack {
+                    // ① 呼吸光环：描边圆向外扩散 + 淡出，无限循环（opacity 归零时硬切回起点，视觉无缝）
+                    Circle()
+                        .stroke(accent.opacity(0.5), lineWidth: 1)
+                        .frame(width: 26, height: 26)
+                        .scaleEffect(halo ? 1.30 : 0.92)
+                        .opacity(halo ? 0 : 0.9)
+
+                    // ② 底圈：与原设计一致的浅色圆底
+                    Circle()
+                        .fill(accent.opacity(0.16))
+                        .frame(width: 26, height: 26)
+
+                    // ③ 图标本体
+                    Image(systemName: shownSymbol)
+                        .font(AIATheme.Font.micro.weight(.semibold))
+                        .foregroundStyle(accent)
+                        .opacity(previewing ? 0.55 : 1)          // 预览态半透明 = "这是预览，不是当前状态"
+                        .contentTransition(.symbolEffect(.replace.downUp))
+                        .symbolEffect(.bounce, value: bounceTick)
+                        .animation(.easeInOut(duration: 0.3), value: shownSymbol)
+                        .animation(.easeInOut(duration: 0.3), value: previewing)
+                }
+                // 保持 30×30，与 privacyEyeButton 对齐；scaleEffect 不参与布局，光环溢出不会撑高标题行
+                .frame(width: 30, height: 30)
+                .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isSleeping ? "结束睡眠" : "开始睡眠")
+            .accessibilityHint("轻点两下切换睡眠状态")
+            .onAppear {
+                // repeatForever 起振一次即可自行循环；autoreverses:false 做单向雷达波
+                withAnimation(.easeOut(duration: 2).repeatForever(autoreverses: false)) {
+                    halo = true
+                }
+            }
+            .onReceive(peek) { _ in
+                previewing = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                    previewing = false
+                }
+            }
+        }
+    }
+
     private func billMetric(_ label: String, _ value: String, _ valueColor: Color) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
@@ -1022,7 +1448,7 @@ struct ContentView: View {
         let todoMsgs = AISummary.todoMessages(reminders: reminders)
 
         return VStack(alignment: .leading, spacing: 8) {
-            SectionTitle(text: "今日事项预览", trailing: "阿宝AI提醒")
+            SectionTitle(text: "今日事项预览", trailing: "小记提醒")
             VStack(spacing: 8) {
                 rollingBubble(messages: dietMsgs, accent: AIATheme.food, active: rollSlot == 0, route: .diet)
                 rollingBubble(messages: healthBubbleMessages, accent: AIATheme.health, active: rollSlot == 1, route: .health)
@@ -1291,6 +1717,18 @@ struct ContentView: View {
     /// 把通知点击携带的路由字符串映射到 HomeRoute，并清空 AppDelegate 的冷启动暂存。
     private func consumeNotificationRoute(_ route: String) {
         AppDelegate.pendingNotificationRoute = nil
+        // 截屏无感识别通知：点通知 = 按「来源×类别」设置分流，
+        // 自动保存类跳对话页查看气泡；确认类弹结果确认（编辑）弹窗。
+        if route == "screenshotRecognition" {
+            checkScreenshotPending(navigateToChat: true)
+            return
+        }
+        // 点通知上的「保存」Action：本次强制自动入库（即便设置是「确认后再保存」），
+        // 用户锁屏点一下即记上，无需进 App 二次确认。
+        if route == "screenshotRecognition:save" {
+            checkScreenshotPending(navigateToChat: true, forceSave: true)
+            return
+        }
         let target: HomeRoute?
         switch route {
         case "todo", "reminder": target = .todo
@@ -1310,6 +1748,10 @@ struct ContentView: View {
     // MARK: - 数据计算：饮食
     private var todayFoods: [FoodEntry] { foods.filter { Calendar.current.isDateInToday($0.date) } }
     private var todayCalories: Double { todayFoods.reduce(0) { $0 + $1.calories } }
+    /// 今日饮水（ml）：与饮食记录页「今日饮水」口径一致——仅统计手动加水 WaterLog（不含食物自带水分）。
+    private var todayWater: Double {
+        waterLogs.filter { Calendar.current.isDateInToday($0.date) }.reduce(0) { $0 + $1.amount }
+    }
     private func mealCal(_ meal: String) -> Int {
         let v = todayFoods.filter { $0.meal == meal }.reduce(0) { $0 + $1.calories }
         return Int(v)
@@ -1321,15 +1763,15 @@ struct ContentView: View {
             * activityMultiplier(activityLevel)
     }
     private var tdee: Double {
-        let actual = health.restingEnergyToday + health.activeEnergyToday
+        let actual = isAuto(.tdee)
+            ? health.restingEnergyToday + health.activeEnergyToday
+            : Double(ManualHealthStore.shared.activeCalories(for: Date()))
         return actual > 0 ? actual : tdeeGoalFallback
     }
-    private var netCalories: Double { todayCalories - tdee }
-
     // MARK: - 数据计算：健康
     private var weekStepValues: [Double] {
         // 仅今日步数可从 HealthKit 拿到；其余占位为 0（免费账号无 HealthKit 时全 0，柱子为最小高度）
-        let today = Double(health.stepsToday)
+        let today = Double(homeSteps)
         return [0, 0, 0, 0, 0, 0, today]
     }
 
@@ -1361,7 +1803,7 @@ struct ContentView: View {
     private func todoTimeSuffix(_ r: Reminder) -> String {
         guard let due = r.due else { return "" }
         let cal = Calendar.current
-        let time = AppFormat.time.string(from: due)
+        let time = AppFormat.hourMinute.string(from: due)
         let datePrefix: String
         if cal.isDateInToday(due) {
             datePrefix = "今天"

@@ -25,7 +25,20 @@ enum IntentTextUtils {
     /// 账单商户名清洗：去掉金额、花费动词、记账动词、量词等，得到干净商户名。
     /// 与 LocalQuickParse.parseBill 的旧实现保持一致，集中在此避免两处漂移。
     static func cleanMerchant(_ text: String) -> String {
-        text
+        // 先保护餐次整体词（早餐/午餐/晚餐/早饭/午饭/晚饭/夜宵/宵夜…），
+        // 避免被下方单字清洗（吃/喝/饭/餐）砍残成「早」「晚」。占位符不含中文字符，
+        // 不会被任何清洗规则误伤，清洗完再原样还原。
+        let mealWords = ["早餐", "早饭", "早点", "午餐", "午饭", "中饭", "中餐",
+                         "晚餐", "晚饭", "夜饭", "夜宵", "宵夜", "夜消", "加餐", "点心", "零食"]
+        // 占位符数量须与 mealWords 一一对应（16 个）。
+        // 历史 bug：只写了 15 个，文本含「零食」(index 15) 时 placeholders[i] 越界崩溃。
+        let placeholders = ["ZMA", "ZMB", "ZMC", "ZMD", "ZME", "ZMF", "ZMG", "ZMH", "ZMI", "ZMJ", "ZMK", "ZML", "ZMM", "ZMN", "ZMO", "ZMP"]
+        assert(mealWords.count == placeholders.count, "mealWords 与 placeholders 长度必须一致")
+        var t = text
+        for (w, ph) in zip(mealWords, placeholders) where t.contains(w) {
+            t = t.replacingOccurrences(of: w, with: ph)
+        }
+        t = t
             .replacingOccurrences(of: #"\d+(?:\.\d+)?\s*(?:元|块|块钱|元钱|￥|¥)"#,
                                   with: "", options: .regularExpression)
             .replacingOccurrences(of: "花了", with: "")
@@ -46,19 +59,19 @@ enum IntentTextUtils {
             .replacingOccurrences(of: "元", with: "")
             .replacingOccurrences(of: "块", with: "")
             .replacingOccurrences(of: "花", with: "")
-            .replacingOccurrences(of: "吃", with: "")
-            .replacingOccurrences(of: "喝", with: "")
-            .replacingOccurrences(of: "饭", with: "")
-            .replacingOccurrences(of: "餐", with: "")
-            .replacingOccurrences(of: "外卖", with: "")
-            .replacingOccurrences(of: "点餐", with: "")
+            // 注意：删掉原「吃/喝/饭/餐/外卖/点餐」单字清洗——这些词若残留进商户名，
+            // 可由下方空串兜底改成 inferBillCategory；若直接删会把「早餐」砍成「早」。
             .replacingOccurrences(of: "的", with: "")
             .replacingOccurrences(of: "我", with: "")
             .replacingOccurrences(of: "给", with: "")
             .replacingOccurrences(of: "在", with: "")
             .replacingOccurrences(of: "去", with: "")
-            .replacingOccurrences(of: "了", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        // 还原受保护的餐次词
+        for (w, ph) in zip(mealWords, placeholders) {
+            t = t.replacingOccurrences(of: ph, with: w)
+        }
+        return t
     }
 
     /// 解析健康指标：把「体重70公斤，体脂20%，血压120/80」拆成多个 HealthPayload。
