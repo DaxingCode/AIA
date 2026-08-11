@@ -40,6 +40,7 @@ enum HomeRoute: Hashable {
     case developerCenter
     case recurringRuleList
     case billImport
+    case importHistory
     case merchantRuleList
     case adManager
     case dataStatsExport
@@ -65,6 +66,7 @@ struct ContentView: View {
     @ObservedObject private var router = NavigationRouter.shared
     @ObservedObject private var layout = HomeLayoutStore.shared
     @ObservedObject private var ent = EntitlementManager.shared
+    @ObservedObject private var global = GlobalConfigStore.shared
     @State private var isEditing = false
     @State private var draggingModule: HomeModule? = nil
 
@@ -84,6 +86,7 @@ struct ContentView: View {
     @State private var longPressEnteredEditAt: Date? = nil
     /// 右上角工具栏是否展开：默认收起，仅露「展开」触发按钮；点开露出「首页编辑」+「设置」。
     @State private var toolbarExpanded = false
+    @State private var browserTarget: BrowserTarget?   // App 内打开公告链接（link 模式）
     /// 非 Pro 用户退出首页布局编辑态时弹出的订阅页（已编辑但未落库，回滚）。
     @State private var showPaywall = false
     /// 进入首页布局编辑态瞬间拍下的布局快照；非 Pro 用户退出编辑时回滚到此，
@@ -97,6 +100,12 @@ struct ContentView: View {
     @State private var showCamera = false
     @State private var showPicker = false
     @State private var animateTiles = false
+    /// Siri/快捷指令记完后，首页对应模块卡片高亮（描边+微缩放脉冲），柔和提示「这笔已记在此处」，不跳页。
+    @State private var siriHighlightModule: HomeModule? = nil
+    /// 高亮自动复位计时器句柄，复位时取消避免内存泄露/误复位。
+    @State private var siriHighlightTask: Task<Void, Never>? = nil
+    /// 沿边逐渐点亮扫描弧的进度（0→1 走一圈）。
+    @State private var siriHighlightProgress: CGFloat = 0
     /// 2026-07-30 新增：首页进入计数器。LazyVGrid 项在导航返回时被复用，
     /// .onAppear 不会再触发；此值每次进入首页 +1，下传给 MiniBar.resetToken，
     /// 强制把 drawn 重置为 0 并重画「从左到右变长」动画。
@@ -359,6 +368,8 @@ struct ContentView: View {
             RecurringRuleListView().environment(\.modelContext, context)
         case .billImport:
             BillImportView().environment(\.modelContext, context)
+        case .importHistory:
+            ImportHistoryView().environment(\.modelContext, context)
         case .merchantRuleList:
             MerchantRuleListView().environment(\.modelContext, context)
         case .adManager:
@@ -390,7 +401,7 @@ struct ContentView: View {
             consumeNotificationRoute(route)
         }
         if !onboardingDone { showOnboarding = true }
-        checkScreenshotPending()
+        Task { await checkScreenshotPending() }
         // 睡眠模式：只要还有没点「醒来」的会话，冷启动就把遮罩盖回来。
         // 先立即试一次（本地库已有数据时即刻生效），再开 3s 窗口等云端同步补数据。
         sleepMaskRestoreWindowOpen = true
@@ -413,6 +424,39 @@ struct ContentView: View {
             showSyncIndicator = true
             hasFirstSyncStarted = false
         }
+        // 数据库降级提示：若 makeContainer 因 schema 版本错位走了「内存存储兜底」，
+        // 本次会话写入不会持久化。提示用户重装 App（数据在云端，登录即恢复），
+        // 避免「看着能记、实则没存」的困惑。
+        if UserDefaults.standard.bool(forKey: "aia.storeDegradedToMemory") {
+            ToastCenter.shared.showImportant(
+                "数据库已降级为临时存储，重启会丢失。请重装 App 从云端恢复数据。",
+                icon: "⚠️",
+                accent: AIATheme.warning
+            )
+        }
+        // Siri/快捷指令记完后：消费共享暂存，让首页对应模块卡片做一次高亮脉冲（柔和提示）。
+        consumeSiriHighlightModule()
+    }
+
+    /// 读取 TellAIAIntent 写入的「刚记的模块」，驱动首页卡片高亮，消费即删除（防重复触发）。
+    private func consumeSiriHighlightModule() {
+        guard let raw = UserDefaults.standard.string(forKey: "aia.siriHighlightModule"),
+              let m = HomeModule(rawValue: raw) else { return }
+        UserDefaults.standard.removeObject(forKey: "aia.siriHighlightModule")
+        siriHighlightTask?.cancel()
+        siriHighlightModule = m
+        siriHighlightProgress = 0
+        // 让扫描弧沿宫格外围从起点出发、逐渐点亮走一圈（1.4s）
+        withAnimation(.linear(duration: 1.4)) {
+            siriHighlightProgress = 1
+        }
+        // 扫完一圈后留 0.8s 整圈常亮，再复位（共 2.2s）
+        siriHighlightTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_200_000_000)
+            guard !Task.isCancelled else { return }
+            siriHighlightModule = nil
+            siriHighlightProgress = 0
+        }
     }
 
     var body: some View {
@@ -424,6 +468,7 @@ struct ContentView: View {
                             .padding(.bottom, 8)
                         syncHeaderIndicator
                         AdBannerView()
+                        announcementBanner
                         if isEditing {
                             homeModulesEditView
                         } else {
@@ -496,8 +541,11 @@ struct ContentView: View {
             // MiniBar 监听 resetToken 统一走 replayMini()（填充淡出→归零→淡入生长），彻底无「变短」观感。
             // 卡片本身已可见，无需再让 animateTiles 重新淡入（避免回前台整屏闪动）。
             homeEnterToken &+= 1
+            // Siri/快捷指令记完后（点 Siri 界面唤醒 App）热启动也走这里：消费高亮暂存。
+            // 必须在下方 `guard quickAction.pending != nil` 之前，否则无快捷操作 pending 时提前 return。
+            consumeSiriHighlightModule()
             // 截图无感识别：无论是否有快捷操作 pending，只要后台留了识别结果就弹确认页
-            checkScreenshotPending()
+            Task { await checkScreenshotPending() }
             // 回到前台兜底：编辑态中途切后台/被杀再回来时，非 Pro 用户的改动可能已落库在 UserDefaults，
             // 这里回滚进入编辑前的快照，防止「关 App 再回来布局被改了」。（杀 App 前 didEnterBackground 已先回滚一次）
             _ = rollbackNonProEditIfNeeded()
@@ -537,7 +585,25 @@ struct ContentView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .screenshotRecognitionReady)) { _ in
-            checkScreenshotPending(navigateToChat: true)
+            Task { await checkScreenshotPending(navigateToChat: true) }
+        }
+        // Siri/快捷指令后台写入独立容器落盘后：前台 @Query 与写容器跨实例不自动合并，
+        // 这里尽力而为刷新本地数据。App 在前台时即时刷新靠本监听；App 在后台/锁屏时，
+        // 回前台（didBecomeActive）或下次启动打开同一 store 自然读到，无需额外处理。
+        .onReceive(NotificationCenter.default.publisher(for: .siriDidSaveData)) { _ in
+            #if DEBUG
+            print("[ContentView] siriDidSaveData received → 刷新本地数据")
+            #endif
+            // 补生成周期账单（如 Siri 记的触发跨月）
+            RecurringBillManager.generateDue(context: context)
+            // 强制主上下文重新读取同一份 store：对关键类型各 fetch 一次，
+            // 触发 @Query 内部快照与磁盘对齐（跨容器写入在主 context 上是「新数据」）。
+            Task { @MainActor in
+                _ = try? context.fetch(FetchDescriptor<Bill>())
+                _ = try? context.fetch(FetchDescriptor<FoodEntry>())
+                _ = try? context.fetch(FetchDescriptor<Reminder>())
+                _ = try? context.fetch(FetchDescriptor<HealthNote>())
+            }
         }
         .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker, navigateToChat: true)
         // 后台「无感截图识别」的结果确认页：App 打开且有 pending 时弹出（正常已入库 / 重复则警告不入库），
@@ -553,9 +619,10 @@ struct ContentView: View {
                 },
                 onCancelAction: {
                     // 「返回 / 不保存」→ 仍生成「待确认态」气泡（syncId=nil 未入库），数据留在对话里
-                    if case .pending(let result, _, _, let source, _) = present {
+                    if case .pending(let result, _, _, let source, let presavedName) = present {
                         RecognitionSaver.insertPendingBubble(result: result, context: context,
-                                                             recogSource: RecogSource.raw(from: source))
+                                                             recogSource: RecogSource.raw(from: source),
+                                                             imageName: presavedName)
                     }
                     if pendingNavigate {
                         DispatchQueue.main.async { NavigationRouter.shared.navigate(.chat) }
@@ -617,6 +684,7 @@ struct ContentView: View {
         .sheet(isPresented: $showPaywall) {
             PaywallView()
         }
+        .inAppBrowser(target: $browserTarget)
     }
 
     /// 检查后台识别留下的待确认结果（截图无感识别链路）：
@@ -625,7 +693,7 @@ struct ContentView: View {
     ///   若用户是点系统通知进来的（navigateToChat=true），跳到对话页查看结果。
     /// - .nothing：按设置丢弃、或未识别出任何类别 → 仅清 pending。
     @MainActor
-    private func checkScreenshotPending(navigateToChat: Bool = false, forceSave: Bool = false) {
+    private func checkScreenshotPending(navigateToChat: Bool = false, forceSave: Bool = false) async {
         guard !isCheckingScreenshotPending, pendingPresent == nil else { return }
         guard let p = ScreenshotStore.loadPending() else { return }
         isCheckingScreenshotPending = true
@@ -684,7 +752,7 @@ struct ContentView: View {
                                       presavedImageName: presavedName)
             isCheckingScreenshotPending = false
         } else {
-            let outcome = RecognitionSaver.processRecognition(result: p.result, rawText: p.rawText,
+            let outcome = await RecognitionSaver.processRecognition(result: p.result, rawText: p.rawText,
                                                               image: img, context: context,
                                                               source: p.source ?? .cloud,
                                                               entryOrigin: "image",
@@ -793,6 +861,63 @@ struct ContentView: View {
         }
     }
 
+    /// 应用内公告横条（方案 B 群发通知）：云端配置生效后，所有用户打开 App 在首页顶部看到。
+    /// 已读去重：用 lastSeenAnnouncementID 记已展示过的公告 id，避免每次回前台重复弹。
+    private var announcementBanner: some View {
+        let lastSeen = UserDefaults.standard.string(forKey: "aia.lastSeenAnnouncementID")
+        // 仅当：有公告 + 生效中 + id 未读
+        let ann = global.announcement
+        let showable = (ann != nil) && ann!.isEffective && (ann!.id != lastSeen)
+        return Group {
+            if showable, let a = ann {
+                Button {
+                    // 标记已读，避免重复弹
+                    UserDefaults.standard.set(a.id, forKey: "aia.lastSeenAnnouncementID")
+                    // 点击跳转：配了 link 优先按 openMode 打开（App 内/浏览器）；否则走 route
+                    if let l = a.link?.nonEmpty, let url = URL(string: l), UIApplication.shared.canOpenURL(url) {
+                        if (a.openMode ?? "inApp") == "browser" {
+                            UIApplication.shared.open(url)          // 跳系统浏览器
+                        } else {
+                            browserTarget = BrowserTarget(url: url) // App 内打开（默认）
+                        }
+                    } else if let r = a.route?.nonEmpty {
+                        consumeNotificationRoute(r)
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "megaphone.fill")
+                            .font(.system(size: 16))
+                            .foregroundStyle(AIATheme.purple)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(a.title)
+                                .font(AIATheme.Font.subhead.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            Text(a.body)
+                                .font(AIATheme.Font.caption)
+                                .foregroundStyle(AIATheme.sub)
+                                .lineLimit(2)
+                        }
+                        Spacer(minLength: 4)
+                        if a.link?.nonEmpty != nil || a.route?.nonEmpty != nil {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(AIATheme.muted)
+                        }
+                    }
+                    .padding(12)
+                    .background(AIATheme.purple.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AIATheme.rMD)
+                            .stroke(AIATheme.purple.opacity(0.25), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
     // MARK: - 可配置首页渲染（分段渲染器 + 编辑态）
     private var gridColumns: [GridItem] {
         [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
@@ -816,12 +941,12 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func tileView(for m: HomeModule) -> some View {
+    private func tileView(for m: HomeModule, gridIndex: Int) -> some View {
         switch m {
-        case .diet:      dietTile
-        case .health:    healthTile
-        case .bill:      billTile
-        case .todo:      todoTile
+        case .diet:      dietTile(gridIndex: gridIndex)
+        case .health:    healthTile(gridIndex: gridIndex)
+        case .bill:      billTile(gridIndex: gridIndex)
+        case .todo:      todoTile(gridIndex: gridIndex)
         case .aiSummary: EmptyView()
         }
     }
@@ -882,7 +1007,7 @@ struct ContentView: View {
                         if chunk.0 == .gridCard {
                             LazyVGrid(columns: gridColumns, spacing: 12) {
                                 ForEach(Array(chunk.1.enumerated()), id: \.element) { gi, m in
-                                    animatedTile(gi, tile: tileView(for: m))
+                                    siriHighlighted(m, animatedTile(gi, tile: tileView(for: m, gridIndex: gi)))
                                         .simultaneousGesture(longPressToEnterEdit)
                                 }
                             }
@@ -998,10 +1123,10 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func tileOrRowContent(for m: HomeModule) -> some View {
+    private func tileOrRowContent(for m: HomeModule, gridIndex: Int = 0) -> some View {
         switch m {
         case .aiSummary: aiSummarySection
-        default:         tileView(for: m)
+        default:         tileView(for: m, gridIndex: gridIndex)
         }
     }
 
@@ -1111,13 +1236,58 @@ struct ContentView: View {
             )
     }
 
+    /// Siri 记完后首页卡片高亮：被点亮的模块描边 + 轻微放大脉冲 +
+    /// 外沿「逐渐点亮绕一圈」扫描效果（亮弧沿圆角矩形周长行进一圈），2.2s 后复位。
+    private func siriHighlighted(_ m: HomeModule, _ content: some View) -> some View {
+        let active = siriHighlightModule == m
+        return content
+            .scaleEffect(active ? 1.04 : 1.0)
+            // ① 静态实色描边（锚定卡片轮廓）
+            .overlay(
+                RoundedRectangle(cornerRadius: AIATheme.rLG)
+                    .stroke(m.accent, lineWidth: active ? 3 : 0)
+            )
+            // ② 沿边逐渐点亮的扫描弧：trim 的 to 从 0→1，亮弧扫过整圈
+            .overlay(
+                RoundedRectangle(cornerRadius: AIATheme.rLG)
+                    .trim(from: 0, to: active ? siriHighlightProgress : 0)
+                    .stroke(
+                        m.accent,
+                        style: StrokeStyle(lineWidth: active ? 4 : 0, lineCap: .round)
+                    )
+                    .animation(
+                        active
+                            ? .linear(duration: 1.4)
+                            : .default,
+                        value: siriHighlightProgress
+                    )
+            )
+            // ③ 扫描头拖尾：一小段更亮的弧跟着进度走，做出"点亮余辉"
+            .overlay(
+                RoundedRectangle(cornerRadius: AIATheme.rLG)
+                    .trim(from: max(0, siriHighlightProgress - 0.12), to: siriHighlightProgress)
+                    .stroke(
+                        m.accent.opacity(0.55),
+                        style: StrokeStyle(lineWidth: active ? 4 : 0, lineCap: .round)
+                    )
+                    .animation(
+                        active
+                            ? .linear(duration: 1.4)
+                            : .default,
+                        value: siriHighlightProgress
+                    )
+            )
+            .animation(.spring(response: 0.4, dampingFraction: 0.7), value: siriHighlightModule)
+    }
+
     // MARK: 饮食
-    private var dietTile: some View {
+    private func dietTile(gridIndex: Int) -> some View {
         tile(bg: AIATheme.dietBG, accent: AIATheme.food, icon: "fork.knife", route: .diet,
              title: "饮食记录",
-             badge: TileBadge(text: "今日 \(todayFoods.count) 条", warn: false),
+             badge: TileBadge(text: "", warn: false),
              number: "\(Int(todayCalories))", unit: "kcal",
-             isEmpty: foods.isEmpty) {
+             isEmpty: foods.isEmpty,
+             gridIndex: gridIndex) {
             VStack(alignment: .leading, spacing: 8) {
                 MiniBar(value: calorieGoal > 0 ? todayCalories / calorieGoal : 0, color: AIATheme.food, height: 5, resetToken: homeEnterToken)
                 VStack(alignment: .leading, spacing: 5) {
@@ -1131,6 +1301,13 @@ struct ContentView: View {
                 }
             }
         }
+        // 右上角水杯按钮用 overlay 浮在宫格上：不参与标题行宽度分配，
+        // 避免"饮食记录"标题被挤小（与账单宫格隐私按钮一致的分层做法）。
+        .overlay(alignment: .topTrailing) {
+            waterCupButton
+                .padding(.top, 12)
+                .padding(.trailing, 12)
+        }
     }
 
     private func calSummaryRow(_ label: String, _ value: String, _ valueColor: Color) -> some View {
@@ -1143,6 +1320,83 @@ struct ContentView: View {
         }
         .font(AIATheme.Font.micro)
         .lineLimit(1)
+    }
+
+    /// 饮食宫格右上角「小水杯」按钮：呼吸光环 + 点击 +100ml。
+    /// 写入 WaterLog(date:.now, amount:100)，与饮食记录页 addWaterTap 同模型、同 @Query，数据自动互通。
+    private var waterCupButton: AnyView {
+        AnyView(
+            WaterCupButton {
+                let log = WaterLog(date: .now, amount: 100)
+                context.insert(log)
+                CloudSyncManager.shared.syncAfterLocalChange(context: context)
+            }
+        )
+    }
+
+    /// 饮食宫格右上角水杯按钮：呼吸光环提示可点，点击弹跳 + 震动 + +100ml 飞出动画。
+    private struct WaterCupButton: View {
+        let onTap: () -> Void
+
+        @State private var halo = false
+        @State private var bounceTick = 0
+        @State private var flyOffset: CGFloat = 0
+        @State private var flyOpacity: Double = 0
+
+        private let accent = AIATheme.food   // 琥珀色，与饮食模块同色
+
+        var body: some View {
+            Button {
+                bounceTick += 1
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                flyOffset = 0
+                flyOpacity = 1
+                withAnimation(.easeOut(duration: 0.9)) {
+                    flyOffset = -34
+                    flyOpacity = 0
+                }
+                onTap()
+            } label: {
+                ZStack {
+                    // ① 呼吸光环：描边圆向外扩散 + 淡出，1.8s 循环
+                    Circle()
+                        .stroke(accent.opacity(0.5), lineWidth: 1)
+                        .frame(width: 26, height: 26)
+                        .scaleEffect(halo ? 1.30 : 0.92)
+                        .opacity(halo ? 0 : 0.9)
+
+                    // ② 底圈：浅色圆底
+                    Circle()
+                        .fill(accent.opacity(0.16))
+                        .frame(width: 26, height: 26)
+
+                    // ③ 玻璃杯图标（mug.fill 在 iOS 17.0 即存在）
+                    Image(systemName: "mug.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(accent)
+                        .symbolEffect(.bounce, value: bounceTick)
+
+                    // ④ +100ml 飞出动画：点击后向上飘移并淡出
+                    Text("+100ml")
+                        .font(AIATheme.Font.micro.weight(.semibold))
+                        .foregroundStyle(accent)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .offset(y: flyOffset)
+                        .opacity(flyOpacity)
+                }
+                .frame(width: 30, height: 30)
+                .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("喝水 +100ml")
+            .accessibilityHint("轻点两下记录 100 毫升饮水")
+            .onAppear {
+                withAnimation(.easeOut(duration: 1.8).repeatForever(autoreverses: false)) {
+                    halo = true
+                }
+            }
+        }
     }
 
     // MARK: 睡眠时长（替代原宫格的「静息心率」项）
@@ -1182,16 +1436,16 @@ struct ContentView: View {
         return true
     }
 
-    private var healthTile: some View {
+    private func healthTile(gridIndex: Int) -> some View {
         tile(bg: AIATheme.healthBG, accent: AIATheme.health, icon: "heart.fill", route: .health,
              title: "健康管理",
-             badge: TileBadge(text: homeSteps >= stepGoal ? "达标" : "今日", warn: false),
+             badge: TileBadge(text: homeSteps >= stepGoal ? "达标" : "", warn: false),
              number: "\(homeSteps)", unit: "步",
              // 空态口径必须与宫格实际展示内容对齐：自动源下步数/运动/能量/睡眠来自 HealthKit
              // （homeSteps / homeExerciseMin / homeEnergyBurned / sleepLastNightHours），不经过 SwiftData
              // 的手动 HealthMetric 表。只看 healths.isEmpty 会在自动模式下永远误显示「点击记录」空态。
              isEmpty: isHealthTileEmpty,
-             titleTrailing: sleepStatusButton) {
+             gridIndex: gridIndex) {
             VStack(alignment: .leading, spacing: 8) {
                 sparkBars
                 VStack(alignment: .leading, spacing: 5) {
@@ -1200,6 +1454,13 @@ struct ContentView: View {
                     healthSummaryRow("睡眠时长", sleepRowText, sleepRowColor)
                 }
             }
+        }
+        // 右上角睡眠图标用 overlay 浮在宫格上：与饮食宫格水杯按钮一致的绝对定位
+        // （topTrailing + 12pt inset），保证两个图标在同一高度、同一位置。
+        .overlay(alignment: .topTrailing) {
+            sleepStatusButton
+                .padding(.top, 12)
+                .padding(.trailing, 12)
         }
     }
 
@@ -1220,7 +1481,7 @@ struct ContentView: View {
     }
 
     // MARK: 账单
-    private var billTile: some View {
+    private func billTile(gridIndex: Int) -> some View {
         // 隐私遮罩：隐藏时所有金额显示 ¥•••，颜色降级为 muted（避免被猜出正负/位数）
         let hiddenText = "¥•••"
         let numberTxt = billHidden ? hiddenText : "¥\(Int(todayExpense))"
@@ -1237,8 +1498,8 @@ struct ContentView: View {
              badge: TileBadge(text: "", warn: false),
              number: numberTxt, unit: "今日支出",
              isEmpty: bills.isEmpty,
-             headerMode: .titleLine,
-             titleTrailing: privacyEyeButton) {
+             gridIndex: gridIndex,
+             headerMode: .titleLine) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     billMetric("本月收入", incomeTxt, billHidden ? AIATheme.muted : AIATheme.income)
@@ -1250,6 +1511,12 @@ struct ContentView: View {
                 }
             }
             .padding(.top, 4)
+        }
+        // 右上角隐私眼用 overlay 浮在宫格上：与饮食/健康宫格图标一致（topTrailing + 12pt inset）
+        .overlay(alignment: .topTrailing) {
+            privacyEyeButton
+                .padding(.top, 12)
+                .padding(.trailing, 12)
         }
     }
 
@@ -1409,17 +1676,19 @@ struct ContentView: View {
                 .font(AIATheme.Font.footnote.weight(.medium))
                 .foregroundStyle(valueColor)
                 .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: 待办
-    private var todoTile: some View {
+    private func todoTile(gridIndex: Int) -> some View {
         tile(bg: AIATheme.todoBG, accent: AIATheme.todo, icon: "checklist", route: .todo,
              title: "待办提醒",
              badge: TileBadge(text: "今日 \(todayTodos.count) 项", warn: false),
              number: "\(todayTodos.count)", unit: "今日待办",
              isEmpty: reminders.isEmpty,
+             gridIndex: gridIndex,
              headerMode: .none) {
             VStack(alignment: .leading, spacing: 6) {
                 if recentTodos.isEmpty {
@@ -1429,7 +1698,7 @@ struct ContentView: View {
                 } else {
                     ForEach(recentTodos, id: \.persistentModelID) { r in
                         HStack(spacing: 4) {
-                            Text("· \(r.title)").lineLimit(1)
+                            Text("· \(r.title)").lineLimit(1).minimumScaleFactor(0.7)
                             Spacer(minLength: 0)
                             Text(todoTimeSuffix(r)).foregroundStyle(AIATheme.muted)
                         }
@@ -1438,6 +1707,7 @@ struct ContentView: View {
                     }
                 }
             }
+            .padding(.top, 4)
         }
     }
 
@@ -1537,14 +1807,77 @@ struct ContentView: View {
     }
 
     // MARK: - 单个宫格构造器
+
+    /// 首页 2×2 宫格专用填充形状：外侧两角大圆角，朝网格中心的两角直角，
+    /// 并向中心方向各伸出 6pt 凸条，把 12pt 间距的十字缝用卡片自身颜色填满
+    /// （消除红框里那种「背景从圆角内侧透出的小三角缺口」）。
+    /// gridIndex：0=左上 1=右上 2=左下 3=右下。
+    private struct GridFillShape: Shape {
+        var cornerRadius: CGFloat
+        var gridIndex: Int
+        var extend: CGFloat = 6   // 与 gridColumns 的 spacing(12) 的一半对应
+
+        func path(in rect: CGRect) -> Path {
+            let col = gridIndex % 2
+            let row = gridIndex / 2
+            let r = cornerRadius
+            let w = rect.width
+            let h = rect.height
+
+            // 四角半径：仅「朝外」的两个角为 r，朝中心的两个角为 0（直角拼合无缝）
+            let tl: CGFloat = (col == 0 && row == 0) ? r : 0
+            let tr: CGFloat = (col == 1 && row == 0) ? r : 0
+            let bl: CGFloat = (col == 0 && row == 1) ? r : 0
+            let br: CGFloat = (col == 1 && row == 1) ? r : 0
+
+            var p = Path()
+            p.addPath(unevenRoundedRect(in: rect, tl: tl, tr: tr, bl: bl, br: br))
+            // 朝中心方向伸凸条（填满相邻间距缝）
+            if col == 0 {
+                p.addPath(Rectangle().path(in: CGRect(x: w, y: 0, width: extend, height: h)))      // 左列→右凸
+            } else {
+                p.addPath(Rectangle().path(in: CGRect(x: -extend, y: 0, width: extend, height: h))) // 右列→左凸
+            }
+            if row == 0 {
+                p.addPath(Rectangle().path(in: CGRect(x: 0, y: h, width: w, height: extend)))       // 上行→下凸
+            } else {
+                p.addPath(Rectangle().path(in: CGRect(x: 0, y: -extend, width: w, height: extend)))  // 下行→上凸
+            }
+            return p
+        }
+
+        /// 四角可分别指定半径的圆角矩形路径（半径为 0 时退化为直角）。
+        private func unevenRoundedRect(in rect: CGRect, tl: CGFloat, tr: CGFloat, bl: CGFloat, br: CGFloat) -> Path {
+            let x = rect.origin.x, y = rect.origin.y
+            let w = rect.width, h = rect.height
+            func pt(_ dx: CGFloat, _ dy: CGFloat) -> CGPoint { CGPoint(x: x + dx, y: y + dy) }
+            var p = Path()
+            p.move(to: pt(tl, 0))
+            p.addLine(to: pt(w - tr, 0))
+            if tr > 0 { p.addArc(center: pt(w - tr, tr), radius: tr, startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false) }
+            else { p.addLine(to: pt(w, tr)) }
+            p.addLine(to: pt(w, h - br))
+            if br > 0 { p.addArc(center: pt(w - br, h - br), radius: br, startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false) }
+            else { p.addLine(to: pt(w - br, h)) }
+            p.addLine(to: pt(bl, h))
+            if bl > 0 { p.addArc(center: pt(bl, h - bl), radius: bl, startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false) }
+            else { p.addLine(to: pt(0, h - bl)) }
+            p.addLine(to: pt(0, tl))
+            if tl > 0 { p.addArc(center: pt(tl, tl), radius: tl, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false) }
+            else { p.addLine(to: pt(tl, 0)) }
+            p.closeSubpath()
+            return p
+        }
+    }
+
     private struct TileBadge { let text: String; let warn: Bool }
     private enum TileHeaderMode { case bigNumber, titleLine, none }
 
     private func tile<Content: View>(
         bg: Color, accent: Color, icon: String, route: HomeRoute, title: String, badge: TileBadge,
         number: String, unit: String, isEmpty: Bool,
+        gridIndex: Int,
         headerMode: TileHeaderMode = .bigNumber,
-        titleTrailing: AnyView? = nil,
         @ViewBuilder details: () -> Content
     ) -> some View {
         Button {
@@ -1569,6 +1902,8 @@ struct ContentView: View {
                         .font(AIATheme.Font.caption.weight(.medium))
                         .foregroundStyle(AIATheme.sub)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .layoutPriority(1)
                     if !badge.text.isEmpty {
                         Text(badge.text)
                             .font(AIATheme.Font.micro)
@@ -1581,7 +1916,6 @@ struct ContentView: View {
                             .fixedSize(horizontal: true, vertical: false)
                     }
                     Spacer(minLength: 0)
-                    if let titleTrailing { titleTrailing }
                 }
                 // 主标题：大数字模式 / 标题行模式
                 switch headerMode {
@@ -1618,10 +1952,9 @@ struct ContentView: View {
                 .padding(.bottom, 10)
             }
             .background(bg)
-            .clipShape(RoundedRectangle(cornerRadius: AIATheme.rLG))
-            .contentShape(RoundedRectangle(cornerRadius: AIATheme.rLG))
+            .clipShape(GridFillShape(cornerRadius: AIATheme.rLG, gridIndex: gridIndex))
+            .contentShape(GridFillShape(cornerRadius: AIATheme.rLG, gridIndex: gridIndex))
             .frame(maxWidth: .infinity, minHeight: 165, maxHeight: 165)
-            .clipped()
         }
         // 按压反馈：整张宫格在按下时轻微缩放下沉 + 阴影抬升，松手 spring 回弹。
         // 用 ButtonStyle 实现，与 Button 点击共存，不吞点击，且自动遵守「减弱动态效果」。
@@ -1715,18 +2048,36 @@ struct ContentView: View {
     }
 
     /// 把通知点击携带的路由字符串映射到 HomeRoute，并清空 AppDelegate 的冷启动暂存。
+    /// 若 route 本身是 http(s) URL，则按 App 内浏览器打开（browser:// 前缀则跳系统浏览器）。
     private func consumeNotificationRoute(_ route: String) {
         AppDelegate.pendingNotificationRoute = nil
+        // 外部链接：直接打开
+        if route.hasPrefix("http://") || route.hasPrefix("https://") || route.hasPrefix("browser://") {
+            let urlString = route.hasPrefix("browser://") ? String(route.dropFirst("browser://".count)) : route
+            guard let url = URL(string: urlString), UIApplication.shared.canOpenURL(url) else { return }
+            if route.hasPrefix("browser://") {
+                UIApplication.shared.open(url)
+            } else {
+                browserTarget = BrowserTarget(url: url)
+            }
+            return
+        }
         // 截屏无感识别通知：点通知 = 按「来源×类别」设置分流，
         // 自动保存类跳对话页查看气泡；确认类弹结果确认（编辑）弹窗。
         if route == "screenshotRecognition" {
-            checkScreenshotPending(navigateToChat: true)
+            Task { await checkScreenshotPending(navigateToChat: true) }
             return
         }
         // 点通知上的「保存」Action：本次强制自动入库（即便设置是「确认后再保存」），
         // 用户锁屏点一下即记上，无需进 App 二次确认。
         if route == "screenshotRecognition:save" {
-            checkScreenshotPending(navigateToChat: true, forceSave: true)
+            Task { await checkScreenshotPending(navigateToChat: true, forceSave: true) }
+            return
+        }
+        // 点 widget / 通知带 aia://home：强制弹回首页根（清空整条导航栈），
+        // 无论当前停在哪个深层页都回到首页宫格主界面。
+        if route == "home" {
+            NavigationRouter.shared.popToRoot()
             return
         }
         let target: HomeRoute?

@@ -4,11 +4,17 @@
 // 真 LLM 对话未接入（API Key 走云端代理的后续迭代）。
 import SwiftUI
 import SwiftData
+import CoreData
 import UniformTypeIdentifiers
 
 /// 本地确认消息的统一开场白池；生成确认消息时随机取一个，避免每条都"记好啦"开头。
 /// 同时被下方"过滤 AI 确认消息不进上下文"的逻辑复用，务必与那个过滤集合保持一致。
-private let chatConfirmOpeners = ["记好啦", "收到～", "好嘞", "搞定", "记下啦", "OK，记上了"]
+/// 自动保存类卡片前附的简短文字开场白（文字/语音/图片三条入口共用）。
+let chatConfirmOpeners = ["记好啦", "收到～", "好嘞", "搞定", "记下啦", "OK，记上了"]
+
+/// 本地创建函数走 processRecognition 水槽、已插入识别卡片后返回的哨兵值。
+/// 调用方据此判定「已处理」，不再插入纯文本回复。
+private let kHandledCard = "__CARD_INSERTED__"
 
 /// 聊天内待确认饮食记录（内嵌在 AI 消息文本中，避免改 ChatMessage schema）。
 private struct PendingFoodConfirm: Codable {
@@ -36,12 +42,37 @@ struct ChatView: View {
     @Query(sort: \RecognitionRecord.recognizedAt, order: .reverse) private var recognitions: [RecognitionRecord]
     @Query(filter: #Predicate<WaterLog> { !$0.syncDeleted }, sort: \WaterLog.date, order: .reverse) private var waters: [WaterLog]
     @Query(filter: #Predicate<RecurringRule> { !$0.syncDeleted }) private var recurringRules: [RecurringRule]
-    @Query(filter: #Predicate<ChatMessage> { !$0.syncDeleted }, sort: \ChatMessage.createdAt, order: .forward) private var messages: [ChatMessage]
+    // 真实分页：手动 modelContext.fetch（带 fetchLimit）写入本 @State，避免 1000+ 历史全量 materialize 卡顿。
+    // 插入 / 删除 / 加载更早时调用 fetchMessages() 重取，保持与 @Query 等价的响应式体验。
+    @State private var messages: [ChatMessage] = []
+    /// 视图使用正序序列（查询是倒序取最近 N 条，便于分页）。
+    private var orderedMessages: [ChatMessage] { messages.reversed() }
+    /// 已加载的聊天记录条数上限，下拉到顶部自动递增以加载更早的消息。
+    @State private var messageFetchLimit = 60
+    /// 是否还有更早的消息未加载（由 fetchCount 决定，驱动「加载更早」入口显隐，避免无限加载）。
+    @State private var hasMoreMessages = false
+    /// 防止下拉自动加载时因视图反复进入视口而重复触发的锁。
+    @State private var isLoadingEarlier = false
     @StateObject private var health = HealthManager.shared
+    // 健康指标数据来源（逐指标切换），与首页 / 健康管理页设置联动。
+    @AppStorage(HealthMetricKind.steps.sourceKey) private var stepsSource: HealthSourceMode = .auto
+    @AppStorage(HealthMetricKind.tdee.sourceKey)  private var tdeeSource: HealthSourceMode = .auto
+    private var hkUsable: Bool { health.authorized && health.isAvailable && health.hasHealthKitData }
+    private func isAuto(_ kind: HealthMetricKind) -> Bool {
+        let mode: HealthSourceMode = (kind == .steps) ? stepsSource : tdeeSource
+        return mode == .auto && hkUsable
+    }
+    private var effectiveStepsToday: Double {
+        isAuto(.steps) ? Double(health.stepsToday) : Double(ManualHealthStore.shared.steps(for: Date()))
+    }
+    private var effectiveActiveEnergy: Double {
+        isAuto(.tdee) ? health.activeEnergyToday : Double(ManualHealthStore.shared.activeCalories(for: Date()))
+    }
     // 消息多选（contextMenu 「选择」进入；底部条改为「取消 / 删除」）
     @State private var messageMultiSelectMode = false
     @State private var selectedMessageIDs = Set<PersistentIdentifier>()
     @State private var showMessageDeleteConfirm = false
+    @State private var showPaywall = false
     @Environment(\.modelContext) private var context
 
     @State private var input = ""
@@ -56,8 +87,15 @@ struct ChatView: View {
     @AppStorage("aia.lastBreakfastReminderDate") private var lastBreakfastReminderDate = ""
     @FocusState private var isInputFocused: Bool
     @State private var isParsing = false
+    /// 图片识别进行中信号：runImageRecognition 置位，驱动输入栏上方「小记正在识别...」提示。
+    @StateObject private var recognitionActivity = RecognitionActivity.shared
     @State private var hasAutoFocused = false
+    /// 首屏是否已执行初始落位（无动画多段校正），避免重复滚动与「两跳」。
+    @State private var didInitialScroll = false
     @State private var pendingQueue: [ChatMessage] = []
+
+    /// processNext 内若识别结果已通过 processRecognition 插入对话气泡，则不再重复插入纯文本回复。
+    @State private var chatBubbleInserted = false
 
     // 语音输入
     @StateObject private var recognizer = SpeechRecognizer()
@@ -67,115 +105,165 @@ struct ChatView: View {
     var prefill: String?
     /// 进入聊天页的来源：home / voice / todoReminder
     var entrySource: String = "home"
+    /// 进入时是否自动聚焦输入框（仅首页文字输入框进入为 true，其余场景不弹键盘）
+    var autofocusInput = false
 
     // 输入栏扩展功能（拍照/相册/文件）
     @State private var showInputActions = false
     @State private var showCamera = false
     @State private var showPicker = false
     @State private var showFileImporter = false
-    @State private var fileImportCoverItem: CameraCoverItem?
     @State private var fileImportErrorMessage: String?
 
-    init(prefill: String? = nil, autostartVoice: Bool = false, entrySource: String = "home") {
+    init(prefill: String? = nil, autostartVoice: Bool = false, entrySource: String = "home", autofocusInput: Bool = false) {
         self.prefill = prefill
         self.autostartVoice = autostartVoice
         self.entrySource = entrySource
+        self.autofocusInput = autofocusInput
         #if DEBUG
-        print("[ChatView] init prefill=\(prefill ?? "nil") autostartVoice=\(autostartVoice) entrySource=\(entrySource)")
+        print("[ChatView] init prefill=\(prefill ?? "nil") autostartVoice=\(autostartVoice) entrySource=\(entrySource) autofocusInput=\(autofocusInput)")
         #endif
     }
 
-    // 当前页面动态生成的阿宝招呼（不持久化），时间戳固定为进入页面时最后一条历史+1秒，
-    // 这样新消息时间更晚，会自然把招呼顶上去，而不是永远钉在底部。
+    /// 构造聊天记录查询：倒序取最近 `limit` 条未软删消息（真实 fetchLimit 分页），
+    /// 避免 1000+ 历史时全量 materialize 导致进入首屏卡顿。
+    private static func makeMessageDescriptor(limit: Int) -> FetchDescriptor<ChatMessage> {
+        var d = FetchDescriptor<ChatMessage>(
+            predicate: #Predicate<ChatMessage> { !$0.syncDeleted },
+            sortBy: [SortDescriptor(\ChatMessage.createdAt, order: .reverse)]
+        )
+        d.fetchLimit = limit
+        return d
+    }
+
+    /// 用全量条数判断是否还有更早消息（fetchLimit 之外仍有数据），驱动「加载更早」入口显隐。
+    private func refreshHasMoreMessages() {
+        let total = (try? context.fetchCount(FetchDescriptor<ChatMessage>(
+            predicate: #Predicate<ChatMessage> { !$0.syncDeleted }))) ?? 0
+        hasMoreMessages = total > messageFetchLimit
+    }
+
+    /// 按当前分页上限拉取消息（带 fetchLimit 的真实分页）。替代 @Query，需在插入/删除/加载更早后手动调用以刷新。
+    private func fetchMessages() {
+        messages = (try? context.fetch(ChatView.makeMessageDescriptor(limit: messageFetchLimit))) ?? []
+    }
+
+    // 当前页面动态生成的小记招呼（不持久化），时间戳两种锚定：
+    // ① 有历史（进入前 1s 窗口外存在历史消息）：钉在「最新一条历史」之后 0.5s → 旧历史在上、招呼居中、刚发的图在下。
+    // ② 无历史（首页首次发图等，@Query 里只有本次会话新增）：钉在「会话最旧一条」之前 0.5s，确保招呼位于刚发的图上方。
     @State private var greetingMessage: ChatMessage?
     /// 进入页面时启动的 LLM 招呼生成任务，离开页面 / 重新进入时取消旧任务避免回灌。
     @State private var greetingTask: Task<Void, Never>?
 
-    /// 用户说了食物但没给重量时，暂存食物名与餐次，等用户回复重量。
+    /// 用户说了食物但没给重量时，暂存食物名、餐次、原始日期与是否含具体时刻，等用户回复重量。
     /// 非 nil 时 app 先问「你大概吃了多少重量呀？」，收到重量回复后再结合入库。
-    @State private var pendingWeightFood: (name: String, meal: String)?
+    /// 注意：必须连同 date/hasTime 一起暂存——用户分两次说（如「昨天 下午3点 喝了咖啡」→「一杯」）时，
+    /// 第二次组句不含「昨天/下午3点」，若不暂存日期/时刻，会回退成「今天 + 默认餐次时间」导致记错天。
+    @State private var pendingWeightFood: (name: String, meal: String, date: Date, hasTime: Bool)?
+
+    /// 识别协议解码结果缓存（文本不变即复用，避免 1000+ 条时每次 body 重复 decode 大 JSON）。
+    private static var recognitionCache: [String: RecognitionResultPayload?] = [:]
 
     private var displayedMessages: [ChatMessage] {
-        if let g = greetingMessage {
-            return (messages + [g]).sorted { $0.createdAt < $1.createdAt }
+        // 方式A：先标记空壳开场白（识别开场白 + 之后已无配对识别卡片气泡），渲染层直接隐藏，
+        // 避免卡片被删而开场白残留时退化成「小圆点」。空壳判定基于已加载的 orderedMessages，
+        // 不额外查库，保持 O(N)。
+        let ordered = orderedMessages
+        let shellOpeners = Set(ordered.enumerated().compactMap { idx, m -> ChatMessage? in
+            guard m.role == .ai,
+                  RecognitionSaver.isRecognitionOpener(m.text),
+                  !m.text.hasPrefix(RECOGNITION_RESULT_PREFIX) else { return nil }
+            let later = ordered[(idx + 1)...]
+            let hasCard = later.contains { $0.text.hasPrefix(RECOGNITION_RESULT_PREFIX) }
+            return hasCard ? nil : m
+        }.map { $0.persistentModelID })
+
+        // 兜底：历史遗留的「空 items 识别协议消息」不再展示（否则渲染成「（无识别结果）」空壳）
+        let filtered = ordered.filter { m in
+            if shellOpeners.contains(m.persistentModelID) { return false }
+            guard m.text.hasPrefix(RECOGNITION_RESULT_PREFIX) else { return true }
+            if let cached = Self.recognitionCache[m.text] { return cached?.items.isEmpty == false }
+            let payload = decodeRecognitionPayload(m.text)
+            Self.recognitionCache[m.text] = payload
+            return payload.map { !$0.items.isEmpty } ?? false
         }
-        return messages
+        let limited = Array(filtered.suffix(messageFetchLimit))
+        // 【D】兜底过滤：理论上 fetchMessages 已按 !syncDeleted 取数，这里再防一层
+        // （如 greetingMessage 拼接、状态竞态边界），确保任何软删消息绝不进入渲染列表。
+        let safe = limited.filter { !$0.syncDeleted }
+        if let g = greetingMessage {
+            return (safe + [g]).sorted { $0.createdAt < $1.createdAt }
+        }
+        return limited
+    }
+
+    /// 时间分隔行插入间隔阈值（秒）。微信为 5 分钟，这里保持一致。
+    /// 语义即「隔了这么久再说话 = 新发起一段对话」，因此不需要额外的会话标记。
+    private static let timeDividerGap: TimeInterval = 5 * 60
+
+    /// 一次性算出每个 index 是否显示时间分隔行，避免逐行重复访问 `displayedMessages`
+    /// （该属性每次访问都要 filter + JSON decode + sorted，逐行调用会变成 O(N²)）。
+    /// 判断一条消息是否会产生可见内容（用于时间戳守门）。
+    /// 软删消息、空壳识别开场白、空 items 识别卡都不应单独带时间戳，
+    /// 否则删除这类消息后会残留「没有消息的时间戳」。
+    private static func messageProducesVisibleContent(_ m: ChatMessage) -> Bool {
+        if m.syncDeleted { return false }
+        // 空壳识别开场白（后面已无配对识别卡）不展示内容，时间戳应随之下沉到真正的卡片。
+        if m.role == .ai,
+           RecognitionSaver.isRecognitionOpener(m.text),
+           !m.text.hasPrefix(RECOGNITION_RESULT_PREFIX) {
+            return false
+        }
+        // 空 items 识别协议消息不展示内容。
+        if m.text.hasPrefix(RECOGNITION_RESULT_PREFIX) {
+            let cached = Self.recognitionCache[m.text]
+            let payload = cached ?? decodeRecognitionPayload(m.text)
+            Self.recognitionCache[m.text] = payload
+            return payload.map { !$0.items.isEmpty } ?? false
+        }
+        return true
+    }
+
+    private static func dividerFlags(for list: [ChatMessage]) -> [Bool] {
+        guard !list.isEmpty else { return [] }
+        var flags = [Bool](repeating: false, count: list.count)
+        // 找到第一条「会产生可见内容」的消息作为首锚点。若整段都不可见则全 false。
+        // 不能直接用 list[0]：若首条是空壳开场白/空 items 卡，渲染层守门会把它剔除，
+        // 此刻强行 flags[0]=true 会让时间戳无处落地。
+        var firstAnchor: Int?
+        for i in 0..<list.count where messageProducesVisibleContent(list[i]) {
+            firstAnchor = i
+            break
+        }
+        guard let first = firstAnchor else { return flags }
+        flags[first] = true
+        // 分段时间锚点应"只减不增"：以「上一条已显示时间戳的时间」为基准，
+        // 而非「相邻消息的时间」。否则删除中间消息会让原本间隔 < timeDividerGap
+        // 的两条消息变成间隔 > timeDividerGap，触发新增时间戳（表现为"删了消息
+        // 时间戳还在/反而多了"）。
+        // 关键：分段基准只纳入「可见消息」，与渲染层守门口径（showDivider[idx] &&
+        // messageProducesVisibleContent）严格对齐。若把不可见消息（如空壳开场白）
+        // 也纳入，它会偷走时间锚点，导致其后紧邻的真实可见消息被迫多出一个时间戳。
+        var lastShowedAt = list[first].createdAt
+        for i in (first + 1)..<list.count {
+            if !messageProducesVisibleContent(list[i]) { continue }
+            if list[i].createdAt.timeIntervalSince(lastShowedAt) > timeDividerGap {
+                flags[i] = true
+                lastShowedAt = list[i].createdAt
+            }
+        }
+        return flags
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(displayedMessages) { m in
-                            if let greeting = greetingMessage, m === greeting {
-                                greetingBubble(m.text)
-                            } else {
-                                bubble(m)
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-                    .padding(.top, 4)
-                    .padding(.bottom, 12)
-                    .contentShape(Rectangle())
-                    .animation(scrollAnimation, value: displayedMessages.count)
-                    .onTapGesture {
-                        // 点击消息区手动收起键盘，方便阅读长内容
-                        isInputFocused = false
-                    }
-                }
-                .scrollDismissesKeyboard(.interactively)
-                .onAppear {
-                    // 首次进入时聚焦输入框（语音模式不弹键盘，交给外层 onAppear 自动开麦）
-                    if !hasAutoFocused {
-                        hasAutoFocused = true
-                        if !autostartVoice {
-                            isInputFocused = true
-                        }
-                    }
-                    // 先快速滚到历史底部，让最新内容可见
-                    scrollToBottom(proxy: proxy, delay: 0.1)
-                    // 等布局稳定后再生成阿宝招呼并播放入场动画。
-                    // 此时列表已在底部，气泡的淡入+滑入动画才会真正被看到；
-                    // 紧接着再滚一次确保停留底部。
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                        withAnimation(scrollAnimation) {
-                            if greetingMessage == nil {
-                                // 进入页面（每次进入都弹）生成阿宝招呼，作为对话的第一条。
-                                // 1) 立即用本地模板出招呼（避免空白闪屏）；2) 后台异步用 LLM 重写更自然的版本，
-                                //    若成功且非空则替换气泡文案（首次渲染的入场动画保留）。
-                                // 时间戳固定在「当前历史最后一条 + 1 秒」，让它停在对话流里；
-                                // 之后不再被推后，用户回复时新消息排在它下方，它自然被顶到上方。
-                                let date = messages.last?.createdAt.addingTimeInterval(1) ?? Date()
-                                let initial = buildGreeting()
-                                greetingMessage = ChatMessage(role: .ai, text: initial, createdAt: date)
-                                startGreetingLLMTask(initial: initial)
-                            }
-                        }
-                        scrollToBottom(proxy: proxy, delay: 0.08)
-                    }
-                }
-                .onChange(of: messages.count) { _, _ in
-                    // 招呼气泡已固定在对话流里，新消息来时它会被自然顶上去；
-                    // 这里不再改动它的时间戳（否则会被推到最新、永远钉在底部）。
-                    scrollToBottom(proxy: proxy, delay: 0.03)
-                }
-                .onChange(of: isInputFocused) { _, focused in
-                    if focused {
-                        // 键盘弹出：等 0.30s 键盘滑入完成再滚到底
-                        scrollToBottom(proxy: proxy, delay: 0.30)
-                    } else {
-                        // 键盘收起：0 延迟，跟键盘滑出同步进行
-                        scrollToBottom(proxy: proxy, delay: 0)
-                    }
-                }
-            }
+            messageList
         }
-        .navigationTitle("阿宝丨AI助理")
+        .navigationTitle("小记")
+        .task { UsageAnalytics.logOpen("chat") }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            // 中间标题：圆形头像 + "我是阿宝" + 副标（与首条气泡同款内容）
+                    // 中间标题：圆形头像 + "我是小记" + 副标（与首条气泡同款内容）
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 8) {
                     Image("AIAvatar")
@@ -185,7 +273,7 @@ struct ChatView: View {
                         .clipShape(Circle())
                         .overlay(Circle().stroke(AIATheme.hairline, lineWidth: 0.5))
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("我是阿宝")
+                        Text("我是小记")
                             .font(AIATheme.Font.footnote.weight(.semibold))
                             .foregroundStyle(.primary)
                         Text("你的私人专属AI助理")
@@ -207,12 +295,12 @@ struct ChatView: View {
         }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 0) {
-                // 处理中提示（放在 chips 上方，避免遮挡输入）
-                if isParsing {
+                // 处理中提示（放在 chips 上方，避免遮挡输入）：文字问答=思考中，图片识别=识别中
+                if isParsing || recognitionActivity.isRecognizing {
                     HStack(spacing: 6) {
                         ProgressView()
                             .scaleEffect(0.7)
-                        Text("阿宝正在思考...")
+                        Text(recognitionActivity.isRecognizing ? "小记正在识别..." : "小记正在思考...")
                             .font(AIATheme.Font.caption)
                             .foregroundStyle(AIATheme.muted)
                     }
@@ -325,6 +413,16 @@ struct ChatView: View {
                 .padding(.horizontal, 12).padding(.vertical, 10)
                 .background(Color(.systemBackground))
                 .overlay(alignment: .top) { Divider() }
+
+                // 底部小字提示：免费版 AI 识别结果仅供参考，引导升级 Pro（2026-08-03）。
+                // 文案对 Pro 用户亦无害（"如需体验更好"为中性表达），故无条件展示，避免引入 ent 依赖。
+                Text("免费版AI识别结果仅供参考，如需体验更好可升级Pro版")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 6)
+                    .background(Color(.systemBackground))
             }
         }
         .background(AppBackgroundView())
@@ -396,15 +494,6 @@ struct ChatView: View {
                       allowsMultipleSelection: false) { result in
             handleFileImport(result)
         }
-        .fullScreenCover(item: $fileImportCoverItem) { item in
-            switch item {
-            case .recognizing(let img):
-                RecognizingOverlay(image: img, onBack: { fileImportCoverItem = nil })
-            case .present(let p):
-                makeResultConfirmView(p)
-                    .environment(\.modelContext, context)
-            }
-        }
         .alert("提示", isPresented: Binding(
             get: { fileImportErrorMessage != nil },
             set: { if !$0 { fileImportErrorMessage = nil } }
@@ -418,14 +507,14 @@ struct ChatView: View {
             if messageMultiSelectMode {
                 MultiSelectBottomBar(
                     count: selectedMessageIDs.count,
-                    totalCount: messages.count,
+                    totalCount: orderedMessages.count,
                     onCancel: {
                         messageMultiSelectMode = false
                         selectedMessageIDs.removeAll()
                     },
                     onSelectAll: {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        let allIDs = Set(messages.map(\.persistentModelID))
+                        let allIDs = Set(orderedMessages.map(\.persistentModelID))
                         if selectedMessageIDs.isSuperset(of: allIDs) {
                             selectedMessageIDs.subtract(allIDs)
                         } else {
@@ -449,13 +538,247 @@ struct ChatView: View {
         } message: {
             Text(String(format: NSLocalizedString("common.deleteCount", comment: ""), selectedMessageIDs.count))
         }
+        .sheet(isPresented: $showPaywall) {
+            PaywallView()
+        }
     }
 
-    /// 阿宝招呼：每次进入页面时根据本地数据与用户习惯实时生成（不持久化，避免重复堆积）。
+    /// 小记招呼：每次进入页面时根据本地数据与用户习惯实时生成（不持久化，避免重复堆积）。
     private var greeting: String { buildGreeting() }
+
+    /// 把一次「新鲜识别结果」转成一条 AI 消息插入对话流（进气泡，不弹确认页）。
+    private func insertRecognitionBubble(result: RecognitionResult, imageName: String? = nil) {
+        let items = buildPendingItems(from: result, source: "image", imageName: imageName)
+        guard !items.isEmpty else { return }
+        let payload = RecognitionResultPayload(
+            types: result.types ?? items.map { $0.type.rawValue },
+            source: "image",
+            autoSaved: false,
+            items: items
+        )
+        let msg = ChatMessage(role: .ai, text: encodeRecognitionPayload(payload), createdAt: Date())
+        context.insert(msg)
+        fetchMessages()
+    }
+
+    private var messageList: some View {
+        ScrollViewReader { proxy in
+            let list = displayedMessages          // 每帧只算一次（避免逐行重复 filter+decode 导致 O(N²)）
+            let showDivider = ChatView.dividerFlags(for: list)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if hasMoreMessages {
+                        earlierLoader(proxy: proxy)
+                    }
+                    ForEach(Array(list.enumerated()),
+                            id: \.element.persistentModelID) { idx, m in
+                        // 【A】渲染层守门：仅当该消息未被软删且确实会产生可见内容时，
+                        // 才显示其时间戳分隔行，杜绝「删了消息却残留孤立时间戳」。
+                        if showDivider[idx],
+                           !m.syncDeleted,
+                           Self.messageProducesVisibleContent(m) {
+                            ChatTimeDivider(date: m.createdAt)
+                        }
+                        messageRow(m)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.top, 4)
+                .padding(.bottom, 12)
+                .contentShape(Rectangle())
+                .animation(didInitialScroll ? scrollAnimation : nil, value: list.count)
+                .onTapGesture {
+                    isInputFocused = false
+                }
+            }
+            .defaultScrollAnchor(.bottom)
+            .scrollDismissesKeyboard(.interactively)
+            .onAppear {
+                // 初次进入即分页拉取最近消息（fetchLimit 真分页），并判定是否还有更早消息。
+                fetchMessages()
+                refreshHasMoreMessages()
+                // 消费「本次会话锚点」：无论是否首次滚动都读走并清零，
+                // 避免上一次遗留的陈旧锚点把下次进入的招呼气泡钉到对话中间。
+                let sessionAnchor = NavigationRouter.shared.chatSessionAnchor
+                NavigationRouter.shared.chatSessionAnchor = nil
+                if !hasAutoFocused {
+                    hasAutoFocused = true
+                    if autofocusInput {
+                        isInputFocused = true
+                    }
+                }
+                if autofocusInput {
+                    // 消费后清零，避免后续其他 .chat 进入误弹；延到下一 runloop 避开 view update 期改状态
+                    DispatchQueue.main.async { NavigationRouter.shared.chatAutoFocus = false }
+                }
+                guard !didInitialScroll else { return }
+                didInitialScroll = true
+                // 招呼气泡锚点：有历史钉在最新历史之后 0.5s，无历史钉在本次会话起点之前 0.5s。
+                // 分界点用 NavigationRouter.chatSessionAnchor —— 由发起方（首页拍照/相册、截屏通知、语音）
+                // 在插入本次第一条新消息「之前」打点，因此绝不会把本次新消息误判成历史。
+                // 旧实现用「进入时刻往前 1s 固定窗口」，慢设备/冷启动时 onAppear 比插图晚超过 1s，
+                // 窗口反向包含刚插的新图 → last(where:) 命中图片自己 → 招呼被钉到图片之后（实测 bug）。
+                // 无锚点（用户直接点进对话页，没有新消息）时用当前时刻：所有消息都是历史，招呼落在最底部。
+                // orderedMessages 是正序（最旧在前、最新在后，见 47 行）。
+                let anchor = sessionAnchor ?? Date.now
+                let greetingDate: Date
+                if let lastHistory = orderedMessages.last(where: { $0.createdAt < anchor }) {
+                    // 有历史：钉在最新历史之后；上限压到 anchor，
+                    // 防止「刚聊过 0.1s 又发图」时 +0.5s 越过 anchor 反超本次新消息。
+                    greetingDate = min(lastHistory.createdAt.addingTimeInterval(0.5), anchor)
+                } else {
+                    greetingDate = anchor.addingTimeInterval(-0.5)  // 无历史：钉在本次会话起点之前
+                }
+                // 招呼气泡同帧末生成，避免「滚到底 → 内容变高 → 再跳一次」的两跳观感
+                DispatchQueue.main.async {
+                    if greetingMessage == nil {
+                        let initial = buildGreeting()
+                        greetingMessage = ChatMessage(role: .ai, text: initial, createdAt: greetingDate)
+                        startGreetingLLMTask(initial: initial)
+                    }
+                }
+                // 无动画多段校正：兜住图片 / 识别卡片的异步高度，保证首屏最后一条贴底
+                for d in [0.0, 0.15, 0.45] {
+                    scrollToBottom(proxy: proxy, delay: d, animated: false)
+                }
+            }
+            // 安全网：任何 store 保存（含 ChatView 之外的识别气泡插入）后重取列表，
+            // 保证响应式不丢消息；fetchMessages 带 decode 缓存，开销仅 O(N)，频繁保存亦可忽略。
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name(rawValue: "NSManagedObjectContextDidSaveNotification"))) { _ in
+                fetchMessages()
+            }
+            .onChange(of: orderedMessages.count) { _, _ in
+                guard !isLoadingEarlier else { return }
+                // 多段校正：兜住识别卡片（含本地小票图/食物图）的异步高度，
+                // 避免单次滚动被后续图片解码/卡片加载顶回中间，结果滚不到视口。
+                for d in [0.0, 0.15, 0.45] {
+                    scrollToBottom(proxy: proxy, delay: d, animated: false)
+                }
+            }
+            // 识别落地（拍照/相册/截屏/ShareExtension/语音等）主动广播的滚动信号：
+            // 刷新列表 + 多段校正，保证结果气泡出现后页面自动滚到底、最新卡片完整可见。
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("AIA.chatScrollToBottom"))) { _ in
+                guard !isLoadingEarlier else { return }
+                fetchMessages()
+                for d in [0.0, 0.15, 0.45] {
+                    scrollToBottom(proxy: proxy, delay: d, animated: false)
+                }
+            }
+            .onChange(of: isInputFocused) { _, focused in
+                if focused {
+                    scrollToBottom(proxy: proxy, delay: 0.30)
+                } else {
+                    scrollToBottom(proxy: proxy, delay: 0)
+                }
+            }
+        }
+    }
+
+    /// 顶部「下拉自动加载更早的消息」：指示器滚入视口即自动扩大分页上限并重建查询，
+    /// 加载后锚定此前的首条保持可视位置；加载期间显示 spinner 并用 `isLoadingEarlier` 锁防重复触发。
+    private func earlierLoader(proxy: ScrollViewProxy) -> some View {
+        HStack(spacing: 6) {
+            if isLoadingEarlier {
+                ProgressView()
+                    .controlSize(.small)
+                Text("加载中…")
+                    .font(AIATheme.Font.subhead)
+            } else {
+                Image(systemName: "arrow.up.circle.dotted")
+                Text("下拉加载更早的消息")
+                    .font(AIATheme.Font.subhead)
+            }
+        }
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.vertical, 6)
+        .onAppear { loadEarlier(proxy: proxy) }
+    }
+
+    /// 自动加载更早的消息：仅在未处于加载态、且仍有更早记录时触发，加载后锚定原首条。
+    private func loadEarlier(proxy: ScrollViewProxy) {
+        guard !isLoadingEarlier, hasMoreMessages else { return }
+        isLoadingEarlier = true
+        let firstID = displayedMessages.first?.persistentModelID
+        messageFetchLimit += 60
+        // 加大 fetchLimit 重新分页拉取更早的消息（手动 fetch 替代 @Query）。
+        fetchMessages()
+        refreshHasMoreMessages()
+        if let firstID {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                var tx = Transaction()
+                tx.disablesAnimations = true
+                withTransaction(tx) { proxy.scrollTo(firstID, anchor: .top) }
+            }
+        }
+        // 锁在滚动校正完成后释放，无论滚动是否成功都解锁，避免死锁。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            isLoadingEarlier = false
+        }
+    }
+
+    @ViewBuilder
+    private func messageRow(_ m: ChatMessage) -> some View {
+        if let greeting = greetingMessage, m === greeting {
+            greetingBubble(m.text)
+        } else if let imgName = decodeUserImageName(m.text) {
+            // 用户发出的图片（拍照/相册/文件/截屏）：像微信一样先出现你发的图，小记随后回识别卡片
+            UserImageBubble(
+                imageName: imgName,
+                isSelected: selectedMessageIDs.contains(m.persistentModelID),
+                showSelection: messageMultiSelectMode,
+                onToggleSelection: { toggleMessageSelection(m.persistentModelID) },
+                onDelete: {
+                    // 【C】SafeDelete.chatMessage 内部用 DispatchQueue.main.async 标记 syncDeleted，
+                    // 必须把 fetchMessages() 也排到同一 main 队列之后，否则当前栈里同步 fetch
+                    // 会读回尚未标记的删除消息，导致「删了没反应 / 时间戳残留」。
+                    SafeDelete.chatMessage(m, in: context)
+                    DispatchQueue.main.async { fetchMessages() }
+                },
+                onEnterMultiSelect: { enterMessageMultiSelect(m.persistentModelID) }
+            )
+        } else if m.text.hasPrefix(RECOGNITION_RESULT_PREFIX) {
+            // 识别结果卡片宽度由内部气泡钉死到（屏宽 − 60），与文字气泡同宽；
+            // 外层不再加 Spacer，避免二次扣减导致比文字气泡窄。
+            ChatRecognitionBubble(message: m)
+        } else if m.text.hasPrefix(UPGRADE_PRO_PREFIX) {
+            // 付费墙拦截（免费版无云端视觉）时给的升级 Pro 引导气泡。
+            upgradeProBubble(message: m)
+        } else {
+            bubble(m)
+        }
+    }
+
+    /// 付费墙拦截引导气泡：免费版用户发「视觉专属场景」（如饭菜照片）本地识别失败时，
+    /// 给一条可读文案 + 升级 Pro 入口，点击弹出订阅页。
+    @ViewBuilder
+    private func upgradeProBubble(message: ChatMessage) -> some View {
+        let body = String(message.text.dropFirst(UPGRADE_PRO_PREFIX.count))
+        VStack(alignment: .leading, spacing: 12) {
+            Text(body)
+                .font(AIATheme.Font.chatBody)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                showPaywall = true
+            } label: {
+                Label("升级 Pro 版会员", systemImage: "crown.fill")
+                    .font(AIATheme.Font.subhead.weight(.semibold))
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 4)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(AIATheme.amber)
+        }
+        .padding(14)
+        .background(Color.adaptive(light: 0xffffff, dark: 0x2c2c2e))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
     @ViewBuilder
     private func bubble(_ m: ChatMessage) -> some View {
+        // 兼容历史消息：旧版 __FOOD_CONFIRM__ 协议仍按确认卡片渲染，新记录统一走识别卡片水槽。
         if let pending = parseFoodConfirm(m.text) {
             foodConfirmBubble(pending, message: m)
         } else {
@@ -526,6 +849,7 @@ struct ChatView: View {
                 }
                 Button(role: .destructive) {
                     SafeDelete.chatMessage(message, in: context)
+                    fetchMessages()
                 } label: {
                     Label("删除", systemImage: "trash")
                 }
@@ -589,14 +913,20 @@ struct ChatView: View {
                 Text(title)
                     .font(AIATheme.Font.micro)
                     .foregroundStyle(AIATheme.muted)
+                    .lineLimit(1)
                 HStack(alignment: .firstTextBaseline, spacing: 1) {
                     Text(formatValue(value))
-                        .font(AIATheme.Font.callout.weight(.semibold))
+                        .font(AIATheme.Font.subhead.weight(.semibold))
                         .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                     Text(unit)
-                        .font(AIATheme.Font.caption)
+                        .font(AIATheme.Font.micro)
                         .foregroundStyle(AIATheme.sub)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                 }
+                .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
@@ -662,7 +992,7 @@ struct ChatView: View {
         try? context.save()
     }
 
-    /// 顶部阿宝招呼气泡（带小头像，区别于普通聊天记录）
+    /// 顶部小记招呼气泡（带小头像，区别于普通聊天记录）
     private func greetingBubble(_ text: String) -> some View {
         HStack(spacing: 8) {
             Image("AIAvatar")
@@ -691,7 +1021,7 @@ struct ChatView: View {
 
             ZStack(alignment: .topTrailing) {
                 Text(displayText)
-                    .font(.system(size: 13.3))
+                    .font(AIATheme.Font.chatBody)
                     .foregroundStyle(userSide ? .white : .primary)
                     .textSelection(.enabled)
                     .padding(10)
@@ -728,6 +1058,7 @@ struct ChatView: View {
                     }
                     Button(role: .destructive) {
                         SafeDelete.chatMessage(m, in: context)
+                        fetchMessages()
                     } label: {
                         Label("删除", systemImage: "trash")
                     }
@@ -768,14 +1099,25 @@ struct ChatView: View {
     }
 
     private func deleteSelectedMessages() {
-        for id in selectedMessageIDs {
-            SafeDelete.chatMessageByID(id, in: context)
-        }
+        let ids = selectedMessageIDs
         messageMultiSelectMode = false
         selectedMessageIDs.removeAll()
+        // SafeDelete.chatMessageByID 内部用 DispatchQueue.main.async 标记 syncDeleted，
+        // 必须等该任务真正执行（syncDeleted=true）之后，再 fetchMessages() 才能按 !syncDeleted
+        // 过滤掉被删消息。否则当前同步栈里立即 fetch 会读回尚未标记的删除消息，导致页面"删了没反应"。
+        // 由于 chatMessageByID → chatMessage 内部嵌套了两层 main.async，这里再嵌套一层 main.async，
+        // 确保 fetchMessages() 排在全部软删标记之后执行。
+        DispatchQueue.main.async {
+            for id in ids {
+                SafeDelete.chatMessageByID(id, in: context)
+            }
+            DispatchQueue.main.async {
+                fetchMessages()
+            }
+        }
     }
 
-    /// 生成阿宝打招呼文案。
+    /// 生成小记打招呼文案。
     /// 格式：时段开头 + 固定自我介绍 + 入口感知专属内容。
     /// 入口感知内容根据 entrySource 决定（food/health/bill/todo/home/兜底）。
     private func buildGreeting() -> String {
@@ -794,7 +1136,7 @@ struct ChatView: View {
         }
 
         // 2. 固定自我介绍
-        let intro = "我是阿宝～你的私人AI助理。"
+        let intro = "我是小记～你的私人AI助理。"
         let ending = "文字、语音跟我说都行。"
 
         // 3. 入口感知专属内容
@@ -915,8 +1257,7 @@ struct ChatView: View {
         }
         // 重要：所有传给云端 LLM 的时间戳必须用本地时区（带 +HH:MM 偏移），
         // 否则默认 ISO8601DateFormatter() 是 UTC（Z），本地 11:45 会变成 03:45Z 被 LLM 误读为「凌晨 3 点」。
-        let fmt = ISO8601DateFormatter()
-        fmt.timeZone = .current
+        let fmt = AppFormat.isoLocal
         let upcomingCompact: [[String: Any]] = upcomingToday.prefix(3).map { r in
             [
                 "title": r.title,
@@ -943,7 +1284,7 @@ struct ChatView: View {
         // 【D】最新健康指标
         var latestMetric: [String: Any]?
         if let lh = healths.first {
-            latestMetric = ["metric": lh.metric, "value": lh.value, "unit": lh.unit ?? ""]
+            latestMetric = ["metric": lh.metric, "value": lh.value, "unit": lh.unit]
         }
 
         var ctx: [String: Any] = [
@@ -959,8 +1300,8 @@ struct ChatView: View {
         ]
         if let bs = todayBillSummary { ctx["todayBillSummary"] = bs }  // 🆕
         if let lm = latestMetric { ctx["latestHealthMetric"] = lm }    // 🆕
-        if health.stepsToday > 0 {
-            ctx["stepsToday"] = health.stepsToday
+        if effectiveStepsToday > 0 {
+            ctx["stepsToday"] = effectiveStepsToday
         }
         return ctx
     }
@@ -1016,13 +1357,14 @@ struct ChatView: View {
         .buttonStyle(.plain)
     }
 
-    /// 「联系我们」chip 点击：直接以阿宝身份发送一条带联系方式的 AI 消息进聊天流。
+    /// 「联系我们」chip 点击：直接以小记身份发送一条带联系方式的 AI 消息进聊天流。
     private func postContactMessage() {
         let body = "如果你需要帮助，或想给我们提供建议，欢迎通过以下方式联系我们😊\n\n微信/Wechat：754727942\n\n邮箱/Email：754727942@qq.com\n\n长按本消息，可复制"
         let aiMessage = ChatMessage(role: .ai, text: body, createdAt: Date())
         context.insert(aiMessage)
         try? context.save()
-        // 关掉输入栏焦点，让用户立刻看到阿宝的回复
+        fetchMessages()
+        // 关掉输入栏焦点，让用户立刻看到小记的回复
         isInputFocused = false
     }
 
@@ -1058,7 +1400,6 @@ struct ChatView: View {
                 return
             }
             runImageRecognition(image: img, context: context,
-                                coverItem: $fileImportCoverItem,
                                 errorMessage: $fileImportErrorMessage)
         } catch {
             fileImportErrorMessage = error.localizedDescription
@@ -1072,9 +1413,9 @@ struct ChatView: View {
         guard !lower.isEmpty else { return nil }
 
         // 身份
-        let identityKw = ["你是谁", "你叫什么", "你是阿宝", "介绍一下你自己", "你的名字", "你是什么"]
+        let identityKw = ["你是谁", "你叫什么", "你是小记", "介绍一下你自己", "你的名字", "你是什么"]
         if identityKw.contains(where: { lower.contains($0) }) {
-            return "我是阿宝，你的私人专属 AI 助理～可以帮你记饮食、账单、待办，也能看看今天的健康数据。今天想记点什么？"
+            return "我是小记，你的私人专属 AI 助理～可以帮你记饮食、账单、待办，也能看看今天的健康数据。今天想记点什么？"
         }
 
         // 能力
@@ -1120,7 +1461,45 @@ struct ChatView: View {
             case 18..<23: opening = "晚上好"
             default:      opening = "这么晚还没休息呀"
             }
-            return "\(opening)，我是阿宝～今天想记录点什么，还是随便聊聊？"
+            return "\(opening)，我是小记～今天想记录点什么，还是随便聊聊？"
+        }
+
+        return nil
+    }
+
+    /// 本地内容安全闸：检测明显的违规/有害内容，命中则直接返回拒答文本（不调云端）。
+    /// 只拦截高置信的硬违规（色情/暴力/政治敏感/违法/严重歧视），正常闲聊一律放行。
+    /// 返回 nil 表示放行，继续走后续 resolveLocally / 云端。
+    static func replyForBlockedIntent(_ text: String) -> String? {
+        let lower = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !lower.isEmpty else { return nil }
+
+        // 色情相关
+        let adultKw = ["做爱","性交","黄片","色情","裸照","裸聊","淫","av ","a片",
+                       "约炮","一夜情","援交","卖淫","嫖娼","自慰","春药"]
+        if adultKw.contains(where: { lower.contains($0) }) {
+            return "哎呀这个我确实帮不上忙呢～不过我可以帮你记生活账呀，比如记一笔、加个待办、看看今天吃了啥，你想试哪个？"
+        }
+
+        // 暴力/伤害
+        let violenceKw = ["杀人","杀掉","打死","砍死","炸毁","制造炸弹","恐怖袭击",
+                          "自杀方法","怎么自杀","如何自杀","自残","伤害他人","打人"]
+        if violenceKw.contains(where: { lower.contains($0) }) {
+            return "这个我确实帮不上忙呢～我是帮你整理生活记录的小记，记账、记饮食、管待办、查健康这些我都在行，想试试吗？"
+        }
+
+        // 政治敏感（常见触发词）
+        let politicsKw = ["反党","反政府","推翻","颠覆政权","法轮功","台独","藏独","疆独",
+                          "六四","八九","习近平","李克强","政治局","中南海"]
+        if politicsKw.contains(where: { lower.contains($0) }) {
+            return "这个我确实帮不上忙呢～我只能帮你整理生活记录，比如记一笔、加个待办、看看今天吃了啥，你想试哪个？"
+        }
+
+        // 违法犯罪
+        let illegalKw = ["怎么造假","如何诈骗","黑客攻击","盗号","洗钱","走私","贩毒",
+                         "制毒","偷税漏税","伪造证件","假币","开锁技术"]
+        if illegalKw.contains(where: { lower.contains($0) }) {
+            return "这个我确实帮不上忙呢～不过我可以帮你记生活账呀，比如记一笔、加个待办、查查健康数据，你想试哪个？"
         }
 
         return nil
@@ -1128,7 +1507,7 @@ struct ChatView: View {
 
     /// 云端聊天不可用时的本地兜底回复：基于用户的本地数据组织成自然语句。
     /// 覆盖饮食/账单/待办/健康几类常见问题，其余给友好兜底并提示能做什么。
-    private func localReply(for text: String) -> String {
+    private func localReply(for text: String) async -> String {
         // 先处理常见闲聊/元意图，避免把「你是谁」「在干嘛」当成未识别意图给通用兜底。
         if let metaReply = replyForMetaIntent(text) {
             return metaReply
@@ -1189,7 +1568,7 @@ struct ChatView: View {
         // 待办 / 任务
         if lower.contains("待办") || lower.contains("任务") || lower.contains("提醒") || lower.contains("事情") || lower.contains("todo") || lower.contains("安排") {
             // 兜底：如果用户明显是在“新建”待办，但云端没识别出来，直接本地创建
-            if let reply = createTodoLocally(from: text) {
+            if let reply = await createTodoLocally(from: text) {
                 return reply
             }
             let upcoming = reminders
@@ -1203,7 +1582,7 @@ struct ChatView: View {
                 let title = r.title
                 guard let due = r.due else { return "· \(title)" }
                 let prefix: String
-                if cal.isDateInToday(due) { prefix = "今天 \(AppFormat.time.string(from: due))" }
+                if cal.isDateInToday(due) { prefix = "今天 \(AppFormat.hourMinute.string(from: due))" }
                 else if cal.isDateInTomorrow(due) { prefix = "明天 \(AppFormat.dateTime.string(from: due))" }
                 else { prefix = AppFormat.dateTime.string(from: due) }
                 return "· \(prefix) · \(title)"
@@ -1214,8 +1593,8 @@ struct ChatView: View {
 
         // 健康 / 步数
         if lower.contains("步数") || lower.contains("健康") || lower.contains("运动") || lower.contains("走") || lower.contains("锻炼") {
-            if health.stepsToday > 0 {
-                return "今天已经走了 \(health.stepsToday) 步，活动量不错，继续保持呀～"
+            if effectiveStepsToday > 0 {
+                return "今天已经走了 \(Int(effectiveStepsToday)) 步，活动量不错，继续保持呀～"
             }
             return "我暂时还没读到你的健康数据（可能还没授权健康权限）。不过你今天感觉怎么样？"
         }
@@ -1225,7 +1604,7 @@ struct ChatView: View {
     }
 
     /// 本地兜底创建待办：当云端返回 types:none 但用户明显在新建待办时，直接解析标题和日期并创建。
-    private func createTodoLocally(from text: String) -> String? {
+    private func createTodoLocally(from text: String) async -> String? {
         let lower = text.lowercased()
         // 负面意图：取消/删除提醒时不应创建。注意「关闭」本身是常见提醒内容（如"关闭wifi"），
         // 仅当明确针对"提醒/待办"本身（关掉提醒/取消提醒）时才屏蔽，避免误杀内容型提醒。
@@ -1238,22 +1617,23 @@ struct ChatView: View {
 
         // 一句话多条：按连词切分后逐条建待办
         let segments = IntentTextUtils.splitByConjunction(text)
-        var created: [Reminder] = []
+        var todoPayloads: [TodoPayload] = []
         for seg in segments {
-            guard let (title, due) = parseTodoCreate(seg) else { continue }
+            guard let (title, due, repeatRule) = parseTodoCreate(seg) else { continue }
             if WaterIntakeParser.checkDuplicateAndRegister(seg, type: "todo") { continue }
             if DataDeduplicator.isDuplicateReminder(title: title, context: context) { continue }
-            let r = Reminder(title: title, due: due, imageName: nil)
-            DefaultReminderSettings.shared.apply(to: r)
-            context.insert(r)
-            ReminderNotificationManager.schedule(r)
-            created.append(r)
+            // 必须带本地时区偏移（AppFormat.iso）。此处曾裸用 ISO8601DateFormatter()（UTC），
+            // 导致「19 点提醒吃饭」序列化成 11:00Z、被 LLM 当成 11 点回传，待办落成 11:00。
+            let dueISO = AppFormat.iso.string(from: due)
+            todoPayloads.append(TodoPayload(title: title, due: dueISO, repeatRule: repeatRule, priority: nil, action: nil, targetTitle: nil))
         }
-        guard !created.isEmpty else { return nil }
-        try? context.save()
-        let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
-        let lines = created.map { "⏰ 已添加待办「\($0.title)」，我会在 \(formatShortDateTime($0.due ?? Date())) 提醒你。" }
-        return "\(opener)：\n" + lines.joined(separator: "\n")
+        guard !todoPayloads.isEmpty else { return nil }
+        UsageAnalytics.logAdd("todo", source: "chat")
+        let result = RecognitionResult(types: ["todo"], todos: todoPayloads)
+        if await routeRecognition(result, rawText: text) {
+            return kHandledCard
+        }
+        return nil
     }
 
     /// 判断文本是否为明显**进食意图**（用于走记录流程）。需要包含进食动词或餐次上下文。
@@ -1346,7 +1726,7 @@ struct ChatView: View {
     /// 商户分类优先查本地 MerchantMeta 经验库，命中即复用、不调 AI；未命中给"其他"。
     /// 触发条件：① 含明确记账动词（记一笔/花了/付了…）且含金额；② 含食物词且含「金额+货币单位」（如「午饭吃了碗牛肉面32块」）。
     /// 纯饮食（无金额，如「喝了一杯奶茶」）仍返回 nil，走 food 路径，避免误吞饮食/问句。
-    private func createBillLocally(from text: String) -> String? {
+    private func createBillLocally(from text: String) async -> String? {
         let lower = text.lowercased()
         // 必须先有金额，否则不是本地可解析的账单（纯饮食/问句等交给其它分支）
         guard extractAmount(text) != nil else { return nil }
@@ -1366,27 +1746,38 @@ struct ChatView: View {
         let isIncomeWithAmount = incomeKeywords.contains(where: { lower.contains($0) })
         guard hasExplicitBill || isFoodWithAmount || isIncomeWithAmount else { return nil }
 
-        // 一句话多条：按连词切分后逐条建账单
-        let segments = IntentTextUtils.splitByConjunction(text)
-        var created: [(merchant: String, amount: Double, isIncome: Bool)] = []
+        // 一句话多条：先按连词切分，再按餐次词（午餐/晚餐…）切分，逐条建账单。
+        // 例：「午餐花了10元晚餐花了15元」无连词，靠餐次词切成两笔，避免两顿被并成一条。
+        var segments = IntentTextUtils.splitByConjunction(text)
+        var expanded: [String] = []
+        for seg in segments { expanded.append(contentsOf: IntentTextUtils.splitBillsByMeal(seg)) }
+        segments = expanded
+        var billPayloads: [BillPayload] = []
         for seg in segments {
             guard let fields = buildBill(from: seg) else { continue }
+            // 解析日期 + 时刻：
+            // - 有「昨天/前天/M月D日/12:30」等 → 取对应日期时刻；
+            // - 仅含餐次词（如「午餐花了10元」，无时刻）→ 用该餐次默认时刻（12:00）补上，
+            //   避免落到当天 0:00 被上海时区序列化成 8:00。
+            let billDate = ChatView.resolveBillDate(from: seg)
             if WaterIntakeParser.checkDuplicateAndRegister(seg, type: "bill") { continue }
-            if DataDeduplicator.isDuplicateBill(merchant: fields.merchant, amount: fields.amount, time: .now, context: context) { continue }
-            let bill = Bill(merchant: fields.merchant, amount: fields.amount, category: fields.category,
-                            time: .now, isIncome: fields.isIncome, imageName: nil)
-            context.insert(bill)
-            created.append((fields.merchant, fields.amount, fields.isIncome))
+            if DataDeduplicator.isDuplicateBill(merchant: fields.merchant, amount: fields.amount, time: billDate, context: context) { continue }
+            billPayloads.append(BillPayload(merchant: fields.merchant,
+                                            amount: fields.amount,
+                                            currency: nil,
+                                            category: fields.category,
+                                            time: AppFormat.iso.string(from: billDate),
+                                            note: nil,
+                                            action: nil,
+                                            targetTitle: nil))
         }
-        guard !created.isEmpty else { return nil }
-        try? context.save()
-        CloudSyncManager.shared.syncAfterLocalChange(context: context)
-        let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
-        let lines = created.map { (m, a, inc) in
-            let icon = inc ? "💰" : "🧾"
-            return "\(icon) 已添加\(inc ? "收入" : "支出")「\(m)」\(String(format: "%.2f", a))"
+        guard !billPayloads.isEmpty else { return nil }
+        UsageAnalytics.logAdd("bill", source: "chat")
+        let result = RecognitionResult(types: ["bill"], bills: billPayloads)
+        if await routeRecognition(result, rawText: text) {
+            return kHandledCard
         }
-        return "\(opener)：\n" + lines.joined(separator: "\n")
+        return nil
     }
 
     /// 从单个子句解析出一笔账单的字段（商户/金额/分类/收支），供一句话多条账单复用。
@@ -1424,6 +1815,32 @@ struct ChatView: View {
         }
         let category = (isIncome && cat == "其他") ? "收入" : cat
         return (merchant, amount, category, isIncome)
+    }
+
+    /// 解析账单最终时间：合并「相对日期 + 时刻/餐次词」。
+    /// 旧逻辑用纯日期串（isoDate）序列化，上海时区 +8 后显示 8:00，且盖过餐次默认时刻。
+    /// 现改为：优先用文本里真实时刻；无时刻但含餐次词（午餐/晚餐…）则补上对应默认时刻
+    /// （12:00 / 18:00…），保证「午餐花了10元」落到当天 12:00 而非 8:00。
+    private static func resolveBillDate(from seg: String) -> Date {
+        let parsed = RelativeDateParser.parse(from: seg)
+        let base = parsed?.date ?? Date()
+        let hasTime = parsed?.hasTime ?? false
+
+        guard !hasTime else { return base }
+
+        // 仅餐次词、无真实时刻：用餐次默认时刻替换 base 的时分秒
+        let mealMap: [(keywords: [String], hour: Int, minute: Int)] = [
+            (["早饭", "早餐", "早点", "早點"], 8, 0),
+            (["午饭", "午餐", "中饭", "中餐"], 12, 0),
+            (["晚饭", "晚餐", "夜饭"], 18, 0),
+            (["夜宵", "宵夜", "夜消"], 22, 0),
+        ]
+        for (keywords, h, m) in mealMap {
+            if keywords.contains(where: { seg.contains($0) }) {
+                return Calendar.current.date(bySettingHour: h, minute: m, second: 0, of: base) ?? base
+            }
+        }
+        return base
     }
 
     /// 本地修改账单金额（处理「把星巴克的账单改成40元」「改一下：星巴克→40」）。
@@ -1477,31 +1894,62 @@ struct ChatView: View {
         return result
     }
 
-    private func createFoodLocally(from text: String) async -> String? {
+    /// 微营养素（纤维/糖/钠）「历史 0 值缓存」重查记录。
+    /// 本地库一旦有条目，match 就直接返回、永不再问云端；早期沉淀的全 0 条目会因此永久卡住。
+    /// 允许对这类条目回云端刷新一次，但同一食物只试一次（记在这里），云端仍无值就不再重复请求，控制调用成本。
+    private static let microRefreshTriedKey = "aia.food.microRefreshTried"
+
+    private static func microRefreshTried(_ name: String) -> Bool {
+        let list = UserDefaults.standard.stringArray(forKey: microRefreshTriedKey) ?? []
+        return list.contains(name)
+    }
+
+    private static func markMicroRefreshTried(_ name: String) {
+        var list = UserDefaults.standard.stringArray(forKey: microRefreshTriedKey) ?? []
+        guard !list.contains(name) else { return }
+        list.append(name)
+        if list.count > 300 { list.removeFirst(list.count - 300) }
+        UserDefaults.standard.set(list, forKey: microRefreshTriedKey)
+    }
+
+    /// 创建本地食物记录。
+    /// - Parameters:
+    ///   - text: 待解析文本（可能含食物名 + 重量 + 日期/时刻）。
+    ///   - preferredDate: 外部已解析好的日期（如用户分两次说，第一步已解析出「昨天」）。传了就用它，不再重新解析文本里的日期。
+    ///   - preferredHasTime: 与 preferredDate 配套，标记是否含具体时刻（影响日期字符串是否带时刻）。
+    private func createFoodLocally(from text: String, preferredDate: Date? = nil, preferredHasTime: Bool = false) async -> String? {
         if ChatView.hasExplicitUpdateIntent(text) ||
            ChatView.hasExplicitDeleteIntent(text) ||
            ChatView.hasExplicitCompleteIntent(text) {
             return nil
         }
         let meal = WaterIntakeParser.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
-        let items = ChatView.parseFoodItems(from: text)
+        // 解析「昨天/前天/大前天/上周X/M月D日」等相对日期词（没有则回退今天）。
+        // 若用户还说了具体时刻（如「下午3点」），把完整时间也存进 FoodPayload。
+        // 优先使用外部传入的日期/时刻（分两次说时第一步已解析好，避免二次组句丢日期）。
+        let (foodDate, foodHasTime): (Date, Bool)
+        if let pd = preferredDate {
+            foodDate = pd
+            foodHasTime = preferredHasTime
+        } else {
+            (foodDate, foodHasTime) = RelativeDateParser.dateTimeOrToday(from: text)
+        }
+        let foodDateStr = foodHasTime ? AppFormat.isoLocal.string(from: foodDate) : AppFormat.isoDate.string(from: foodDate)
+        let items = ChatView.parseFoodItems(from: text, context: context)
         guard !items.isEmpty else { return nil }
 
-        // 如果用户没给重量/份量，先追问不急着入库
+        // 如果用户没给重量/份量，先追问不急着入库。
+        // 连同原始日期/时刻一起暂存，避免用户下一步只回重量时丢了「昨天/下午3点」。
         if !ChatView.hasWeightInfo(text) {
             let firstItem = items[0]
-            pendingWeightFood = (firstItem.name, meal)
+            pendingWeightFood = (firstItem.name, meal, foodDate, foodHasTime)
             return nil
         }
 
-        var entries: [FoodEntry] = []
-        var summaries: [String] = []
-        var totalCal: Double = 0
-        let foodIcon = ["🍽", "🍜", "🍚", "🥗", "😋", "🍱"].randomElement() ?? "🍽"
-
+        var foodPayloads: [FoodPayload] = []
         var missingNutrition: [String] = []
         var cloudFilled: [String] = []
-        for (name, weight, portion) in items {
+        for (name, weight, _) in items {
             var ref: FoodRef? = NutritionLibrary.shared.match(name, in: context)
             if ref == nil {
                 // 本地库无 → 尝试云端查询营养（带超时，失败降级 0 占位）
@@ -1518,78 +1966,82 @@ struct ChatView: View {
                     ref = nil
                     missingNutrition.append(name)
                 }
+            } else if let hit = ref,
+                      hit.fiber == 0, hit.sugar == 0, hit.sodium == 0,
+                      !FoodMetaStore.isBuiltin(name: hit.name, in: context),
+                      !Self.microRefreshTried(name) {
+                // 本地命中，但纤维/糖/钠全 0 且不是内置权威值 → 大概率是早期沉淀的脏缓存。
+                // match 命中就不再查云端，这个 0 会永久卡住，所以在此主动回云端刷新一次。
+                Self.markMicroRefreshTried(name)
+                if let cloudRef = await Self.queryFoodOrNil(name),
+                   cloudRef.fiber > 0 || cloudRef.sugar > 0 || cloudRef.sodium > 0 {
+                    // 用用户实际说的名字建/更新条目，避免覆盖子串命中的通用键（如「禾花鱼」写坏「鱼肉」）
+                    FoodMetaStore.upsert(name: name, displayName: cloudRef.name,
+                                         kcal: cloudRef.kcal, protein: cloudRef.protein,
+                                         carbs: cloudRef.carbs, fat: cloudRef.fat,
+                                         fiber: cloudRef.fiber, sugar: cloudRef.sugar, sodium: cloudRef.sodium,
+                                         source: "cloud", in: context)
+                    ref = cloudRef
+                    cloudFilled.append(name)
+                }
             }
 
+            let r = ref
+            let fname = r?.name ?? name
+            // 营养库每 100 克营养，按实际重量缩放成这一份的总量
             let ratio = weight / 100.0
-            let cal = (ref?.kcal ?? 0) * ratio
-            let protein = (ref?.protein ?? 0) * ratio
-            let carbs = (ref?.carbs ?? 0) * ratio
-            let fat = (ref?.fat ?? 0) * ratio
-            let fiber = (ref?.fiber ?? 0) * ratio
-            let sugar = (ref?.sugar ?? 0) * ratio
-            let sodium = (ref?.sodium ?? 0) * ratio
-
-            let entry = FoodEntry(name: name, calories: cal, protein: protein, carbs: carbs, fat: fat,
-                                  fiber: fiber, sugar: sugar, sodium: sodium,
-                                  portion: portion, meal: meal,
-                                  weightGram: weight,
-                                  baseCalories: ref?.kcal,
-                                  baseProtein: ref?.protein,
-                                  baseCarbs: ref?.carbs,
-                                  baseFat: ref?.fat,
-                                  baseFiber: ref?.fiber,
-                                  baseSugar: ref?.sugar,
-                                  baseSodium: ref?.sodium,
-                                  imageName: nil)
-            entries.append(entry)
-            totalCal += cal
-            // 展示全部 7 项营养：热量/蛋白/碳水/脂肪/膳食纤维/糖/钠
-            // 用「·」串联避免挤在一行；macro 值保留 1 位小数（钠 0 位），0 值也显示以让用户看到全貌
-            let macros = String(format: "蛋白 %.1fg · 碳水 %.1fg · 脂肪 %.1fg · 纤维 %.1fg · 糖 %.1fg · 钠 %.0fmg",
-                                protein, carbs, fat, fiber, sugar, sodium)
-            let pendingTag: String
-            if ref == nil {
-                pendingTag = "（热量待补全）"
-            } else if cloudFilled.contains(name) {
-                pendingTag = "（云端查营养）"
-            } else {
-                pendingTag = ""
-            }
-            summaries.append("\(foodIcon) \(meal)「\(name)」\(Int(cal)) kcal（\(portion)）\(pendingTag)\n  \(macros)")
+            let fcal = (r?.kcal ?? 0) * ratio
+            let fpro = (r?.protein ?? 0) * ratio
+            let fcar = (r?.carbs ?? 0) * ratio
+            let ffat = (r?.fat ?? 0) * ratio
+            let ffib = (r?.fiber ?? 0) * ratio
+            let fsug = (r?.sugar ?? 0) * ratio
+            let fsod = (r?.sodium ?? 0) * ratio
+            foodPayloads.append(FoodPayload(
+                name: fname,
+                calories: fcal,
+                protein: fpro,
+                carbs: fcar,
+                fat: ffat,
+                fiber: ffib,
+                sugar: fsug,
+                sodium: fsod,
+                portion: "约\(Int(weight))克",
+                meal: meal,
+                date: foodDateStr,
+                action: nil,
+                targetTitle: nil,
+                weightGram: weight
+            ))
         }
 
         // 防重复：以整句话做 key（短期窗口）
         if WaterIntakeParser.checkDuplicateAndRegister(text, type: "food") {
             return "这顿你刚记过啦，我就不重复记了～"
         }
-        // 内容级去重：检查 24h 内是否有同名 + 同份量记录
-        for entry in entries {
-            if DataDeduplicator.isDuplicateFood(name: entry.name, date: entry.date, portion: entry.portion, context: context) {
+        // 内容级去重：检查 24h 内是否有同名 + 同份量记录（按解析出的日期，避免"昨天"被误判成今天刚记过）
+        for p in foodPayloads {
+            if DataDeduplicator.isDuplicateFood(name: p.name ?? "", date: foodDate, portion: p.portion ?? "", context: context) {
                 return "这顿你刚记过啦，我就不重复记了～"
             }
         }
-        for entry in entries {
-            context.insert(entry)
+        guard !foodPayloads.isEmpty else { return nil }
+        UsageAnalytics.logAdd("food", source: "chat")
+        let result = RecognitionResult(types: ["food"], foods: foodPayloads)
+        if await routeRecognition(result, rawText: text) {
+            return kHandledCard
         }
-        HealthManager.shared.saveCaloriesConsumed(totalCal, date: .now)
-        CloudSyncManager.shared.syncAfterLocalChange(context: context)
-        let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
-        var disclaimer = "\n\n结果仅供参考，如需修改可到\"饮食记录\"页面进行修改。"
-        if !cloudFilled.isEmpty {
-            disclaimer = "\n（「\(cloudFilled.joined(separator: "、"))」已通过云端查询到营养并记下，同时存到了本地食物库）" + disclaimer
-        } else if !missingNutrition.isEmpty {
-            disclaimer = "\n（「\(missingNutrition.joined(separator: "、"))」本地与云端暂未收录营养，已先按 0 占位记下，到「饮食记录」补全即可）" + disclaimer
-        }
-        return summaries.count == 1
-            ? "\(opener)：\(summaries[0])" + disclaimer
-            : "\(opener)：\n" + summaries.joined(separator: "\n") + disclaimer
+        return nil
     }
 
     /// 用户回复了重量后，组合成完整的食物文本再走正常创建流程。
-    private func createFoodWithWeight(name: String, text: String, meal: String) async -> String {
-        // 构建合成文本让 createFoodLocally 复用同一套解析逻辑
+    /// date/hasTime 来自第一步暂存的原始日期/时刻（如「昨天 下午3点」），必须透传给 createFoodLocally，
+    /// 否则合成文本不含这些词时会回退成「今天 + 默认餐次时间」，记错天/时刻。
+    private func createFoodWithWeight(name: String, text: String, meal: String, date: Date, hasTime: Bool) async -> String {
+        // 构建合成文本让 createFoodLocally 复用同一套解析逻辑；
+        // 但日期/时刻用第一步已解析好的，不走合成文本重新解析。
         let syntheticText = "\(meal)吃了\(text)\(name)"
-        if let result = await createFoodLocally(from: syntheticText) {
+        if let result = await createFoodLocally(from: syntheticText, preferredDate: date, preferredHasTime: hasTime) {
             return result
         }
         // 兜底：即使合成文本也解析失败，至少记下食物名（让用户知道已处理）
@@ -1628,7 +2080,7 @@ struct ChatView: View {
         let sug  = String(format: "%.1f", ref.sugar)
         let sod  = String(format: "%.0f", ref.sodium)
 
-        return "阿宝帮你查到「\(ref.name)」每100克" +
+        return "小记帮你查到「\(ref.name)」每100克" +
                "热量\(kcal)kcal，碳水\(carb)g，蛋白质\(pro)g，脂肪\(fat)g，" +
                "膳食纤维\(fib)g，糖\(sug)g，钠\(sod)mg，数据仅供参考。"
     }
@@ -1638,7 +2090,9 @@ struct ChatView: View {
     /// 典型场景：云端 provider 配置缺失导致纯文字被发到视觉模型、识别成 none —— 食物绝不能因此消失。
     private func createFoodLocallyFallback(from text: String) -> String? {
         let meal = WaterIntakeParser.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
-        let items = ChatView.parseFoodItems(from: text)
+        // 解析「昨天/前天/上周X/M月D日」等相对日期词（没有则回退今天）
+        let (foodDate, _) = RelativeDateParser.dateTimeOrToday(from: text)
+        let items = ChatView.parseFoodItems(from: text, context: context)
         guard !items.isEmpty else { return nil }
 
         var names: [String] = []
@@ -1646,11 +2100,13 @@ struct ChatView: View {
             let entry = FoodEntry(name: name, calories: 0, protein: 0, carbs: 0, fat: 0,
                                   fiber: 0, sugar: 0, sodium: 0,
                                   portion: portion, meal: meal,
+                                  date: foodDate,
                                   weightGram: weight,
                                   baseCalories: 0, baseProtein: 0, baseCarbs: 0, baseFat: 0,
                                   baseFiber: 0, baseSugar: 0, baseSodium: 0,
                                   imageName: nil)
             context.insert(entry)
+            context.insert(FoodSource(foodSyncId: entry.syncId, origin: "chat"))
             names.append("「\(name)」\(portion)")
         }
         try? context.save()
@@ -1659,88 +2115,40 @@ struct ChatView: View {
         return "🍽 已记下 \(joined)，但暂时没查到热量，点开记录可以补全哦～"
     }
 
-    /// 账单已记且本地营养库未命中时，异步联网查营养并在聊天中发送确认卡片。
-    /// 用户点击"确认记录"后才创建 FoodEntry；查询失败则仅提示，保留账单。
-    /// 支持一句话里多个食物：每个食物独立一张确认卡片。
-    private func sendFoodConfirmCard(text: String) async {
+    /// 账单已记且本地营养库未命中时，异步联网查营养并走统一识别卡片水槽，
+    /// 按「文字/语音」设置自动保存或待确认（与图片/文字入口一致）。
+    private func routeFoodCloudThenCard(text: String) async {
         let meal = WaterIntakeParser.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
-        let items = ChatView.parseFoodItems(from: text)
+        // 解析「昨天/前天/上周X/M月D日」等相对日期词（没有则回退今天）
+        let (foodDate, foodHasTime) = RelativeDateParser.dateTimeOrToday(from: text)
+        let foodDateStr = foodHasTime ? AppFormat.isoLocal.string(from: foodDate) : AppFormat.isoDate.string(from: foodDate)
+        let items = ChatView.parseFoodItems(from: text, context: context)
         guard !items.isEmpty else { return }
 
-        let amount = extractAmount(text)
-        var anySent = false
-
-        for (name, weight, portion) in items {
+        var foodPayloads: [FoodPayload] = []
+        for (name, weight, _) in items {
             do {
                 if let ref = try await RecognizeService.queryFood(name: name) {
-                    let ratio = weight / 100.0
-                    let cal = ref.kcal * ratio
-                    let protein = ref.protein * ratio
-                    let carbs = ref.carbs * ratio
-                    let fat = ref.fat * ratio
-                    let fiber = ref.fiber * ratio
-                    let sugar = ref.sugar * ratio
-                    let sodium = ref.sodium * ratio
-
                     FoodMetaStore.upsert(name: name, displayName: ref.name,
                                          kcal: ref.kcal, protein: ref.protein, carbs: ref.carbs, fat: ref.fat,
                                          fiber: ref.fiber, sugar: ref.sugar, sodium: ref.sodium,
                                          source: "cloud", in: context)
-
-                    let pending = PendingFoodConfirm(
-                        meal: meal,
-                        name: ref.name,
-                        portion: portion,
-                        weight: weight,
-                        cal: cal,
-                        protein: protein,
-                        carbs: carbs,
-                        fat: fat,
-                        fiber: fiber,
-                        sugar: sugar,
-                        sodium: sodium,
-                        amount: amount,
-                        originalText: text
-                    )
-                    guard let data = try? JSONEncoder().encode(pending),
-                          let json = String(data: data, encoding: .utf8) else { continue }
-                    let confirmText = "__FOOD_CONFIRM__" + json
-                    let aiMessage = ChatMessage(role: .ai, text: confirmText, createdAt: Date().addingTimeInterval(0.2))
-                    context.insert(aiMessage)
-                    try? context.save()
-                    anySent = true
-                } else {
-                    let aiMessage = ChatMessage(
-                        role: .ai,
-                        text: "🍽 没查到「\(name)」的营养信息，支出已经记下啦，你可以稍后手动补录饮食哦～",
-                        createdAt: Date().addingTimeInterval(0.2)
-                    )
-                    context.insert(aiMessage)
-                    try? context.save()
-                    anySent = true
+                // 营养库每 100 克营养，按实际重量缩放成这一份的总量
+                let ratio = weight / 100.0
+                foodPayloads.append(FoodPayload(
+                    name: ref.name, calories: ref.kcal * ratio, protein: ref.protein * ratio,
+                    carbs: ref.carbs * ratio, fat: ref.fat * ratio, fiber: ref.fiber * ratio, sugar: ref.sugar * ratio,
+                    sodium: ref.sodium * ratio, portion: "约\(Int(weight))克", meal: meal,
+                    date: foodDateStr,
+                    action: nil, targetTitle: nil, weightGram: weight))
                 }
             } catch {
-                print("[sendFoodConfirmCard] 失败：\(error)")
-                let aiMessage = ChatMessage(
-                    role: .ai,
-                    text: "🍽 联网查「\(name)」时出错了，支出已经记下啦，稍后再试吧～",
-                    createdAt: Date().addingTimeInterval(0.2)
-                )
-                context.insert(aiMessage)
-                try? context.save()
-                anySent = true
+                print("[routeFoodCloudThenCard] 云端查营养失败：\(error)")
             }
         }
-
-        if !anySent {
-            let aiMessage = ChatMessage(
-                role: .ai,
-                text: "🍽 没查到这些食物的营养信息，支出已经记下啦，你可以稍后手动补录饮食哦～",
-                createdAt: Date().addingTimeInterval(0.2)
-            )
-            context.insert(aiMessage)
-            try? context.save()
-        }
+        guard !foodPayloads.isEmpty else { return }
+        let result = RecognitionResult(types: ["food"], foods: foodPayloads)
+        _ = await routeRecognition(result, rawText: text)
     }
 
     /// 聊天记录饮水量：直接创建一条 FoodEntry，仅 waterIntake 有值，营养全 0。
@@ -1774,63 +2182,69 @@ struct ChatView: View {
     /// 支持一句话里多个食物，逐项查询并分别建 FoodEntry。
     private func createFoodFromCloud(text: String, recentMessages: [[String: String]]) async -> String {
         let meal = WaterIntakeParser.mealFromText(text) ?? ChatView.defaultMeal(for: .now)
-        let items = ChatView.parseFoodItems(from: text)
-        guard !items.isEmpty else { return localReply(for: text) }
+        // 解析「昨天/前天/上周X/M月D日」等相对日期词（没有则回退今天）
+        let (foodDate, foodHasTime) = RelativeDateParser.dateTimeOrToday(from: text)
+        let foodDateStr = foodHasTime ? AppFormat.isoLocal.string(from: foodDate) : AppFormat.isoDate.string(from: foodDate)
+        let items = ChatView.parseFoodItems(from: text, context: context)
+        guard !items.isEmpty else { return await localReply(for: text) }
 
         // 1) 优先专项查询每个食物的营养（更可靠，不易被上下文带偏）
-        var entries: [FoodEntry] = []
-        var summaries: [String] = []
-        var totalCal: Double = 0
-        let foodIcon = ["🍽", "🍜", "🍚", "🥗", "😋", "🍱"].randomElement() ?? "🍽"
+        var foodPayloads: [FoodPayload] = []
 
-        for (name, weight, portion) in items {
-            do {
-                if let ref = try await RecognizeService.queryFood(name: name) {
-                    let ratio = weight / 100.0
-                    let cal = ref.kcal * ratio
-                    let protein = ref.protein * ratio
-                    let carbs = ref.carbs * ratio
-                    let fat = ref.fat * ratio
-                    let fiber = ref.fiber * ratio
-                    let sugar = ref.sugar * ratio
-                    let sodium = ref.sodium * ratio
+        for (name, weight, _) in items {
+            // A1/A3：本地营养库优先（与「手动搜索」同源）。先用规范名在本地单库 match，
+            // 命中即用确定值，保证对话记饮食与手动搜索对同一食物（如「红烧牛肉」vs「牛肉」）数值一致；
+            // 仅本地库不认识该食物时，才走云端专项食物营养查询。
+            let canonical = NutritionLibrary.canonicalFoodName(name, in: context)
+            var ref: FoodRef? = NutritionLibrary.shared.match(canonical, in: context)
+            var fromCloud = false
 
+            if ref == nil {
+                do {
+                    ref = try await RecognizeService.queryFood(name: name)
+                    fromCloud = true
+                } catch {
+                    print("[queryFood] 失败：\(error)")
+                }
+            }
+
+            if let ref = ref {
+                // 仅云端命中才回写缓存（本地命中已是单库内建/沉淀值，无需重复写入）。
+                if fromCloud {
                     FoodMetaStore.upsert(name: name, displayName: ref.name,
                                          kcal: ref.kcal, protein: ref.protein, carbs: ref.carbs, fat: ref.fat,
                                          fiber: ref.fiber, sugar: ref.sugar, sodium: ref.sodium,
                                          source: "cloud", in: context)
-
-                    let entry = FoodEntry(name: ref.name, calories: cal, protein: protein, carbs: carbs, fat: fat,
-                                          fiber: fiber, sugar: sugar, sodium: sodium,
-                                          portion: portion, meal: meal,
-                                          weightGram: weight,
-                                          baseCalories: ref.kcal,
-                                          baseProtein: ref.protein,
-                                          baseCarbs: ref.carbs,
-                                          baseFat: ref.fat,
-                                          baseFiber: ref.fiber,
-                                          baseSugar: ref.sugar,
-                                          baseSodium: ref.sodium,
-                                          imageName: nil)
-                    entries.append(entry)
-                    totalCal += cal
-                    summaries.append("\(foodIcon) \(meal)「\(ref.name)」\(Int(cal)) kcal（\(portion)）")
                 }
-            } catch {
-                print("[queryFood] 失败：\(error)")
+
+                // 营养库每 100 克营养，按实际重量缩放成这一份的总量
+                let ratio = weight / 100.0
+                foodPayloads.append(FoodPayload(
+                    name: ref.name,
+                    calories: ref.kcal * ratio,
+                    protein: ref.protein * ratio,
+                    carbs: ref.carbs * ratio,
+                    fat: ref.fat * ratio,
+                    fiber: ref.fiber * ratio,
+                    sugar: ref.sugar * ratio,
+                    sodium: ref.sodium * ratio,
+                    portion: "约\(Int(weight))克",
+                    meal: meal,
+                    date: foodDateStr,
+                    action: nil,
+                    targetTitle: nil,
+                    weightGram: weight
+                ))
             }
         }
 
-        if !entries.isEmpty {
-            for entry in entries {
-                context.insert(entry)
+        if !foodPayloads.isEmpty {
+            let result = RecognitionResult(types: ["food"], foods: foodPayloads)
+            if await routeRecognition(result, rawText: text) {
+                return kHandledCard
             }
-            HealthManager.shared.saveCaloriesConsumed(totalCal, date: .now)
-            CloudSyncManager.shared.syncAfterLocalChange(context: context)
-            let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
-            return summaries.count == 1
-                ? "\(opener)：\(summaries[0])"
-                : "\(opener)：\n" + summaries.joined(separator: "\n")
+            // 按设置丢弃（或无需记录）→ 不再强制入库
+            return await localReply(for: text)
         }
 
         // 2) 专项查询全部失败：兜底通用文本识别
@@ -1849,7 +2263,7 @@ struct ChatView: View {
         if let fb = createFoodLocallyFallback(from: text) {
             return fb + "\n（云端暂时没查到营养，已先帮你记下来）"
         }
-        return localReply(for: text)
+        return await localReply(for: text)
     }
 
     /// 从用户输入里提取食物名、估算重量和份量描述。
@@ -1980,10 +2394,12 @@ struct ChatView: View {
             ("个", 50), ("片", 30), ("份", 200), ("块", 50),
             ("串", 100), ("根", 100), ("盘", 300), ("勺", 15),
             ("两", 50),
-            ("克", 1), ("g", 1)
+            ("盒", 100), ("袋", 100), ("包", 100), ("听", 330),
+            ("毫升", 1), ("ml", 1), ("ML", 1), ("斤", 500),
+            ("克", 1), ("g", 1), ("G", 1)
         ]
         let unitPattern = unitWeights.map { NSRegularExpression.escapedPattern(for: $0.0) }.joined(separator: "|")
-        let quantityPattern = "([\\d一二两三四五六七八九十]+)?\\s*(\(unitPattern))"
+        let quantityPattern = "([\\d一二两三四五六七八九十半]+)?\\s*(\(unitPattern))"
 
         var weight: Double?
         var portion = "100克"
@@ -1996,9 +2412,15 @@ struct ChatView: View {
                     : ""
                 let count = ChatView.parseChineseNumber(numberStr) ?? 1
                 if let uw = unitWeights.first(where: { $0.0 == unit }) {
-                    weight = Double(count) * uw.1
-                    portion = "\(count)\(unit)"
-                    t = (t as NSString).replacingCharacters(in: match.range(at: 0), with: "")
+                    weight = count * uw.1
+                    portion = "\(formatCount(count))\(unit)"
+                    // 清掉本段里【所有】量词，防止「一碗」「两个」等残留量词污染食物名
+                    let allMatches = regex.matches(in: t, range: range)
+                    var cleaned = t
+                    for m in allMatches.reversed() {
+                        cleaned = (cleaned as NSString).replacingCharacters(in: m.range(at: 0), with: "")
+                    }
+                    t = cleaned
                 }
             }
         }
@@ -2044,19 +2466,47 @@ struct ChatView: View {
         return (name, weight ?? 100.0, portion)
     }
 
+    /// 食物名退化补刀：云端/本地解析常把「燕麦粥」这类具体食物退化成泛称「粥」。
+    /// 用原始输入文本回查：若解析出的名字是泛称（粥/炒饭/面条…），且原文中存在以该泛称
+    /// 结尾的更具体长词（如「燕麦粥」），且本地营养库确有该长词，则把名字升级回具体长词。
+    /// 仅做升级、不改动重量/份量，无对应具体词则保持原样。
+    static func upgradeFoodNameIfNeeded(_ name: String, originalText: String, context: ModelContext) -> String {
+        let genericNames = ["粥", "炒饭", "米饭", "面条", "汤", "包子", "饺子", "馒头", "饼", "沙拉", "炒菜", "盖饭", "粉"]
+        guard genericNames.contains(name) else { return name }
+        let chars = Array(originalText)
+        for generic in genericNames where name == generic {
+            let maxLen = min(8, chars.count)
+            for len in (generic.count + 1)...maxLen {
+                for start in 0...(chars.count - len) {
+                    let sub = String(chars[start..<start + len])
+                    guard sub.hasSuffix(generic) else { continue }
+                    // 优先用 NutritionLibrary.match 查（含内存内置表兜底，seed 未到位也能命中精确长词）；
+                    // 再退一步直接查本地库，双保险。
+                    if NutritionLibrary.shared.match(sub, in: context) != nil
+                        || FoodMetaStore.peek(name: sub, in: context) != nil {
+                        return sub
+                    }
+                }
+            }
+        }
+        return name
+    }
+
     /// 从文本中拆出多个食物项。
     /// 优先按「数量+单位」切分；没有量词时退回整句解析，或按常见连词/标点切分。
     /// 示例：「早餐吃了两个鸡蛋一碗燕麦粥」→ [(鸡蛋, 100, "2个"), (燕麦粥, 300, "1碗")]
-    static func parseFoodItems(from text: String) -> [(name: String, weight: Double, portion: String)] {
+    static func parseFoodItems(from text: String, context: ModelContext? = nil) -> [(name: String, weight: Double, portion: String)] {
         let unitWeights: [(String, Double)] = [
             ("碗", 300), ("杯", 250), ("瓶", 500), ("罐", 330),
             ("个", 50), ("片", 30), ("份", 200), ("块", 50),
             ("串", 100), ("根", 100), ("盘", 300), ("勺", 15),
             ("两", 50),
-            ("克", 1), ("g", 1)
+            ("盒", 100), ("袋", 100), ("包", 100), ("听", 330),
+            ("毫升", 1), ("ml", 1), ("ML", 1), ("斤", 500),
+            ("克", 1), ("g", 1), ("G", 1)
         ]
         let unitPattern = unitWeights.map { NSRegularExpression.escapedPattern(for: $0.0) }.joined(separator: "|")
-        let quantityPattern = "([\\d一二两三四五六七八九十]+)?\\s*(\(unitPattern))"
+        let quantityPattern = "([\\d一二两三四五六七八九十半]+)?\\s*(\(unitPattern))"
 
         guard let regex = try? NSRegularExpression(pattern: quantityPattern) else { return [] }
         let ns = text as NSString
@@ -2064,30 +2514,67 @@ struct ChatView: View {
 
         var items: [(name: String, weight: Double, portion: String)] = []
 
-        // 按量词「开始位置」切分：中文习惯「数量+单位+食物名」，
-        // 每项从当前量词开始，到下一量词开始之前结束。
+        // 切分策略：贪心配对。
+        // 每个量词都应绑定到「其前面的食物名」，因此把每个段定义为
+        // 「上一个量词的结束位置 → 当前量词的结束位置」。
+        // 首段额外把「首量词之前的文本」一起并入段内（即 0 → 首量词结束），
+        // 让 parseFoodNameAndWeight 的 firstMatch 吃到的第一个量词正确归属到
+        // 位于其前面的食物名（如「生菜50克…」里的生菜拿到50克）。
+        // 这样「吃了生菜50克豆芽50克」/「吃了生菜50克，豆芽50克」都能正确拆成
+        // 「生菜50g + 豆芽50g」，而非把首量词漏给下一个食物、首食物回落默认100g。
+        var searchFrom = 0
         for (idx, match) in matches.enumerated() {
-            let start = match.range(at: 0).location
-            let end: Int
-            if idx + 1 < matches.count {
-                end = matches[idx + 1].range(at: 0).location
-            } else {
-                end = ns.length
+            let matchEnd = match.range(at: 0).location + match.range(at: 0).length
+            // 段起点：第一段从 0 开始（含首量词前文本），其余段从上一量词结束开始
+            let segStart = (idx == 0) ? 0 : searchFrom
+            // 段终点：当前量词结束
+            let segmentRange = NSRange(location: segStart, length: matchEnd - segStart)
+            let segment = ns.substring(with: segmentRange).trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // 优先整段解析（覆盖「食物名在重量之前」的情况，如「吃了生菜50克」）。
+            // 若段内含量词但解析不到食物名（如「吃了50克苹果」「50克苹果」：重量前置、名字落在 trailing 段），
+            // 则把本段与其后的 trailing 文本合并后再解析一次，让重量与食物名 reunite，
+            // 否则两者被拆到不同段、双双失败，会回退默认 100 克（见 issue：吃50克苹果记成100克）。
+            var parsedItem: (name: String, weight: Double, portion: String)? = nil
+            if !segment.isEmpty { parsedItem = parseFoodNameAndWeight(segment) }
+            if parsedItem == nil {
+                // 找到本段之后、到下一量词（或文末）之间的残余文本
+                let nextStart = (idx + 1 < matches.count) ? matches[idx + 1].range(at: 0).location : ns.length
+                let nextEnd = (idx + 1 < matches.count)
+                    ? (matches[idx + 1].range(at: 0).location + matches[idx + 1].range(at: 0).length)
+                    : ns.length
+                let combined = ns.substring(with: NSRange(location: segStart, length: nextEnd - segStart))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if combined != segment, let parsed = parseFoodNameAndWeight(combined) {
+                    parsedItem = parsed
+                    // 不吞掉下一量词：从下一量词【开头】继续切，让后段也能用它算重量
+                    searchFrom = nextStart
+                }
             }
-            let segmentRange = NSRange(location: start, length: end - start)
-            let segment = ns.substring(with: segmentRange)
-            if let parsed = parseFoodNameAndWeight(segment) {
+            if let parsed = parsedItem { items.append(parsed) }
+            if searchFrom < matchEnd { searchFrom = matchEnd }
+        }
+
+        // 末量词之后若还有残余文本（如额外食物名无量词、或语气词），作为 trailing 段单独解析
+        if searchFrom < ns.length {
+            let trailingRange = NSRange(location: searchFrom, length: ns.length - searchFrom)
+            let trailing = ns.substring(with: trailingRange).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trailing.isEmpty, let parsed = parseFoodNameAndWeight(trailing) {
                 items.append(parsed)
             }
         }
 
         // 按量词切出至少一项时直接返回，避免把 trailing 语气词/场景词当成食物。
         if !items.isEmpty {
-            return items
+            return upgradeParsedItems(items, originalText: text, context: context)
         }
 
         // 没有量词：先尝试整句
         if let parsed = parseFoodNameAndWeight(text) {
+            if let context = context {
+                let upgradedName = upgradeFoodNameIfNeeded(parsed.name, originalText: text, context: context)
+                return [(upgradedName, parsed.weight, parsed.portion)]
+            }
             return [parsed]
         }
 
@@ -2099,7 +2586,15 @@ struct ChatView: View {
                 items.append(parsed)
             }
         }
-        return items
+        return upgradeParsedItems(items, originalText: text, context: context)
+    }
+
+    static func upgradeParsedItems(_ items: [(name: String, weight: Double, portion: String)], originalText: String, context: ModelContext?) -> [(name: String, weight: Double, portion: String)] {
+        guard let context = context else { return items }
+        return items.map { item in
+            let upgraded = upgradeFoodNameIfNeeded(item.name, originalText: originalText, context: context)
+            return (upgraded, item.weight, item.portion)
+        }
     }
 
     /// 从文本提取金额数字（如 35 / 12.5 / 10,000 / 1,234.56）。
@@ -2158,7 +2653,7 @@ struct ChatView: View {
             let range = match.range(at: idx)
             guard range.location != NSNotFound else { return nil }
             let s = (string as NSString).substring(with: range)
-            return ChatView.parseChineseNumber(s)
+            return ChatView.parseChineseNumber(s).map(Int.init)
         }
 
         // 一刻钟 / 半小时
@@ -2202,19 +2697,23 @@ struct ChatView: View {
             if let h = h, let mi = mi, h <= 23, mi <= 59 { hour = h; minute = mi }
         }
 
-        // X点X分 / X点 / X点半
+        // X点X分 / X点 / X点半（支持 8点 / 八点 / 十二点）
         if hour == nil,
-           let regex = try? NSRegularExpression(pattern: "(\\d{1,2})\\s*点\\s*(半|(\\d{1,2})\\s*分)?"),
+           let regex = try? NSRegularExpression(pattern: "([\\d一二两三四五六七八九十]+)\\s*点\\s*(半|([\\d一二两三四五六七八九十]+)\\s*分)?"),
            let m = regex.firstMatch(in: text, range: NSRange(location: 0, length: text.utf16.count)) {
-            let h = Int((text as NSString).substring(with: m.range(at: 1)))
-            if let h = h, h <= 23 {
+            let hStr = (text as NSString).substring(with: m.range(at: 1))
+            if let h = ChatView.parseChineseNumber(hStr).map(Int.init), h <= 23 {
                 hour = h
                 let g2 = m.range(at: 2)
                 if g2.location != NSNotFound {
                     let ms = (text as NSString).substring(with: g2)
                     if ms.contains("半") { minute = 30 }
-                    else if let mi = Int(ms.replacingOccurrences(of: "分", with: "").trimmingCharacters(in: .whitespaces)),
-                            mi <= 59 { minute = mi }
+                    else {
+                        // 去掉「分」字后解析分钟（支持中文数字，如「八分」）
+                        let minStr = ms.replacingOccurrences(of: "分", with: "")
+                                   .trimmingCharacters(in: .whitespaces)
+                        if let mi = ChatView.parseChineseNumber(minStr).map(Int.init), mi <= 59 { minute = mi }
+                    }
                 }
             }
         }
@@ -2282,44 +2781,96 @@ struct ChatView: View {
         return nil
     }
 
-    /// 把中文数字（如「二」「十二」「两」）转成 Int；阿拉伯数字直接返回。
-    static func parseChineseNumber(_ string: String) -> Int? {
-        if let n = Int(string) { return n }
-        let digits: [Character: Int] = [
+    /// 把中文/阿拉伯数字（含「半」，如「一半」「两半」）转成 Double；阿拉伯数字直接返回。
+    static func parseChineseNumber(_ string: String) -> Double? {
+        if string.isEmpty { return nil }
+        if string == "半" { return 0.5 }
+        if let n = Double(string) { return n }
+        let digits: [Character: Double] = [
             "零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
             "五": 5, "六": 6, "七": 7, "八": 8, "九": 9
         ]
-        let units: [Character: Int] = [
+        let units: [Character: Double] = [
             "十": 10, "百": 100, "千": 1000
         ]
-        var result = 0
-        var current = 0
+        var result = 0.0
+        var current = 0.0
         for c in string {
-            if let d = digits[c] {
+            if c == "半" {
+                // 「半」表示 0.5：叠加到当前累计值（如「一半」=1.5、「两半」=2.5）；
+                // 若前面没有整数（即单独半已在上文处理），这里保底记 0.5。
+                current += 0.5
+            } else if let d = digits[c] {
                 current = current * 10 + d
             } else if let u = units[c] {
                 if current == 0 { current = 1 }
                 current *= u
                 result += current
                 current = 0
+            } else {
+                // 遇到无法识别的字符直接放弃（如混入其它字）
+                return nil
             }
         }
         result += current
         return result > 0 ? result : nil
     }
 
+    /// 把计数（可能含 0.5）格式化成展示串，整数不显示小数。
+    private static func formatCount(_ count: Double) -> String {
+        return count.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", count)
+            : String(format: "%.1f", count)
+    }
+
+    /// 从文本提取重复规则（覆盖全部周期词，值与 Reminder.repeatRule / repeatOptions 一致）。
+    /// 优先级高→低，命中即返回；与日期提取相互独立，两者可叠加。
+    static func parseRepeatRule(from text: String) -> String? {
+        let t = text
+        // 每年（带具体月日也归 yearly）
+        if t.contains("每年") || t.contains("每一年") || t.contains("年年") {
+            return "yearly"
+        }
+        if t.contains("每半年") || t.contains("每六月") || t.contains("半年") {
+            return "semiannual"
+        }
+        if t.contains("每季度") || t.contains("每三月") || t.contains("一季度") || t.contains("三个月") {
+            return "quarterly"
+        }
+        if t.contains("每两月") || t.contains("隔月") || t.contains("每2个月") || t.contains("每二个月") {
+            return "bimonthly"
+        }
+        if t.contains("每月") || t.contains("每个月") || t.contains("每一月") {
+            return "monthly"
+        }
+        if t.contains("每两周") || t.contains("隔周") || t.contains("每2周") || t.contains("每二周") {
+            return "biweekly"
+        }
+        if t.contains("每周") || t.contains("每星期") || t.contains("每个星期") {
+            return "weekly"
+        }
+        if t.contains("每天") || t.contains("每日") || t.contains("天天") || t.contains("每一天") {
+            return "daily"
+        }
+        return nil
+    }
+
     /// 从「帮我增加一个7月30日去体检的提醒」这类文本里解析标题和日期。
-    private func parseTodoCreate(_ text: String) -> (title: String, due: Date)? {
+    private func parseTodoCreate(_ text: String) -> (title: String, due: Date, repeatRule: String?)? {
         let cal = Calendar.current
         let now = Date()
+        // 周期词提取独立于日期解析，提前计算以便下方「无具体日期的周期待办」使用
+        let repeatRule = ChatView.parseRepeatRule(from: text)
         var due = now
         var dateFound = false
+        var hasSpecificTime = false   // 相对时间/具体钟点/时段词都算「已明确具体时刻」，防止被默认 8:00 覆盖
         let lower = text.lowercased()
 
         // 优先处理相对时间（2分钟后、1小时后、半小时后），云端常把这类词解析错。
         if let relativeDue = parseRelativeTime(from: text) {
             due = relativeDue
             dateFound = true
+            hasSpecificTime = true
         }
 
         // 匹配「7月30日」「7月30号」
@@ -2344,8 +2895,11 @@ struct ChatView: View {
             if lower.contains("后天") {
                 due = cal.date(byAdding: .day, value: 2, to: now) ?? now
                 dateFound = true
-            } else if lower.contains("明天") || lower.contains("明日") {
+            } else if lower.contains("明天") || lower.contains("明日") || lower.contains("明早") {
                 due = cal.date(byAdding: .day, value: 1, to: now) ?? now
+                dateFound = true
+            } else if lower.contains("今天") || lower.contains("今早") || lower.contains("今晚") {
+                // 今天（含「今早/今晚」等组合词），具体时刻交由下方 clock/tod 解析
                 dateFound = true
             } else if let weekdayDate = parseWeekday(from: text) {
                 due = weekdayDate
@@ -2358,15 +2912,26 @@ struct ChatView: View {
         let tod = parseTimeOfDay(from: text)
         if let clock {
             due = cal.date(bySettingHour: clock.hour, minute: clock.minute, second: 0, of: due) ?? due
+            hasSpecificTime = true
         } else if let tod {
             due = cal.date(bySettingHour: tod.hour, minute: tod.minute, second: 0, of: due) ?? due
+            hasSpecificTime = true
         } else if !dateFound {
-            // 既没日期也没时间：默认 1 小时后提醒
-            due = cal.date(byAdding: .hour, value: 1, to: now) ?? now
-        } else {
-            // 有日期但用户没说具体时间：默认当天 8:00，避免变成 00:00 的尴尬提醒
+            if repeatRule != nil {
+                // 识别到周期词但文本无具体日期（如「每天喝水」「每周开会」）：due 取今天此刻，
+                // 而非默认的 1 小时后，更符合「每天/每周」从今天开始的直觉；首次完成后下一条按周期顺延。
+                due = now
+            } else {
+                // 既没日期也没时间：默认 1 小时后提醒
+                due = cal.date(byAdding: .hour, value: 1, to: now) ?? now
+            }
+        } else if !hasSpecificTime {
+            // 有日期但用户没明确具体时刻（如「7月30日提醒我体检」）：默认当天 8:00，避免变成 00:00 的尴尬提醒
             due = cal.date(bySettingHour: 8, minute: 0, second: 0, of: due) ?? due
         }
+
+        // 提取重复规则已在函数开头完成（repeatRule 变量），与日期解析相互独立，可叠加：
+        // 如「每年9月1号」→ repeatRule=yearly + due=9月1日。
 
         // 提取标题：先移除前缀动词，再移除日期、时段词和「提醒/待办」后缀
         var title = text
@@ -2374,17 +2939,17 @@ struct ChatView: View {
         // 与饮食/账单/云端共用 commandVerbPrefixes，避免「给我记个买菜提醒」残留成「给我记个买菜提醒」。
         title = ChatView.stripCommandVerbPrefix(title)
         title = title.replacingOccurrences(of: datePattern, with: "", options: .regularExpression)
-        title = title.replacingOccurrences(of: "明天|后天|明日", with: "", options: .regularExpression)
+        title = title.replacingOccurrences(of: "今天|明天|后天|明日|今早|今晚|明早", with: "", options: .regularExpression)
         // 移除星期词（下周六/这周六/礼拜天/星期一等），避免标题残留
         title = title.replacingOccurrences(of: "(这|本|今|下)?(周|星期|礼拜)([一二三四五六七日天])", with: "", options: .regularExpression)
         // 移除相对时间表达，避免标题里保留「2分钟后」「1小时后」等词
-        title = title.replacingOccurrences(of: "([\\d一二两三四五六七八九十]+)\\s*[分钟小时](后|以后)", with: "", options: .regularExpression)
+        title = title.replacingOccurrences(of: "([\\d一二两三四五六七八九十]+)\\s*(?:分钟|小时|分|时)(后|以后)", with: "", options: .regularExpression)
         title = title.replacingOccurrences(of: "半小时(后|以后)?|一刻钟(后|以后)?", with: "", options: .regularExpression)
         // 移除时段词（中午/晚上等），避免标题里保留「中午运动」
         title = title.replacingOccurrences(of: ChatView.timeOfDayPattern, with: "", options: .regularExpression)
         // 移除具体时刻（9点 / 21:30 / 下午3点半），避免标题残留「9点运动」
         title = title.replacingOccurrences(of: "(\\d{1,2}):(\\d{2})", with: "", options: .regularExpression)
-        title = title.replacingOccurrences(of: "(\\d{1,2})\\s*点\\s*(半|(\\d{1,2})\\s*分)?", with: "", options: .regularExpression)
+        title = title.replacingOccurrences(of: "([\\d一二两三四五六七八九十]+)\\s*点\\s*(半|([\\d一二两三四五六七八九十]+)\\s*分)?", with: "", options: .regularExpression)
         // 先移除「提醒我」，再移除后缀「提醒/待办/任务/事项」，避免标题残留「我」
         title = title.replacingOccurrences(of: "提醒我", with: "", options: .regularExpression)
         title = title.replacingOccurrences(of: "的?(提醒|待办|任务|事项)", with: "", options: .regularExpression)
@@ -2392,7 +2957,7 @@ struct ChatView: View {
         title = title.trimmingCharacters(in: CharacterSet(charactersIn: "的"))
 
         if title.isEmpty { return nil }
-        return (title, due)
+        return (title, due, repeatRule)
     }
 
     /// 判断文本是否是记录操作指令（如「记一下」「帮我记」「添加」「删除」「改到」等）。
@@ -2417,12 +2982,24 @@ struct ChatView: View {
         return createWords.contains { lower.contains($0) }
     }
 
+    /// 识别结果中是否包含"编辑/删除/完成"类动作（而非纯新建）。
+    /// 这类动作 processRecognition 不处理，需走原有文本回复路径。
+    private static func resultHasEditAction(_ r: RecognitionResult) -> Bool {
+        let editActions = ["update", "delete", "complete", "done"]
+        let isEdit = { (a: String?) -> Bool in editActions.contains((a ?? "").lowercased()) }
+        return r.billList.contains { isEdit($0.action) }
+            || r.todoList.contains { isEdit($0.action) }
+            || r.foodList.contains { isEdit($0.action) }
+    }
+
     /// 把最近几条聊天记录整理成云端可理解的上下文，用于识别"这个提醒""改成"等指代。
     /// 过滤掉：
     /// - AI 的确认消息（开场白取自 chatConfirmOpeners 池），避免模型把前一笔记录当成模板重复套用；
     /// - 用户的记录操作指令，避免模型把后续"好的好的"当成重复执行。
     private func buildRecentMessages(limit: Int) -> [[String: String]] {
-        let recent = messages.suffix(limit).filter { msg in
+        let recent = orderedMessages.suffix(limit).filter { msg in
+            // 协议串消息（发图 / 识别结果卡片）对模型无意义，且 JSON 很长，纯浪费 token
+            if msg.text.hasPrefix(USER_IMAGE_PREFIX) || msg.text.hasPrefix(RECOGNITION_RESULT_PREFIX) { return false }
             if msg.role == .ai, chatConfirmOpeners.contains(where: { msg.text.hasPrefix($0) }) { return false }
             if msg.role == .user, ChatView.isRecordOperationMessage(msg.text) { return false }
             return true
@@ -2446,6 +3023,8 @@ struct ChatView: View {
         let userMessage = ChatMessage(role: .user, text: t)
         context.insert(userMessage)
         try? context.save()
+        fetchMessages()
+        UsageAnalytics.log("chat_send", meta: ["len": t.count])
         pendingQueue.append(userMessage)
         processNext()
     }
@@ -2453,6 +3032,7 @@ struct ChatView: View {
     private func processNext() {
         guard !isParsing, !pendingQueue.isEmpty else { return }
         isParsing = true
+        chatBubbleInserted = false
         let userMessage = pendingQueue.removeFirst()
         let t = userMessage.text
         // 登录账户 userId（aia.userId）；未登录为空串 → 云端按"userId 缺失"回落普通 chat。
@@ -2462,8 +3042,12 @@ struct ChatView: View {
             do {
                 let recentMessages = buildRecentMessages(limit: 5)
                 let responseText: String
+                // —— 本地内容安全闸：命中违规/越界词直接本地拒答，根本不调云端（省成本 + 零风险） ——
+                if let blocked = ChatView.replyForBlockedIntent(t) {
+                    responseText = blocked
+                }
                 // —— 本地优先：所有结构化指令（记账/记饮食/待办/饮水/食物查询）先走本地，零云端调用 ——
-                if let local = await resolveLocally(t, recentMessages: recentMessages) {
+                else if let local = await resolveLocally(t, recentMessages: recentMessages) {
                     responseText = local
                 } else {
                     // —— 仅本地兜不住才走云端 LLM ——
@@ -2477,7 +3061,7 @@ struct ChatView: View {
                             // Agent 可能在云端做了删除/修改/新建等动作（chat agent 是写权限的），
                             // 这些变更只会落在云端，本地 SwiftData 不会自动同步——必须触发完整 sync
                             // （push + pull + cleanupSyncedTombstones）才能让本地看到云端的删除/修改。
-                            // 否则会出现「阿宝说删了，但账单还在」的 UX 假象。
+                            // 否则会出现「小记说删了，但账单还在」的 UX 假象。
                             Task { @MainActor in
                                 await CloudSyncManager.shared.sync(context: context)
                             }
@@ -2491,26 +3075,55 @@ struct ChatView: View {
                             let hasCreateIntent = ChatView.hasExplicitCreateIntent(t)
                             if hasCreateIntent {
                                 let (result, _) = try await RecognizeService.parseText(t, recentMessages: recentMessages)
-                                let summary = saveFromResult(result, originalText: t)
-                                if summary.isEmpty {
-                                    responseText = localReply(for: t)
+                                if ChatView.resultHasEditAction(result) {
+                                    // 编辑/删除/完成类动作：processRecognition 不处理，沿用原有文本回复，
+                                    // 并触发完整云端同步（云端 agent 可能已对记录做了写操作）。
+                                    let summary = saveFromResult(result, originalText: t)
+                                    if summary.isEmpty {
+                                        responseText = await localReply(for: t)
+                                    } else {
+                                        let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
+                                        responseText = "\(opener)：\n" + summary.joined(separator: "\n")
+                                    }
+                                    if UserDefaults.standard.bool(forKey: "aia.isLoggedIn") {
+                                        Task { @MainActor in
+                                            await CloudSyncManager.shared.sync(context: context)
+                                        }
+                                    }
                                 } else {
-                                    let opener = chatConfirmOpeners.randomElement() ?? "记好啦"
-                                    responseText = "\(opener)：\n" + summary.joined(separator: "\n")
+                                    // 纯"新建识别"：统一走 processRecognition，按「来源=文字 × 类别」二维设置
+                                    // （自动保存 / 待确认 / 丢弃）分流；命中则插入一条识别结果气泡
+                                    // （已保存/待确认三态卡片），由气泡承担本次回复，不再插入纯文本。
+                                    let outcome = await RecognitionSaver.processRecognition(
+                                        result: result, rawText: t, image: nil,
+                                        context: context, source: .cloud, entryOrigin: "text")
+                                    switch outcome {
+                                    case .inserted:
+                                        chatBubbleInserted = true
+                                        responseText = ""
+                                    case .nothing:
+                                        responseText = await localReply(for: t)
+                                    }
                                 }
                             } else {
-                                responseText = localReply(for: t)
+                                responseText = await localReply(for: t)
                             }
                         }
                     }
                 }
-                let aiMessage = ChatMessage(role: .ai, text: responseText, createdAt: userMessage.createdAt.addingTimeInterval(0.1))
-                context.insert(aiMessage)
-                try? context.save()
+                if !chatBubbleInserted {
+                    let aiMessage = ChatMessage(role: .ai, text: responseText, createdAt: userMessage.createdAt.addingTimeInterval(0.1))
+                    context.insert(aiMessage)
+                    try? context.save()
+                    fetchMessages()
+                }
             } catch {
-                let aiMessage = ChatMessage(role: .ai, text: localReply(for: t), createdAt: userMessage.createdAt.addingTimeInterval(0.1))
-                context.insert(aiMessage)
-                try? context.save()
+                if !chatBubbleInserted {
+                    let aiMessage = ChatMessage(role: .ai, text: await localReply(for: t), createdAt: userMessage.createdAt.addingTimeInterval(0.1))
+                    context.insert(aiMessage)
+                    try? context.save()
+                    fetchMessages()
+                }
             }
             isParsing = false
             processNext()
@@ -2522,6 +3135,23 @@ struct ChatView: View {
 
     /// 本地优先意图解析：纯本地（零云端调用），快速处理结构化指令。
     /// 返回非空表示本地已处理完成；返回 nil 表示需走云端 LLM。
+    /// 把解析好的「新建记录」载荷统一走 processRecognition 水槽（与图片同一条路），
+    /// 插入识别卡片；若卡片含「已保存」项，在卡片之前插一句简短文字（自动保存类才加）。
+    /// 返回 true 表示已插入卡片（调用方据此不再发纯文本回复）。
+    private func routeRecognition(_ result: RecognitionResult, rawText: String) async -> Bool {
+        let outcome = await RecognitionSaver.processRecognition(
+            result: result, rawText: rawText, image: nil,
+            context: context, source: .local, entryOrigin: "text")
+        switch outcome {
+        case .nothing:
+            return false
+        case .inserted:
+            chatBubbleInserted = true
+            try? context.save()
+            return true
+        }
+    }
+
     private func resolveLocally(_ t: String, recentMessages: [[String: String]]) async -> String? {
         // 0. 端侧 LLM 意图分类（iOS 26+ 且可用时）：
         //    用设备端 ~3B 小模型做快速意图分类，比纯正则更鲁棒。
@@ -2533,7 +3163,7 @@ struct ChatView: View {
                     // 端侧模型判定为闲聊/无法分类 → 直接交给云端，跳过整个本地链
                     return nil
                 case .bill:
-                    if let bill = createBillLocally(from: t) {
+                    if let bill = await createBillLocally(from: t) {
                         return bill
                     }
                 case .food:
@@ -2541,7 +3171,7 @@ struct ChatView: View {
                         return food
                     }
                 case .todo:
-                    if let todo = createTodoLocally(from: t) {
+                    if let todo = await createTodoLocally(from: t) {
                         return todo
                     }
                 case .water:
@@ -2565,26 +3195,25 @@ struct ChatView: View {
 
         // 1. 待办意图优先：含「提醒/待办/记得」等明确动词时直接本地建待办，
         //    避免「晚上提醒我吃饭」被食物分支误吞。
-        if let localTodo = createTodoLocally(from: t) {
+        if let localTodo = await createTodoLocally(from: t) {
             return localTodo
         }
 
         // 2. 本地能解析的明确账单意图（如「记一笔星巴克35」「付了美团28」）
         //    直接本地建，复用 MerchantMeta 分类，跳过 AI。
-        if let localBill = createBillLocally(from: t) {
-            // 账单已创建；若该文本同时含食物意图，本地营养库命中则直接建饮食；
-            // 未命中则先记账单，再异步联网查营养并以确认卡片让用户确认入库。
+        if await createBillLocally(from: t) != nil {
+            // 账单已统一为识别卡片（kHandledCard）；若该文本同时含食物意图，
+            // 继续把饮食也插成卡片（本地命中直接建；未命中异步联网查营养后插卡片）。
             if hasRawFoodIntent(t) {
                 if let localFood = await createFoodLocally(from: t) {
-                    return localBill + "\n" + stripOpener(localFood)
+                    if localFood == kHandledCard { return kHandledCard }
                 } else {
                     Task { @MainActor in
-                        await sendFoodConfirmCard(text: t)
+                        await routeFoodCloudThenCard(text: t)
                     }
-                    return localBill
                 }
             }
-            return localBill
+            return kHandledCard
         }
 
         // 3. 饮水意图：含「喝+水/饮+水」+ 不含其他真实食物词时直接走饮水路径
@@ -2600,10 +3229,11 @@ struct ChatView: View {
                 pendingWeightFood = nil
                 return "好嘞，那就不记「\(pending.name)」啦～"
             }
-            // 用户明确回复了重量 → 组合创建
+            // 用户明确回复了重量 → 组合创建（复用暂存的日期/时刻，避免丢「昨天/下午3点」）
             if let (_, p) = ChatView.parseWeightOnly(t) {
+                let saved = pending
                 pendingWeightFood = nil
-                return await createFoodWithWeight(name: pending.name, text: p, meal: pending.meal)
+                return await createFoodWithWeight(name: saved.name, text: p, meal: saved.meal, date: saved.date, hasTime: saved.hasTime)
             }
             // 用户说了一个新食物 → 替代 pending，走正常食物分支
             if isFoodLike(t) {
@@ -2767,11 +3397,21 @@ struct ChatView: View {
 
     // MARK: - 平滑滚动到底部
     private let scrollAnimation: Animation = .spring(response: 0.32, dampingFraction: 0.82)
-    private func scrollToBottom(proxy: ScrollViewProxy, delay: TimeInterval = 0, anchor: UnitPoint = .bottom) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            if let last = displayedMessages.last {
+    private func scrollToBottom(proxy: ScrollViewProxy, delay: TimeInterval = 0, anchor: UnitPoint = .bottom, animated: Bool = true) {
+        let work = {
+            guard let last = displayedMessages.last else { return }
+            if animated {
                 withAnimation(scrollAnimation) { proxy.scrollTo(last.id, anchor: anchor) }
+            } else {
+                var tx = Transaction()
+                tx.disablesAnimations = true
+                withTransaction(tx) { proxy.scrollTo(last.id, anchor: anchor) }
             }
+        }
+        if delay <= 0 {
+            DispatchQueue.main.async(execute: work)
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
         }
     }
 
@@ -2804,7 +3444,7 @@ struct ChatView: View {
     }
 
     /// 从纯重量回复中提取份量（如「100克」「200g」「两个」「一碗」「半斤」），返回 (weight_g: Double, portionString)。
-    /// 只处理简短重量型文本，不含食物名——用于用户回复阿宝的「你吃了多少」追问。
+    /// 只处理简短重量型文本，不含食物名——用于用户回复小记的「你吃了多少」追问。
     /// 不复用 parseFoodNameAndWeight 是因为后者要求文本必须含食物名，单独「100克」会返回 nil。
     private static func parseWeightOnly(_ text: String) -> (Double, String)? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2873,15 +3513,27 @@ struct ChatView: View {
 
         if shouldSaveType("food"), types.contains("food") {
             for food in result.food.map({ [$0] }) ?? [] {
-                guard let foodName = food.name, !foodName.isEmpty else { continue }
+                guard let rawName = food.name, !rawName.isEmpty else { continue }
+                // 先把云端可能退化成的泛称（如「粥」）升回具体长词（如「燕麦粥」）
+                let upgradedName = ChatView.upgradeFoodNameIfNeeded(rawName, originalText: originalText, context: context)
+                // 用本地营养库规范化名字：命中就用准确规范名，避免老用户本地脏数据污染
+                let canonical = NutritionLibrary.canonicalFoodName(upgradedName, in: context)
+                let localRef = NutritionLibrary.shared.match(canonical, in: context)
+                let foodName = localRef?.name ?? canonical
                 let meal = resolveMeal(from: food.meal, text: originalText)
                 let portion = food.portion ?? "100克"
+                // 重量优先级：① 份量带「克/g」直接取 ② 模糊单位（一碗）按本地表换算（碗=300）
+                // ③ 云端给的 weightGram ④ 兜底 100。确保一碗=300，不被云端乱写 100 覆盖。
                 let weight = RecognitionSaver.weightFromPortion(portion)
+                    ?? RecognitionSaver.weightFromServingUnit(portion)
+                    ?? food.weightGram
+                    ?? 100
                 let ratio = weight / 100.0
-                let baseCal = food.calories ?? 0
-                let basePro = food.protein ?? 0
-                let baseCar = food.carbs ?? 0
-                let baseFat = food.fat ?? 0
+                // 营养值优先用本地权威库（内置表/本地库），云端只作兜底
+                let baseCal = localRef?.kcal ?? food.calories ?? 0
+                let basePro = localRef?.protein ?? food.protein ?? 0
+                let baseCar = localRef?.carbs ?? food.carbs ?? 0
+                let baseFat = localRef?.fat ?? food.fat ?? 0
                 let baseFiber = food.fiber ?? 0
                 let baseSugar = food.sugar ?? 0
                 let baseSodium = food.sodium ?? 0
@@ -2941,19 +3593,21 @@ struct ChatView: View {
                         summary.append("⚠️ 识别到「\(foodName)」但暂未查到营养数据，已跳过保存")
                         break
                     }
-                    context.insert(FoodEntry(name: foodName,
-                                             calories: cal, protein: protein, carbs: carbs, fat: fat,
-                                             fiber: fiber, sugar: sugar, sodium: sodium,
-                                             portion: portion, meal: meal,
-                                             weightGram: weight,
-                                             baseCalories: baseCal,
-                                             baseProtein: basePro,
-                                             baseCarbs: baseCar,
-                                             baseFat: baseFat,
-                                             baseFiber: baseFiber,
-                                             baseSugar: baseSugar,
-                                             baseSodium: baseSodium,
-                                             imageName: nil))
+                    let entry = FoodEntry(name: foodName,
+                                          calories: cal, protein: protein, carbs: carbs, fat: fat,
+                                          fiber: fiber, sugar: sugar, sodium: sodium,
+                                          portion: portion, meal: meal,
+                                          weightGram: weight,
+                                          baseCalories: baseCal,
+                                          baseProtein: basePro,
+                                          baseCarbs: baseCar,
+                                          baseFat: baseFat,
+                                          baseFiber: baseFiber,
+                                          baseSugar: baseSugar,
+                                          baseSodium: baseSodium,
+                                          imageName: nil)
+                    context.insert(entry)
+                    context.insert(FoodSource(foodSyncId: entry.syncId, origin: "chat"))
                     FoodMetaStore.upsert(name: foodName, displayName: foodName,
                                          kcal: baseCal, protein: basePro, carbs: baseCar, fat: baseFat,
                                          fiber: baseFiber, sugar: baseSugar, sodium: baseSodium,
@@ -2968,7 +3622,7 @@ struct ChatView: View {
             for bill in result.billList {
                 guard let merchant = bill.merchant, !merchant.isEmpty,
                       let amount = bill.amount, amount > 0 else { continue }
-                let time = RecognitionResult.date(from: bill.time) ?? .now
+                let time = RecognitionSaver.billTime(from: bill.time, merchant: bill.merchant, category: bill.category, entryOrigin: "text")
                 let category = bill.category ?? "其他"
                 let income = RecognitionSaver.isIncomeCategory(category)
 
@@ -3188,8 +3842,7 @@ struct ChatView: View {
         let weekBillEntries = bills.filter { $0.time >= startOf7DaysAgo }
         // 重要：传给云端 LLM 的所有日期必须带本地时区偏移（+HH:MM），否则默认 ISO8601 输出 UTC（Z），
         // 本地 11:45 会变成 03:45Z 被 LLM 误读为「凌晨 3 点」。
-        let fmt = ISO8601DateFormatter()
-        fmt.timeZone = .current
+        let fmt = AppFormat.isoLocal
         let todayTodos = reminders.filter { r in
             if let due = r.due { return cal.isDateInToday(due) && !r.done } else { return false }
         }
@@ -3209,7 +3862,7 @@ struct ChatView: View {
             "recentBills": bills.sorted { $0.time > $1.time }.prefix(10).map { buildContext_billDict($0, fmt: fmt) },
             "recentReminders": reminders.sorted { ($0.due ?? .distantPast) > ($1.due ?? .distantPast) }.prefix(10).map { buildContext_todoDict($0, fmt: fmt) },
             "recentHealth": healths.sorted { $0.date > $1.date }.prefix(10).map { buildContext_healthDict($0, fmt: fmt) },
-            "merchantRules": merchantMetas.sorted { ($0.lastSeen ?? .distantPast) > ($1.lastSeen ?? .distantPast) }.prefix(20).map { buildContext_merchantDict($0) },
+            "merchantRules": merchantMetas.sorted { $0.lastSeen > $1.lastSeen }.prefix(20).map { buildContext_merchantDict($0) },
             "recentRecognitions": recognitions.prefix(10).map { buildContext_recognitionDict($0, fmt: fmt) },
             // —— 饮水与周期规则（v10/v9 模型，buildContext 之前漏了导致 agent 第一句话看不到）——
             "recentWaters": waters.prefix(20).map { ["id": $0.syncId.uuidString, "amount": $0.amount, "date": fmt.string(from: $0.date)] },
@@ -3262,8 +3915,8 @@ struct ChatView: View {
                 return ["value": r.value, "unit": r.unit, "date": fmt.string(from: r.date)]
             }
         return [
-            "stepsToday": health.stepsToday,
-            "activeEnergyToday": health.activeEnergyToday,
+            "stepsToday": effectiveStepsToday,
+            "activeEnergyToday": effectiveActiveEnergy,
             "latestMetrics": latestMetrics
         ]
     }
@@ -3357,4 +4010,57 @@ struct ChatView: View {
         ]
     }
 
+}
+
+/// 微信式居中时间分隔行：仅在与上一条消息间隔较久 / 列表首条时插入。
+/// 不是消息实体，不进 SwiftData，只是渲染期的视觉分隔（不响应点击、不可多选删除）。
+private struct ChatTimeDivider: View {
+    let date: Date
+
+    var body: some View {
+        Text(ChatTimeDivider.label(for: date))
+            .font(AIATheme.Font.micro)
+            .foregroundStyle(AIATheme.muted)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Color(.tertiarySystemFill)))
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, 2)
+            .accessibilityLabel("消息时间 \(ChatTimeDivider.label(for: date))")
+    }
+
+    /// 微信式分档文案。全部走 Calendar.current / 本地时区，不碰 ISO8601 序列化。
+    static func label(for date: Date) -> String {
+        let cal = Calendar.current
+        let hm = AppFormat.hourMinute.string(from: date) // 复用现有 HH:mm
+        if cal.isDateInToday(date) { return hm }
+        if cal.isDateInYesterday(date) { return "昨天 \(hm)" }
+        // 近 7 天内：显示星期
+        if let days = cal.dateComponents([.day],
+                                         from: cal.startOfDay(for: date),
+                                         to: cal.startOfDay(for: .now)).day,
+           days < 7 {
+            let wd = Self.weekdayNames[cal.component(.weekday, from: date) - 1]
+            return "\(wd) \(hm)"
+        }
+        // 跨年补年份
+        if cal.component(.year, from: date) != cal.component(.year, from: .now) {
+            return Self.crossYearFormatter.string(from: date)
+        }
+        return Self.normalFormatter.string(from: date)
+    }
+
+    private static let weekdayNames = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
+    private static let crossYearFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "yyyy年M月d日 HH:mm"
+        return f
+    }()
+    private static let normalFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "M月d日 HH:mm"
+        return f
+    }()
 }

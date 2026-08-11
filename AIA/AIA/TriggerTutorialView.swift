@@ -167,11 +167,11 @@ struct TriggerTutorialView: View {
     private var placeholderTip: String {
         switch trigger {
         case .assistiveTouch:
-            return "点击「辅助触控」进入后，选择一个自定操作绑定「阿宝AI自动记账、记待办、记饮食」。"
+            return "点击「辅助触控」进入后，选择一个自定操作绑定「小记自动记账、记待办、记饮食」。"
         case .backTap:
             return "点击「轻点背面」进入后，选择「轻点两下」或「轻点三下」绑定指令。"
         case .actionButton:
-            return "把操作按钮滑动到「快捷指令」，然后选择「阿宝AI自动记账、记待办、记饮食」。"
+            return "把操作按钮滑动到「快捷指令」，然后选择「小记自动记账、记待办、记饮食」。"
         case .controlCenter:
             return "在控制中心添加「快捷指令」控制，长按后选择本 App 指令即可。"
         }

@@ -12,23 +12,78 @@ struct SettingsView: View {
 
     @StateObject private var sync = CloudSyncManager.shared
 
-    @AppStorage("userNickname") private var userNickname = "阿宝的朋友"
+    @AppStorage("userNickname") private var userNickname = "我的账号"
     // 外观模式：浅色 / 深色 / 跟随系统（写 UserDefaults，ContentView 读取并应用到全窗口）
     @AppStorage("aia.appearance") private var appearanceRaw = "system"
     @State private var showCopied = false
     @State private var toastText = "已复制同步账号"
     @State private var showShortcutGuide = false
     @State private var showOnboarding = false
-    // 背景图选择
-    @State private var bgPicker: PhotosPickerItem?
-    @State private var bgPreview: UIImage?
-    @State private var bgEnabled: Bool = AppBackgroundStore.shared.isEnabled
     // 开发者模式口令
     @State private var showPasscode = false
     @State private var passcodeText = ""
     @State private var showPasscodeError = false
     @State private var devUnlocked: Bool = DeveloperGate.isUnlocked
     @State private var devNavigate = false
+    @State private var browserTarget: BrowserTarget?
+
+    // MARK: - 每天使用提醒（每晚定时汇总四模块，带操作按钮）
+    private var dailyCheckinCard: some View {
+        let enabled = Binding<Bool>(
+            get: { UserDefaults.standard.bool(forKey: ReminderNotificationManager.dailyEnabledKey) },
+            set: { on in
+                UserDefaults.standard.set(on, forKey: ReminderNotificationManager.dailyEnabledKey)
+                if on {
+                    ReminderNotificationManager.rescheduleFromStoredDefaults()
+                } else {
+                    ReminderNotificationManager.cancelDailyCheckin()
+                }
+            }
+        )
+        let storedHour = UserDefaults.standard.integer(forKey: ReminderNotificationManager.dailyHourKey)
+        let storedMin = UserDefaults.standard.integer(forKey: ReminderNotificationManager.dailyMinuteKey)
+        let timeBinding = Binding<Date>(
+            get: { Calendar.current.date(bySettingHour: storedHour, minute: storedMin, second: 0, of: Date()) ?? Date() },
+            set: { newDate in
+                let c = Calendar.current.dateComponents([.hour, .minute], from: newDate)
+                let h = c.hour ?? 22
+                let m = c.minute ?? 0
+                UserDefaults.standard.set(h, forKey: ReminderNotificationManager.dailyHourKey)
+                UserDefaults.standard.set(m, forKey: ReminderNotificationManager.dailyMinuteKey)
+                ReminderNotificationManager.rescheduleFromStoredDefaults()
+            }
+        )
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar.badge.clock")
+                    .font(AIATheme.Font.callout.weight(.medium))
+                    .foregroundStyle(AIATheme.blue)
+                Text("每天使用提醒")
+                    .font(AIATheme.Font.subhead.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            Toggle("提醒我记账 / 记饮食 / 记健康 / 看待办", isOn: enabled)
+                .font(AIATheme.Font.subhead)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            if enabled.wrappedValue {
+                DatePicker("提醒时间", selection: timeBinding, displayedComponents: .hourAndMinute)
+                    .font(AIATheme.Font.subhead)
+            }
+            Text("到点会发一条汇总提醒，长按通知可分别跳到各模块。")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+                .lineSpacing(2)
+        }
+        .padding(14)
+        .card()
+    }
+
+    @StateObject private var ent = EntitlementManager.shared
+    @StateObject private var sub = SubscriptionManager.shared
+    @StateObject private var cfg = GlobalConfigStore.shared
+    @State private var showPaywall = false
 
     var body: some View {
         // 注意：本页由首页 navigationDestination(for:) push 进来，
@@ -37,14 +92,21 @@ struct SettingsView: View {
         ScrollView {
             VStack(spacing: 16) {
                 myAccountEntry
+                // 本月福利卡片显示条件：
+                // ① 付费用户且「未」开启免费版体验模式 → 显示（口径：不限次）；
+                // ② 开发者已开启免费额度（cfg.freeQuotaEnabled）→ 显示（口径：剩余次数）。
+                // 付费用户开启体验模式后与免费用户对齐：免额关→不显示；免额开→显示(剩次数)。
+                if (ent.isFullAccess && !ent.simulateFree) || cfg.freeQuotaEnabled {
+                    monthlyBenefitCard
+                }
+                freeTrialExperienceCard
                 appearanceCard
-                backgroundCard()
+                backgroundNavRow
                 homeLayoutEntry
-                tierCard
-                autoSyncSettingsCard
                 screenshotAutoCard
                 imageAutoRecogCard
-                reminderCard
+                membershipCard
+                dailyCheckinCard
                 guideCard
                 aboutCard
                 if devUnlocked {
@@ -58,7 +120,13 @@ struct SettingsView: View {
         .background(AIATheme.fillSoft)
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(isPresented: $devNavigate) { AdManagerView() }
+        .onAppear {
+            Task {
+                await GlobalConfigStore.shared.fetchConfig()
+                await ent.refresh()
+            }
+        }
+        .navigationDestination(isPresented: $devNavigate) { DeveloperCenterView() }
         .overlay(alignment: .top) {
             if showCopied {
                 copiedToast
@@ -76,6 +144,10 @@ struct SettingsView: View {
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView { showOnboarding = false }
         }
+        .sheet(isPresented: $showPaywall) {
+            PaywallView()
+        }
+        .inAppBrowser(target: $browserTarget)
         .alert("解锁开发者模式", isPresented: $showPasscode) {
             SecureField("输入口令", text: $passcodeText)
             Button("取消", role: .cancel) { passcodeText = "" }
@@ -115,15 +187,16 @@ struct SettingsView: View {
                     Circle()
                         .fill(LinearGradient.techAccent.opacity(0.15))
                         .frame(width: 56, height: 56)
-                    // 默认展示阿宝头像，与首页/我的账号页一致
+                    // 默认展示好好记头像，与首页/我的账号页一致
                     Image("AIAvatar")
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                         .frame(width: 56, height: 56)
                         .clipShape(Circle())
                 }
+                .proAvatarBadge(isPro: ent.isPro, badgeDiameter: 20)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(userNickname.isEmpty ? "阿宝的朋友" : userNickname)
+                    Text(userNickname.isEmpty ? "我的账号" : userNickname)
                         .font(AIATheme.Font.body.weight(.semibold))
                         .foregroundStyle(.primary)
                     Text("昵称、账号信息、退出登录")
@@ -139,6 +212,48 @@ struct SettingsView: View {
             .background(AIATheme.surface)
         }
         .buttonStyle(.plain)
+        .card()
+    }
+
+    // MARK: - 免费版体验模式（独立总开关，模拟纯免费档，真实权益不受影响）
+    private var freeTrialExperienceCard: some View {
+        let on = Binding<Bool>(
+            get: { EntitlementManager.shared.simulateFree },
+            set: { EntitlementManager.shared.simulateFree = $0 }
+        )
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "wand.and.stars")
+                    .font(AIATheme.Font.callout.weight(.medium))
+                    .foregroundStyle(AIATheme.blue)
+                Text("免费版体验模式")
+                    .font(AIATheme.Font.subhead.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 0)
+                Toggle("", isOn: on)
+                    .labelsHidden()
+            }
+            Text("开启后，本机将模拟「纯免费版」：云端识别、对话、同步与备份均不可用；首页布局自定义、背景图等 Pro 专属功能也会暂时锁定，仅本地基础功能（OCR / 端侧模型 / 离线记账）可演示。这不影响你的真实订阅或试用权益，关闭即恢复。")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+                .lineSpacing(2)
+            if on.wrappedValue {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "info.circle.fill")
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.blue)
+                    Text("体验模式已开启：当前所有云端功能在本机被禁用。")
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.blue)
+                        .lineSpacing(2)
+                }
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(AIATheme.blue.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+            }
+        }
+        .padding(14)
         .card()
     }
 
@@ -172,84 +287,36 @@ struct SettingsView: View {
         .card()
     }
 
-    // MARK: - 设置App背景图（用户本人从相册换图，仅本机）
-
-    @ViewBuilder
-    private func backgroundCard() -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "photo.fill")
+    // MARK: - App背景图（进入子页设置，与主页其他入口一致）
+    private var backgroundNavRow: some View {
+        Button {
+            NavigationRouter.shared.navigate(.backgroundSettings)
+        } label: {
+            HStack {
+                Label("App 背景图", systemImage: "photo.fill")
                     .font(AIATheme.Font.callout.weight(.medium))
-                    .foregroundStyle(AIATheme.purple)
-                Text("设置App背景图")
-                    .font(AIATheme.Font.subhead.weight(.medium))
                     .foregroundStyle(.primary)
+                Image(systemName: "crown.fill")
+                    .font(AIATheme.Font.footnote.weight(.semibold))
+                    .foregroundStyle(AIATheme.amber)
+                    .accessibilityLabel("Pro 专属")
                 Spacer()
-                Text("恢复默认")
-                    .font(AIATheme.Font.footnote)
-                    .foregroundStyle(AIATheme.blue)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        print("[AIA] 卡片恢复默认点击(手势)，bgEnabled=\(bgEnabled)")
-                        guard bgEnabled else { return }
-                        resetBackground()
-                    }
-                    .opacity(bgEnabled ? 1 : 0.4)
-            }
-
-            if let img = bgPreview ?? AppBackgroundStore.shared.loadImage() {
-                Image(uiImage: img)
-                    .resizable().scaledToFill()
-                    .frame(height: 120).clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
-                    .contentShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
-                    .contextMenu {
-                        Button("恢复默认背景", role: .destructive) {
-                            print("[AIA] 预览图长按恢复默认")
-                            resetBackground()
-                        }
-                    }
-            }
-
-            PhotosPicker(selection: $bgPicker, matching: .images) {
-                Label(bgEnabled ? "更换背景图" : "从相册选择背景图",
-                      systemImage: "photo.on.rectangle.angled")
-                    .font(AIATheme.Font.footnote.weight(.medium))
-                    .foregroundStyle(.primary)
-            }
-
-            if bgEnabled {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("遮罩浓度（保证文字可读）：\(Int(AppBackgroundStore.shared.maskOpacity * 100))%")
-                        .font(AIATheme.Font.micro).foregroundStyle(AIATheme.muted)
-                    Slider(value: Binding(
-                        get: { AppBackgroundStore.shared.maskOpacity },
-                        set: { AppBackgroundStore.shared.maskOpacity = $0 }
-                    ), in: 0...0.85)
+                if AppBackgroundStore.shared.isEnabled {
+                    Text("已设置")
+                        .font(AIATheme.Font.footnote)
+                        .foregroundStyle(AIATheme.muted)
+                        .lineLimit(1)
                 }
+                Image(systemName: "chevron.right")
+                    .font(AIATheme.Font.caption.weight(.semibold))
+                    .foregroundStyle(AIATheme.muted)
+                    .padding(.leading, 4)
             }
-
-            Text("仅首页与聊天页生效；图片仅保存在本机，不会上传。")
-                .font(AIATheme.Font.micro).foregroundStyle(AIATheme.muted).lineSpacing(2)
+            .padding(14)
+            .background(AIATheme.surface)
         }
-        .padding(14)
+        .buttonStyle(.plain)
         .card()
-        .onChange(of: bgPicker) { _, newItem in
-            guard let newItem else { return }
-            Task {
-                if let data = try? await newItem.loadTransferable(type: Data.self),
-                   let img = UIImage(data: data) {
-                    AppBackgroundStore.shared.save(img)
-                    bgEnabled = true
-                    bgPreview = img
-                }
-                bgPicker = nil
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .aiaBackgroundChanged)) { _ in
-            bgEnabled = AppBackgroundStore.shared.isEnabled
-            bgPreview = AppBackgroundStore.shared.loadImage()
-        }
     }
 
     // MARK: - 首页布局（模块排序 / 显示隐藏）
@@ -261,6 +328,10 @@ struct SettingsView: View {
                 Label("首页布局", systemImage: "square.grid.2x2")
                     .font(AIATheme.Font.callout.weight(.medium))
                     .foregroundStyle(.primary)
+                Image(systemName: "crown.fill")
+                    .font(AIATheme.Font.footnote.weight(.semibold))
+                    .foregroundStyle(AIATheme.amber)
+                    .accessibilityLabel("Pro 专属")
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(AIATheme.Font.caption.weight(.semibold))
@@ -275,79 +346,85 @@ struct SettingsView: View {
     }
 
     // MARK: - 识别档位（免费/付费分层）
-    private var tierCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "tag.circle.fill")
-                    .font(AIATheme.Font.callout.weight(.medium))
-                    .foregroundStyle(AIATheme.blue)
-                Text("识别档位")
-                    .font(AIATheme.Font.subhead.weight(.medium))
-                    .foregroundStyle(.primary)
-                Spacer()
-            }
-            Picker("识别档位", selection: tierBinding) {
-                ForEach(UserTier.allCases) { t in
-                    Text(t.title).tag(t)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(4)
-            .background(AIATheme.surfaceSecondary)
-            .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+    private var membershipCard: some View {
+        MembershipCompareView(showPaywall: $showPaywall)
+    }
 
-            if let remaining = AppUserTier.freeUsageRemaining {
-                HStack(spacing: 6) {
-                    Image(systemName: "cloud.fill")
-                        .font(AIATheme.Font.caption)
-                        .foregroundStyle(AIATheme.muted)
-                    Text("本月云端识别剩余 \(remaining) 次 · 免费版仅本地+文本模型，不发的图")
-                        .font(AIATheme.Font.micro)
-                        .foregroundStyle(AIATheme.muted)
+    // MARK: - 本月福利（开发者在开发者中心改 N，随 aia_config 动态跟随）
+    @ViewBuilder
+    private var monthlyBenefitCard: some View {
+        let r = ent.freeQuotaRemaining
+        let n = cfg.freeQuotaPerMonth
+        // 仅"真付费挡"（付费且未开体验模式）展示"已解锁全功能/不限次"；
+        // 付费+体验 或 免费用户 都走剩余次数口径，与免费用户对齐。
+        if ent.isFullAccess && !ent.simulateFree {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "gift.fill")
+                        .font(AIATheme.Font.callout.weight(.medium))
+                        .foregroundStyle(AIATheme.health)
+                    Text("本月福利")
+                        .font(AIATheme.Font.subhead.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Spacer()
                 }
-                .lineSpacing(2)
-            } else {
-                Text("付费版：复杂图片（食物照片、模糊小票）走云端视觉识别，准确率最高；本地不发的图也能尽量准。")
+                Text("已解锁全功能 · 云端识别、云端对话、云同步不限次，畅享所有 Pro 能力。")
                     .font(AIATheme.Font.micro)
                     .foregroundStyle(AIATheme.muted)
                     .lineSpacing(2)
             }
-        }
-        .padding(14)
-        .card()
-    }
-
-    private var tierBinding: Binding<UserTier> {
-        Binding(
-            get: { AppUserTier.current },
-            set: { AppUserTier.current = $0 }
-        )
-    }
-
-    // MARK: - 自动同步设置
-    private var autoSyncSettingsCard: some View {
-        Button {
-            NavigationRouter.shared.navigate(.autoSyncSettings)
-        } label: {
-            HStack {
-                Label("自动同步设置", systemImage: "arrow.triangle.2.circlepath")
-                    .font(AIATheme.Font.callout.weight(.medium))
-                    .foregroundStyle(.primary)
-                Spacer()
-                Text(sync.status)
-                    .font(AIATheme.Font.footnote)
-                    .foregroundStyle(AIATheme.muted)
-                    .lineLimit(1)
-                Image(systemName: "chevron.right")
-                    .font(AIATheme.Font.caption.weight(.semibold))
-                    .foregroundStyle(AIATheme.muted)
-                    .padding(.leading, 4)
+            .padding(14)
+            .card()
+        } else {
+            // 免费用户（且开发者已开启免费额度）：右上胶囊=剩余 r 次；副文案=共 N 次，已用 M 次。
+            let gRemain = cfg.freeQuotaGlobalRemaining
+            let gUsed = cfg.freeQuotaGlobalUsed
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "gift.fill")
+                        .font(AIATheme.Font.callout.weight(.medium))
+                        .foregroundStyle(AIATheme.warn)
+                    Text("本月福利")
+                        .font(AIATheme.Font.subhead.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    if r >= 0 {
+                        Text("剩余 \(r) 次")
+                            .font(AIATheme.Font.micro.weight(.semibold))
+                            .foregroundStyle(AIATheme.warn)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(AIATheme.warn.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+                }
+                if r < 0 {
+                    Text("免费云端体验 · 本月不限次（视觉识别、云端对话、云同步等）。")
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.muted)
+                        .lineSpacing(2)
+                } else {
+                    Text("免费云端体验 · 共 \(n) 次，已用 \(max(0, n - r)) 次（用完自动降级本地识别，本地功能不受影响）。")
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.muted)
+                        .lineSpacing(2)
+                }
+                // 全平台每月上限（成本熔断）：仅当开发者设置了全局额度才展示实时全平台用量。
+                if gRemain >= 0 {
+                    HStack(spacing: 6) {
+                        Image(systemName: "globe")
+                            .font(AIATheme.Font.micro)
+                            .foregroundStyle(AIATheme.over)
+                        Text("全平台本月已用 \(gUsed) 次，剩余 \(gRemain) 次（触顶将暂停所有免费云端功能）。")
+                            .font(AIATheme.Font.micro)
+                            .foregroundStyle(AIATheme.over)
+                            .lineSpacing(2)
+                    }
+                }
             }
             .padding(14)
-            .background(AIATheme.surface)
+            .card()
         }
-        .buttonStyle(.plain)
-        .card()
     }
 
     // MARK: - 截屏自动记账、记待办
@@ -393,39 +470,11 @@ struct SettingsView: View {
                 NavigationRouter.shared.navigate(.imageAutoRecogSettings)
             } label: {
                 HStack {
-                    Label("图片自动识别", systemImage: "photo.badge.checkmark")
+                    Label("图片自动识别设置", systemImage: "photo.badge.checkmark")
                         .font(AIATheme.Font.callout.weight(.medium))
                         .foregroundStyle(.primary)
                     Spacer()
                     Text("自动保存 · 弹出确认页")
-                        .font(AIATheme.Font.footnote)
-                        .foregroundStyle(AIATheme.muted)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.right")
-                        .font(AIATheme.Font.caption.weight(.semibold))
-                        .foregroundStyle(AIATheme.muted)
-                        .padding(.leading, 4)
-                }
-                .padding(14)
-                .background(AIATheme.surface)
-            }
-            .buttonStyle(.plain)
-        }
-        .card()
-    }
-
-    // MARK: - 待办提醒
-    private var reminderCard: some View {
-        VStack(spacing: 0) {
-            Button {
-                NavigationRouter.shared.navigate(.defaultReminderSettings)
-            } label: {
-                HStack {
-                    Label("默认提醒时间", systemImage: "bell.badge")
-                        .font(AIATheme.Font.callout.weight(.medium))
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    Text(DefaultReminderSettings.shared.summary)
                         .font(AIATheme.Font.footnote)
                         .foregroundStyle(AIATheme.muted)
                         .lineLimit(1)
@@ -469,7 +518,7 @@ struct SettingsView: View {
                 .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
             }
             .buttonStyle(.plain)
-            Text("第一次打开 App 时的引导，含快捷指令配置说明（截屏自动识别 + 跟阿宝说一句话记账）。")
+            Text("第一次打开 App 时的引导，含快捷指令配置说明（截屏自动识别 + 跟小记说一句话记账）。")
                 .font(AIATheme.Font.micro)
                 .foregroundStyle(AIATheme.muted)
                 .lineSpacing(2)
@@ -479,6 +528,7 @@ struct SettingsView: View {
     }
 
     // MARK: - 关于
+
     private var aboutCard: some View {
         VStack(spacing: 0) {
             Button {
@@ -490,6 +540,44 @@ struct SettingsView: View {
                         .foregroundStyle(.primary)
                     Spacer()
                     Image(systemName: "chevron.right")
+                        .font(AIATheme.Font.caption.weight(.semibold))
+                        .foregroundStyle(AIATheme.muted)
+                }
+                .padding(14)
+                .background(AIATheme.surface)
+            }
+            .buttonStyle(.plain)
+
+            Divider().padding(.leading, 14).background(AIATheme.hairline)
+
+            Button {
+                browserTarget = BrowserTarget(url: AppURLs.privacyPolicy)
+            } label: {
+                HStack {
+                    Label("隐私政策", systemImage: "hand.raised.fill")
+                        .font(AIATheme.Font.callout.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Image(systemName: "arrow.up.right.square")
+                        .font(AIATheme.Font.caption.weight(.semibold))
+                        .foregroundStyle(AIATheme.muted)
+                }
+                .padding(14)
+                .background(AIATheme.surface)
+            }
+            .buttonStyle(.plain)
+
+            Divider().padding(.leading, 14).background(AIATheme.hairline)
+
+            Button {
+                browserTarget = BrowserTarget(url: AppURLs.userAgreement)
+            } label: {
+                HStack {
+                    Label("用户协议", systemImage: "doc.plaintext.fill")
+                        .font(AIATheme.Font.callout.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Image(systemName: "arrow.up.right.square")
                         .font(AIATheme.Font.caption.weight(.semibold))
                         .foregroundStyle(AIATheme.muted)
                 }
@@ -514,24 +602,18 @@ struct SettingsView: View {
             .onLongPressGesture(minimumDuration: 1.2) {
                 showPasscode = true
             }
-
-            Divider().padding(.leading, 14).background(AIATheme.hairline)
-
-            Link(destination: URL(string: "https://www.cloudbase.net/")!) {
-                HStack {
-                    Label("CloudBase 文档", systemImage: "doc.text")
-                        .font(AIATheme.Font.callout.weight(.medium))
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    Image(systemName: "arrow.up.right.square")
-                        .font(AIATheme.Font.caption.weight(.semibold))
-                        .foregroundStyle(AIATheme.muted)
-                }
-                .padding(14)
-                .background(AIATheme.surface)
-            }
         }
         .card()
+    }
+
+    // MARK: - 复制账号标识（白名单录入用）
+    private func copyAccountId(_ value: String) {
+        UIPasteboard.general.string = value
+        toastText = "已复制：\(value.prefix(12))"
+        showCopied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            showCopied = false
+        }
     }
 
     // MARK: - 复制成功提示
@@ -549,28 +631,15 @@ struct SettingsView: View {
         .padding(.top, 8)
     }
 
-    // MARK: - 恢复默认背景（卡片按钮 / 工具栏按钮共用，带 toast 反馈便于确认是否触发）
-    private func resetBackground() {
-        AppBackgroundStore.shared.reset()
-        bgEnabled = false
-        bgPreview = nil
-        showToast("已恢复默认背景")
-    }
-
     private func hideKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
-    private func showToast(_ text: String) {
-        toastText = text
-        showCopied = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { showCopied = false }
-    }
 }
 
     // MARK: - 截屏自动识别引导页
     // iOS 不允许 App 直接安装「带触发器的自动化」，这一步必须用户在快捷指令里手动创建。
-    // 但「阿宝AI自动记账、记待办、记饮食」动作已随 App 自动注册（AppShortcutsProvider），所以搭建时它就在动作区顶部，
+    // 但「小记自动记账、记待办、记饮食」动作已随 App 自动注册（AppShortcutsProvider），所以搭建时它就在动作区顶部，
     // 用户只需选「截屏」触发器 + 关掉「运行前询问」即可，约 20 秒。
     struct ScreenshotAutomationGuideView: View {
     @Environment(\.dismiss) private var dismiss
@@ -580,8 +649,8 @@ struct SettingsView: View {
          "打开快捷指令 App → 底部「自动化」→ 右上「+」→ 选「创建个人自动化」。"),
         ("camera.viewfinder", "选择「截屏」触发",
          "在触发列表里找到并选择「截屏」，点「下一步」。"),
-        ("text.viewfinder", "添加「阿宝AI自动记账、记待办、记饮食」动作",
-         "点「添加操作」，搜索「阿宝AI自动记账、记待办、记饮食」（本 App 已自动注册，通常直接就在顶部），点它加入。"),
+        ("text.viewfinder", "添加「小记自动记账、记待办、记饮食」动作",
+         "点「添加操作」，搜索「小记自动记账、记待办、记饮食」（本 App 已自动注册，通常直接就在顶部），点它加入。"),
         ("bolt.slash.fill", "关掉「运行前询问」",
          "点「下一步」，关闭「运行前询问」开关并确认。这样截屏后才会静默运行、真正无感。")
     ]
@@ -599,7 +668,7 @@ struct SettingsView: View {
                             Text("设置截屏自动识别")
                                 .font(AIATheme.Font.title3.weight(.bold))
                         }
-                        Text("「阿宝AI自动记账、记待办、记饮食」动作已随 App 自动装好。只差最后一步——由你在快捷指令里绑定「截屏」触发器（iOS 规定自动化只能本人手动创建）。跟着下面 4 步，约 20 秒完成。")
+                        Text("「小记自动记账、记待办、记饮食」动作已随 App 自动装好。只差最后一步——由你在快捷指令里绑定「截屏」触发器（iOS 规定自动化只能本人手动创建）。跟着下面 4 步，约 20 秒完成。")
                             .font(AIATheme.Font.footnote)
                             .foregroundStyle(AIATheme.sub)
                             .lineSpacing(3)

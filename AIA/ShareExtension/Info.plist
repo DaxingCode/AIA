@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>AI 助理</string>
+	<string>好记</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -25,17 +25,13 @@
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.share-services</string>
 		<key>NSExtensionPrincipalClass</key>
-		<string>ShareExtension.ShareViewController</string>
+		<string>ShareViewController</string>
 		<key>NSExtensionActivationRule</key>
 		<dict>
 			<key>NSExtensionActivationSupportsImageWithMaxCount</key>
-			<integer>1</integer>
-			<key>NSExtensionActivationSupportsMovieWithMaxCount</key>
-			<integer>0</integer>
-			<key>NSExtensionActivationSupportsWebURLWithMaxCount</key>
-			<integer>0</integer>
-			<key>NSExtensionActivationSupportsWebPageWithMaxCount</key>
-			<integer>0</integer>
+			<integer>10</integer>
+			<key>NSExtensionActivationSupportsFileWithMaxCount</key>
+			<integer>10</integer>
 		</dict>
 	</dict>
 </dict>

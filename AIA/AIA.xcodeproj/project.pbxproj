@@ -6,20 +6,172 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		8725B00F302756E4006CACAE /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8725B00E302756E4006CACAE /* StoreKit.framework */; };
+		873B9F6030249F8000BBAA42 /* AIAKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 873B9F5830249F8000BBAA42 /* AIAKit.framework */; };
+		873BA07E3024A35100BBAA42 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 873BA07D3024A35100BBAA42 /* WidgetKit.framework */; };
+		873BA0803024A35100BBAA42 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 873BA07F3024A35100BBAA42 /* SwiftUI.framework */; };
+		873BA08B3024A35300BBAA42 /* AIAWidgetExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 873BA07B3024A35100BBAA42 /* AIAWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		873BA0993024A49E00BBAA42 /* AIAKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 873B9F5830249F8000BBAA42 /* AIAKit.framework */; };
+		A1B2C30100000000000001B /* AIALiveAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C30100000000000001A /* AIALiveAttributes.swift */; };
+		A1B2C30100000000000001C /* AIALiveActivityWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A1B2C301000000000000010 /* AIALiveActivityWidget.appex */; };
+		A1B2C30100000000000001E /* ShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A1B2C3010000000000000001 /* ShareExtension.appex */; };
+		A1B2C30100000000000002A /* AIAKit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 873B9F5830249F8000BBAA42 /* AIAKit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		A1B2C301000000000000035 /* UniformTypeIdentifiers.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1B2C301000000000000034 /* UniformTypeIdentifiers.framework */; };
+		A1B2C3020000000000000011 /* AIAKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3020000000000000001 /* AIAKit.swift */; };
+		A1B2C3020000000000000012 /* AIAMigrationPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3020000000000000002 /* AIAMigrationPlan.swift */; };
+		A1B2C3020000000000000013 /* AIATheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3020000000000000003 /* AIATheme.swift */; };
+		A1B2C3020000000000000014 /* AppFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3020000000000000004 /* AppFormat.swift */; };
+		A1B2C3020000000000000015 /* AppPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3020000000000000005 /* AppPersistence.swift */; };
+		A1B2C3020000000000000016 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3020000000000000006 /* Models.swift */; };
+		A1B2C3020000000000000017 /* RecognitionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3020000000000000007 /* RecognitionTypes.swift */; };
+		A1B2C3020000000000000018 /* RecurringRule.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3020000000000000008 /* RecurringRule.swift */; };
+		A1B2C3020000000000000019 /* WidgetNavIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3020000000000000009 /* WidgetNavIntent.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		8725B59E302825A7006CACAE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 87295F1E3009204100C92D5F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A1B2C3010000000000000002;
+			remoteInfo = ShareExtension;
+		};
+		873B9F5E30249F8000BBAA42 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 87295F1E3009204100C92D5F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 873B9F5730249F8000BBAA42;
+			remoteInfo = AIAKit;
+		};
+		873BA0893024A35300BBAA42 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 87295F1E3009204100C92D5F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 873BA07A3024A35100BBAA42;
+			remoteInfo = AIAWidgetExtension;
+		};
+		873BA09B3024A49E00BBAA42 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 87295F1E3009204100C92D5F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 873B9F5730249F8000BBAA42;
+			remoteInfo = AIAKit;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A1B2C30100000000000001D /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				873BA08B3024A35300BBAA42 /* AIAWidgetExtension.appex in Embed App Extensions */,
+				A1B2C30100000000000001C /* AIALiveActivityWidget.appex in Embed App Extensions */,
+				A1B2C30100000000000001E /* ShareExtension.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1B2C30100000000000002B /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				A1B2C30100000000000002A /* AIAKit.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		8725B00E302756E4006CACAE /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
 		87295F263009204100C92D5F /* AIA.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AIA.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8732986F301D902C00E61F3D /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; name = ShareExtension.entitlements; path = ShareExtension/ShareExtension.entitlements; sourceTree = "<group>"; };
+		873B9F5830249F8000BBAA42 /* AIAKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = AIAKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		873BA07B3024A35100BBAA42 /* AIAWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = AIAWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		873BA07D3024A35100BBAA42 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		873BA07F3024A35100BBAA42 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		A1B2C3010000000000000001 /* ShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1B2C301000000000000010 /* AIALiveActivityWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = AIALiveActivityWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1B2C30100000000000001A /* AIALiveAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AIALiveAttributes.swift; path = AIALiveActivityWidget/AIALiveAttributes.swift; sourceTree = "<group>"; };
+		A1B2C301000000000000034 /* UniformTypeIdentifiers.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UniformTypeIdentifiers.framework; path = System/Library/Frameworks/UniformTypeIdentifiers.framework; sourceTree = SDKROOT; };
+		A1B2C3020000000000000001 /* AIAKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIAKit.swift; sourceTree = "<group>"; };
+		A1B2C3020000000000000002 /* AIAMigrationPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIAMigrationPlan.swift; sourceTree = "<group>"; };
+		A1B2C3020000000000000003 /* AIATheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIATheme.swift; sourceTree = "<group>"; };
+		A1B2C3020000000000000004 /* AppFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFormat.swift; sourceTree = "<group>"; };
+		A1B2C3020000000000000005 /* AppPersistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPersistence.swift; sourceTree = "<group>"; };
+		A1B2C3020000000000000006 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		A1B2C3020000000000000007 /* RecognitionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecognitionTypes.swift; sourceTree = "<group>"; };
+		A1B2C3020000000000000008 /* RecurringRule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecurringRule.swift; sourceTree = "<group>"; };
+		A1B2C3020000000000000009 /* WidgetNavIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetNavIntent.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		870590F43028872200E7BC95 /* Exceptions for "ShareExtension" folder in "ShareExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = A1B2C3010000000000000002 /* ShareExtension */;
+		};
+		873BA08C3024A35300BBAA42 /* Exceptions for "AIAWidget" folder in "AIAWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 873BA07A3024A35100BBAA42 /* AIAWidgetExtension */;
+		};
+		873BA09F3024A55B00BBAA42 /* Exceptions for "AIA" folder in "AIA" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 87295F253009204100C92D5F /* AIA */;
+		};
+		A1B2C301000000000000012 /* Exceptions for "AIALiveActivityWidget" folder in "AIALiveActivityWidget" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = A1B2C301000000000000013 /* AIALiveActivityWidget */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		87295F283009204100C92D5F /* AIA */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				873BA09F3024A55B00BBAA42 /* Exceptions for "AIA" folder in "AIA" target */,
+			);
 			path = AIA;
+			sourceTree = "<group>";
+		};
+		873BA0813024A35100BBAA42 /* AIAWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				873BA08C3024A35300BBAA42 /* Exceptions for "AIAWidget" folder in "AIAWidgetExtension" target */,
+			);
+			path = AIAWidget;
 			sourceTree = "<group>";
 		};
 		A1B2C3010000000000000003 /* ShareExtension */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				870590F43028872200E7BC95 /* Exceptions for "ShareExtension" folder in "ShareExtension" target */,
+			);
 			path = ShareExtension;
+			sourceTree = "<group>";
+		};
+		A1B2C301000000000000011 /* AIALiveActivityWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A1B2C301000000000000012 /* Exceptions for "AIALiveActivityWidget" folder in "AIALiveActivityWidget" target */,
+			);
+			path = AIALiveActivityWidget;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -29,10 +181,37 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				873B9F6030249F8000BBAA42 /* AIAKit.framework in Frameworks */,
+				8725B00F302756E4006CACAE /* StoreKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		873B9F5530249F8000BBAA42 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		873BA0783024A35100BBAA42 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				873BA0993024A49E00BBAA42 /* AIAKit.framework in Frameworks */,
+				873BA0803024A35100BBAA42 /* SwiftUI.framework in Frameworks */,
+				873BA07E3024A35100BBAA42 /* WidgetKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		A1B2C3010000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1B2C301000000000000035 /* UniformTypeIdentifiers.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1B2C301000000000000015 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -45,17 +224,27 @@
 		87295F1D3009204100C92D5F = {
 			isa = PBXGroup;
 			children = (
+				8732986F301D902C00E61F3D /* ShareExtension.entitlements */,
+				A1B2C3010000000000000003 /* ShareExtension */,
 				87295F283009204100C92D5F /* AIA */,
+				A1B2C301000000000000011 /* AIALiveActivityWidget */,
+				873B9F5930249F8000BBAA42 /* AIAKit */,
+				873BA0813024A35100BBAA42 /* AIAWidget */,
+				873BA07C3024A35100BBAA42 /* Frameworks */,
 				87295F273009204100C92D5F /* Products */,
-				872960A430094CB200C92D5F /* Recovered References */,
+				87503E54301F097500BDE51B /* Recovered References */,
 			);
 			sourceTree = "<group>";
 		};
 		87295F273009204100C92D5F /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				872960A430094CB200C92D5F /* Recovered References */,
 				87295F263009204100C92D5F /* AIA.app */,
 				A1B2C3010000000000000001 /* ShareExtension.appex */,
+				A1B2C301000000000000010 /* AIALiveActivityWidget.appex */,
+				873B9F5830249F8000BBAA42 /* AIAKit.framework */,
+				873BA07B3024A35100BBAA42 /* AIAWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -63,12 +252,56 @@
 		872960A430094CB200C92D5F /* Recovered References */ = {
 			isa = PBXGroup;
 			children = (
-				A1B2C3010000000000000003 /* ShareExtension */,
+			);
+			name = "Recovered References";
+			sourceTree = "<group>";
+		};
+		873B9F5930249F8000BBAA42 /* AIAKit */ = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3020000000000000001 /* AIAKit.swift */,
+				A1B2C3020000000000000002 /* AIAMigrationPlan.swift */,
+				A1B2C3020000000000000003 /* AIATheme.swift */,
+				A1B2C3020000000000000004 /* AppFormat.swift */,
+				A1B2C3020000000000000005 /* AppPersistence.swift */,
+				A1B2C3020000000000000006 /* Models.swift */,
+				A1B2C3020000000000000007 /* RecognitionTypes.swift */,
+				A1B2C3020000000000000008 /* RecurringRule.swift */,
+				A1B2C3020000000000000009 /* WidgetNavIntent.swift */,
+			);
+			path = AIAKit;
+			sourceTree = "<group>";
+		};
+		873BA07C3024A35100BBAA42 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				8725B00E302756E4006CACAE /* StoreKit.framework */,
+				873BA07D3024A35100BBAA42 /* WidgetKit.framework */,
+				873BA07F3024A35100BBAA42 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		87503E54301F097500BDE51B /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				A1B2C30100000000000001A /* AIALiveAttributes.swift */,
+				A1B2C301000000000000034 /* UniformTypeIdentifiers.framework */,
 			);
 			name = "Recovered References";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
+
+/* Begin PBXHeadersBuildPhase section */
+		873B9F5330249F8000BBAA42 /* Headers */ = {
+			isa = PBXHeadersBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXHeadersBuildPhase section */
 
 /* Begin PBXNativeTarget section */
 		87295F253009204100C92D5F /* AIA */ = {
@@ -78,10 +311,15 @@
 				87295F223009204100C92D5F /* Sources */,
 				87295F233009204100C92D5F /* Frameworks */,
 				87295F243009204100C92D5F /* Resources */,
+				A1B2C30100000000000002B /* Embed Frameworks */,
+				A1B2C30100000000000001D /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				8725B59F302825A7006CACAE /* PBXTargetDependency */,
+				873B9F5F30249F8000BBAA42 /* PBXTargetDependency */,
+				873BA08A3024A35300BBAA42 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				87295F283009204100C92D5F /* AIA */,
@@ -92,6 +330,49 @@
 			productName = AIA;
 			productReference = 87295F263009204100C92D5F /* AIA.app */;
 			productType = "com.apple.product-type.application";
+		};
+		873B9F5730249F8000BBAA42 /* AIAKit */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 873B9F6230249F8000BBAA42 /* Build configuration list for PBXNativeTarget "AIAKit" */;
+			buildPhases = (
+				873B9F5330249F8000BBAA42 /* Headers */,
+				873B9F5430249F8000BBAA42 /* Sources */,
+				873B9F5530249F8000BBAA42 /* Frameworks */,
+				873B9F5630249F8000BBAA42 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AIAKit;
+			packageProductDependencies = (
+			);
+			productName = AIAKit;
+			productReference = 873B9F5830249F8000BBAA42 /* AIAKit.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+		873BA07A3024A35100BBAA42 /* AIAWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 873BA08D3024A35300BBAA42 /* Build configuration list for PBXNativeTarget "AIAWidgetExtension" */;
+			buildPhases = (
+				873BA0773024A35100BBAA42 /* Sources */,
+				873BA0783024A35100BBAA42 /* Frameworks */,
+				873BA0793024A35100BBAA42 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				873BA09C3024A49E00BBAA42 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				873BA0813024A35100BBAA42 /* AIAWidget */,
+			);
+			name = AIAWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = AIAWidgetExtension;
+			productReference = 873BA07B3024A35100BBAA42 /* AIAWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 		A1B2C3010000000000000002 /* ShareExtension */ = {
 			isa = PBXNativeTarget;
@@ -115,6 +396,28 @@
 			productReference = A1B2C3010000000000000001 /* ShareExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		A1B2C301000000000000013 /* AIALiveActivityWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1B2C301000000000000019 /* Build configuration list for PBXNativeTarget "AIALiveActivityWidget" */;
+			buildPhases = (
+				A1B2C301000000000000014 /* Sources */,
+				A1B2C301000000000000015 /* Frameworks */,
+				A1B2C301000000000000016 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A1B2C301000000000000011 /* AIALiveActivityWidget */,
+			);
+			name = AIALiveActivityWidget;
+			packageProductDependencies = (
+			);
+			productName = AIALiveActivityWidget;
+			productReference = A1B2C301000000000000010 /* AIALiveActivityWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -122,11 +425,17 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2650;
-				LastUpgradeCheck = 2650;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
 				TargetAttributes = {
 					87295F253009204100C92D5F = {
 						CreatedOnToolsVersion = 26.5;
+					};
+					873B9F5730249F8000BBAA42 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					873BA07A3024A35100BBAA42 = {
+						CreatedOnToolsVersion = 26.6;
 					};
 				};
 			};
@@ -149,12 +458,29 @@
 			targets = (
 				87295F253009204100C92D5F /* AIA */,
 				A1B2C3010000000000000002 /* ShareExtension */,
+				A1B2C301000000000000013 /* AIALiveActivityWidget */,
+				873B9F5730249F8000BBAA42 /* AIAKit */,
+				873BA07A3024A35100BBAA42 /* AIAWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		87295F243009204100C92D5F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		873B9F5630249F8000BBAA42 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		873BA0793024A35100BBAA42 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -168,10 +494,41 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A1B2C301000000000000016 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		87295F223009204100C92D5F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1B2C30100000000000001B /* AIALiveAttributes.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		873B9F5430249F8000BBAA42 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1B2C3020000000000000011 /* AIAKit.swift in Sources */,
+				A1B2C3020000000000000012 /* AIAMigrationPlan.swift in Sources */,
+				A1B2C3020000000000000013 /* AIATheme.swift in Sources */,
+				A1B2C3020000000000000014 /* AppFormat.swift in Sources */,
+				A1B2C3020000000000000015 /* AppPersistence.swift in Sources */,
+				A1B2C3020000000000000016 /* Models.swift in Sources */,
+				A1B2C3020000000000000017 /* RecognitionTypes.swift in Sources */,
+				A1B2C3020000000000000018 /* RecurringRule.swift in Sources */,
+				A1B2C3020000000000000019 /* WidgetNavIntent.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		873BA0773024A35100BBAA42 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -185,7 +542,37 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A1B2C301000000000000014 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		8725B59F302825A7006CACAE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A1B2C3010000000000000002 /* ShareExtension */;
+			targetProxy = 8725B59E302825A7006CACAE /* PBXContainerItemProxy */;
+		};
+		873B9F5F30249F8000BBAA42 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 873B9F5730249F8000BBAA42 /* AIAKit */;
+			targetProxy = 873B9F5E30249F8000BBAA42 /* PBXContainerItemProxy */;
+		};
+		873BA08A3024A35300BBAA42 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 873BA07A3024A35100BBAA42 /* AIAWidgetExtension */;
+			targetProxy = 873BA0893024A35300BBAA42 /* PBXContainerItemProxy */;
+		};
+		873BA09C3024A49E00BBAA42 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 873B9F5730249F8000BBAA42 /* AIAKit */;
+			targetProxy = 873BA09B3024A49E00BBAA42 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		87295F313009204300C92D5F /* Debug */ = {
@@ -193,6 +580,7 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -222,7 +610,9 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = XRJH9U2Y5F;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -244,6 +634,7 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -254,6 +645,7 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -283,7 +675,9 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = XRJH9U2Y5F;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -298,6 +692,7 @@
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 			};
 			name = Release;
@@ -307,20 +702,24 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = AIA/AIA.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = ME362KPZ7G;
-				ENABLE_APP_SANDBOX = YES;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = XRJH9U2Y5F;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "阿宝AI管家";
-				INFOPLIST_KEY_NSCameraUsageDescription = "阿宝想用相机帮你拍下餐食或单据～ 拍完会交给 AI 自动识别归类，原始照片只存在你的手机里，不会上传。";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "把步数、体重、心率交给阿宝吧～ 它会算出你的每日净热量，并画出健康趋势，这些数据都在本机处理。";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "阿宝会把你记录的热量、体重等同步到「健康」App，方便你在一处查看，也能让推荐更贴合你。";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "语音记录时需要调用麦克风，把您说的话实时转成文字，再交给 AI 助理识别并记录到对应板块。";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "想从相册挑张图给阿宝识别？授权后我们只读取你选中的图片来自动记账；后台无感识别时也会读取最近一张截图。照片都只存在本机，不会上传。";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "语音记录时需要把您的语音发送给语音识别引擎转成文字，仅用于本次识别记录，不会保存音频。";
+				INFOPLIST_FILE = AIA/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "好记";
+				INFOPLIST_KEY_NSCameraUsageDescription = "好记需要相机权限来拍小票、食物或物品照片，用于自动识别与记录。";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "把步数、体重、心率交给好记吧～ 它会算出你的每日净热量，并画出健康趋势，这些数据都在本机处理。";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "好记会把你记录的热量、体重等同步到「健康」App，方便你在一处查看，也能让推荐更贴合你。";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "好记需要麦克风权限来听你说的话，并把语音实时转成文字。";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "好记需要相册权限来把识别原图保存到你的相册。";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "好记会把你说的话转成文字，用于记录饮食、账单、待办和健康数据。";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -331,13 +730,14 @@
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.5;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.daxing.aia.AIA;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -357,20 +757,24 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = AIA/AIA.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = ME362KPZ7G;
-				ENABLE_APP_SANDBOX = YES;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = XRJH9U2Y5F;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "阿宝AI管家";
-				INFOPLIST_KEY_NSCameraUsageDescription = "阿宝想用相机帮你拍下餐食或单据～ 拍完会交给 AI 自动识别归类，原始照片只存在你的手机里，不会上传。";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "把步数、体重、心率交给阿宝吧～ 它会算出你的每日净热量，并画出健康趋势，这些数据都在本机处理。";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "阿宝会把你记录的热量、体重等同步到「健康」App，方便你在一处查看，也能让推荐更贴合你。";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "语音记录时需要调用麦克风，把您说的话实时转成文字，再交给 AI 助理识别并记录到对应板块。";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "想从相册挑张图给阿宝识别？授权后我们只读取你选中的图片来自动记账；后台无感识别时也会读取最近一张截图。照片都只存在本机，不会上传。";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "语音记录时需要把您的语音发送给语音识别引擎转成文字，仅用于本次识别记录，不会保存音频。";
+				INFOPLIST_FILE = AIA/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "好记";
+				INFOPLIST_KEY_NSCameraUsageDescription = "好记需要相机权限来拍小票、食物或物品照片，用于自动识别与记录。";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "把步数、体重、心率交给好记吧～ 它会算出你的每日净热量，并画出健康趋势，这些数据都在本机处理。";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "好记会把你记录的热量、体重等同步到「健康」App，方便你在一处查看，也能让推荐更贴合你。";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "好记需要麦克风权限来听你说的话，并把语音实时转成文字。";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "好记需要相册权限来把识别原图保存到你的相册。";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "好记会把你说的话转成文字，用于记录饮食、账单、待办和健康数据。";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -381,13 +785,14 @@
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.5;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.daxing.aia.AIA;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -397,24 +802,230 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-				XROS_DEPLOYMENT_TARGET = 26.5;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				XROS_DEPLOYMENT_TARGET = 1.0;
+			};
+			name = Release;
+		};
+		873B9F6330249F8000BBAA42 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUILD_LIBRARY_FOR_DISTRIBUTION = NO;
+				CODE_SIGN_ENTITLEMENTS = AIAKit/AIAKit.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				MODULE_VERIFIER_SUPPORTED_LANGUAGES = "objective-c objective-c++";
+				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu17 gnu++20";
+				PRODUCT_BUNDLE_IDENTIFIER = com.daxing.aia.AIAKit;
+				PRODUCT_NAME = "$(TARGET_NAME:c99extidentifier)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_INSTALL_MODULE = YES;
+				SWIFT_INSTALL_OBJC_HEADER = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VERSIONING_SYSTEM = "apple-generic";
+				VERSION_INFO_PREFIX = "";
+			};
+			name = Debug;
+		};
+		873B9F6430249F8000BBAA42 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUILD_LIBRARY_FOR_DISTRIBUTION = NO;
+				CODE_SIGN_ENTITLEMENTS = AIAKit/AIAKit.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				MODULE_VERIFIER_SUPPORTED_LANGUAGES = "objective-c objective-c++";
+				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu17 gnu++20";
+				PRODUCT_BUNDLE_IDENTIFIER = com.daxing.aia.AIAKit;
+				PRODUCT_NAME = "$(TARGET_NAME:c99extidentifier)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_INSTALL_MODULE = YES;
+				SWIFT_INSTALL_OBJC_HEADER = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+				VERSIONING_SYSTEM = "apple-generic";
+				VERSION_INFO_PREFIX = "";
+			};
+			name = Release;
+		};
+		873BA08E3024A35300BBAA42 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = AIAWidget/AIAWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AIAWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = AIAWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.daxing.aia.AIA.AIAWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		873BA08F3024A35300BBAA42 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = AIAWidget/AIAWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AIAWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = AIAWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.daxing.aia.AIA.AIAWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
 		};
 		A1B2C3010000000000000008 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_LANGUAGE = en;
-				DEVELOPMENT_TEAM = ME362KPZ7G;
-				ENABLE_APP_SANDBOX = NO;
+				DEVELOPMENT_TEAM = XRJH9U2Y5F;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_DEBUG_DYLIB = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.daxing.aia.AIA.ShareExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_FORCE_DYNAMIC_LINK_STDLIB = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A1B2C3010000000000000009 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_LANGUAGE = en;
+				DEVELOPMENT_TEAM = XRJH9U2Y5F;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_DEBUG_DYLIB = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.daxing.aia.AIA.ShareExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_FORCE_DYNAMIC_LINK_STDLIB = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A1B2C301000000000000017 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_LANGUAGE = en;
+				ENABLE_APP_SANDBOX = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AIALiveActivityWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.daxing.aia.AIA.AIALiveActivityWidget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = iphoneos;
@@ -425,19 +1036,18 @@
 			};
 			name = Debug;
 		};
-		A1B2C3010000000000000009 /* Release */ = {
+		A1B2C301000000000000018 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_LANGUAGE = en;
-				DEVELOPMENT_TEAM = ME362KPZ7G;
 				ENABLE_APP_SANDBOX = NO;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = ShareExtension/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				INFOPLIST_FILE = AIALiveActivityWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.daxing.aia.AIA.ShareExtension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.daxing.aia.AIA.AIALiveActivityWidget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = iphoneos;
@@ -469,11 +1079,38 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		873B9F6230249F8000BBAA42 /* Build configuration list for PBXNativeTarget "AIAKit" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				873B9F6330249F8000BBAA42 /* Debug */,
+				873B9F6430249F8000BBAA42 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		873BA08D3024A35300BBAA42 /* Build configuration list for PBXNativeTarget "AIAWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				873BA08E3024A35300BBAA42 /* Debug */,
+				873BA08F3024A35300BBAA42 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		A1B2C3010000000000000007 /* Build configuration list for PBXNativeTarget "ShareExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A1B2C3010000000000000008 /* Debug */,
 				A1B2C3010000000000000009 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1B2C301000000000000019 /* Build configuration list for PBXNativeTarget "AIALiveActivityWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1B2C301000000000000017 /* Debug */,
+				A1B2C301000000000000018 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

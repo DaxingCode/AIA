@@ -10,7 +10,8 @@ private let priorityOptions: [(value: String, label: String)] = [("high", "高")
 private let repeatOptions: [(value: String, label: String)] = [
     ("none", "不重复"), ("daily", "每天"), ("weekly", "每周"),
     ("biweekly", "每2周"), ("monthly", "每月"), ("bimonthly", "每2个月"),
-    ("quarterly", "每3个月"), ("semiannual", "每6个月")
+    ("quarterly", "每3个月"), ("semiannual", "每6个月"),
+    ("yearly", "每年")
 ]
 private let reminderOptions: [ReminderOption] = [.atTime, .before15, .before30, .before1Hour, .before1Day, .before1Week, .custom]
 
@@ -53,6 +54,10 @@ struct EditFoodView: View {
 
     // 食物库本地缓存（hitCount 倒序，热词靠前）
     @Query(sort: \FoodMeta.hitCount, order: .reverse) private var foodMetas: [FoodMeta]
+    /// 按 entry.syncId 取该饮食记录的来源标记（1:1）
+    @Query private var sources: [FoodSource]
+    /// 识别引擎来源标记（1:1 关联 FoodEntry.syncId）
+    @Query private var recogSources: [RecogSource]
 
     @State private var name: String
     @State private var meal: String
@@ -75,7 +80,6 @@ struct EditFoodView: View {
     // 图片添加 / 查看
     @State private var showImageSourceDialog = false
     @State private var showImagePicker = false
-    @State private var showCameraPicker = false
     @State private var showFullImage = false
     @State private var fullImageName: String? = nil
     @State private var pickedImage: UIImage? = nil
@@ -95,9 +99,12 @@ struct EditFoodView: View {
 
     init(entry: FoodEntry) {
         self.entry = entry
+        let sid = entry.syncId
+        _sources = Query(filter: #Predicate<FoodSource> { $0.foodSyncId == sid })
+        _recogSources = Query(filter: #Predicate<RecogSource> { $0.syncId == sid })
         // 重量：weightGram 缺失或为 0 时，回退到 portion 推算；再不行默认 100g。
         let rawWeight = entry.weightGram ?? 0
-        let weight = rawWeight > 0 ? rawWeight : max(RecognitionSaver.weightFromPortion(entry.portion), 1)
+        let weight = rawWeight > 0 ? rawWeight : max(RecognitionSaver.weightFromPortion(entry.portion) ?? 100, 1)
         let currentWeight = max(weight, 1)
         _name = State(initialValue: entry.name)
         _meal = State(initialValue: entry.meal)
@@ -126,6 +133,42 @@ struct EditFoodView: View {
         return String(format: "%.0f", base * weight / 100)
     }
 
+    /// 来源标签：优先取 FoodSource 标记；无标记（老记录）兜底为「图片识别 / 好好记帮记」
+    private var sourceLabel: String {
+        if let o = sources.first?.origin, let label = FoodSource.displayLabel(for: o) { return label }
+        return entry.imageName != nil ? NSLocalizedString("food.recognized", comment: "")
+                                      : NSLocalizedString("food.by_chat", comment: "")
+    }
+    private var sourceIcon: String {
+        if let o = sources.first?.origin { return FoodSource.icon(for: o) }
+        return entry.imageName != nil ? "photo" : "message"
+    }
+    /// 识别引擎来源中文标签（本地AI识别 / 云端AI…），无标记返回 nil
+    private var recogSourceLabel: String? {
+        recogSources.first.flatMap { RecogSource.displayLabel(for: $0.recogSourceRaw) }
+    }
+    private var sourceTag: some View {
+        HStack(spacing: 4) {
+            Image(systemName: sourceIcon)
+                .font(AIATheme.Font.caption)
+                .foregroundStyle(AIATheme.sub)
+            Text(sourceLabel)
+                .font(AIATheme.Font.caption)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            if let recogSourceLabel {
+                Text(recogSourceLabel)
+                    .font(AIATheme.Font.micro.weight(.medium))
+                    .foregroundStyle(AIATheme.sub)
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(AIATheme.surfaceSecondary)
+                    .clipShape(Capsule())
+                    .lineLimit(1)
+            }
+        }
+    }
+
 
     var body: some View {
         NavigationStack {
@@ -135,6 +178,7 @@ struct EditFoodView: View {
                     VStack(spacing: 16) {
                         nameCard
                         infoCard
+                        weightCard
                         nutritionCard
                         noteCard
                         deleteCard
@@ -149,9 +193,6 @@ struct EditFoodView: View {
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(image: $pickedImage)
             }
-            .fullScreenCover(isPresented: $showCameraPicker) {
-                CameraPicker(image: $pickedImage)
-            }
             .fullScreenCover(isPresented: $showFullImage) {
                 if let img = LocalImageStore.load(fullImageName) {
                     FullImageView(image: img)
@@ -159,7 +200,13 @@ struct EditFoodView: View {
             }
             .confirmationDialog("添加图片", isPresented: $showImageSourceDialog, titleVisibility: .visible) {
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                    Button("拍照") { showCameraPicker = true }
+                    // 直接弹独立黑窗相机（不经 fullScreenCover，无白屏过渡）；
+                    // 结果写回 pickedImage，触发下方既有的 onChange 存图逻辑。
+                    Button("拍照") {
+                        CameraPresenter.shared.present { img in
+                            if let img { pickedImage = img }
+                        }
+                    }
                 }
                 Button("从相册选择") { showImagePicker = true }
                 Button("取消", role: .cancel) {}
@@ -230,8 +277,11 @@ struct EditFoodView: View {
                     .font(AIATheme.Font.body)
                     .foregroundStyle(.primary)
                     .autocorrectionDisabled()
+                    .layoutPriority(1)
                 if isSearching {
                     ProgressView().scaleEffect(0.7)
+                } else {
+                    sourceTag
                 }
             }
 
@@ -360,29 +410,86 @@ struct EditFoodView: View {
         VStack(spacing: 0) {
             menuRow(icon: "clock.fill", label: "餐次", selection: $meal,
                     options: mealOptions.map { ($0, $0) })
-            Divider().padding(.leading, 46)
+        }
+        .card()
+    }
+
+    private var weightCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                Image(systemName: "scalemass.fill")
-                    .font(AIATheme.Font.subhead)
-                    .foregroundStyle(AIATheme.muted)
-                    .frame(width: 20, alignment: .center)
-                Text("重量")
+                Text("食用重量")
                     .font(AIATheme.Font.callout)
                     .foregroundStyle(.primary)
                 Spacer()
-                TextField("0", text: $weightText)
-                    .keyboardType(.decimalPad)
-                    .multilineTextAlignment(.trailing)
-                    .font(AIATheme.Font.headline.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .frame(width: 80)
-                Text("g")
-                    .font(AIATheme.Font.subhead)
-                    .foregroundStyle(AIATheme.muted)
+                HStack(spacing: 8) {
+                    Button {
+                        adjustWeight(by: -10)
+                    } label: {
+                        Image(systemName: "minus")
+                            .font(AIATheme.Font.caption.weight(.bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 28, height: 28)
+                            .background(AIATheme.food)
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+
+                    HStack(spacing: 4) {
+                        TextField("手动输入", text: $weightText)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .font(AIATheme.Font.headline.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .frame(minWidth: 44)
+                        Text("克")
+                            .font(AIATheme.Font.subhead)
+                            .foregroundStyle(AIATheme.muted)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AIATheme.rSM)
+                            .stroke(weightText.isEmpty ? AIATheme.hairline : AIATheme.food, lineWidth: 1)
+                    )
+
+                    Button {
+                        adjustWeight(by: 10)
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(AIATheme.Font.caption.weight(.bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 28, height: 28)
+                            .background(AIATheme.food)
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            .padding(.vertical, 14)
-            .padding(.horizontal, 14)
+
+            Text("快速选择 · 或手动输入")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+
+            let presets: [Int] = [50, 100, 150, 200, 250, 300]
+            HStack(spacing: 10) {
+                ForEach(presets, id: \.self) { value in
+                    Button {
+                        weightText = "\(value)"
+                    } label: {
+                        Text("\(value)g")
+                            .font(AIATheme.Font.caption.weight(.medium))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
+                            .background(weightText == "\(value)" ? AIATheme.food : AIATheme.food.opacity(0.12))
+                            .foregroundStyle(weightText == "\(value)" ? .white : AIATheme.food)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.top, 2)
         }
+        .padding(14)
         .card()
     }
 
@@ -571,7 +678,7 @@ struct EditFoodView: View {
             Image(systemName: icon)
                 .font(AIATheme.Font.subhead)
                 .foregroundStyle(AIATheme.muted)
-                .frame(width: 20, alignment: .center)
+                .frame(width: 20, height: 20, alignment: .center)
             Text(label)
                 .font(AIATheme.Font.callout)
                 .foregroundStyle(.primary)
@@ -672,6 +779,18 @@ struct EditFoodView: View {
                 base.wrappedValue = String(format: "%.1f", total / weight * 100)
             }
         )
+    }
+
+    /// 重量步进调整（步长 10g，下限 0）
+    private func adjustWeight(by delta: Int) {
+        let raw = weightText.trimmingCharacters(in: .whitespaces)
+        let current = Double(raw) ?? 0
+        let newValue = max(0, current + Double(delta))
+        if newValue == floor(newValue) {
+            weightText = "\(Int(newValue))"
+        } else {
+            weightText = String(format: "%.1f", newValue)
+        }
     }
 
     private func save() {
@@ -854,12 +973,58 @@ struct EditFoodView: View {
     }
 }
 
+// MARK: - 账单多草稿（添加模式，参照 AddFoodManualView 的 FoodDraft）
+private struct BillDraft: Identifiable {
+    let id = UUID()
+    /// 编辑/首个草稿挂靠的真实 Bill（添加模式首个由 caller 软删传入；其余为 nil，保存时新建）
+    var existingBill: Bill?
+    var merchant: String
+    var amountText: String
+    var category: String
+    var time: Date
+    var isIncome: Bool
+    var note: String
+    var imageName: String?
+    // 每卡独立 UI 状态
+    var showCategoryPicker = false
+    var showImageSourceDialog = false
+    var showImagePicker = false
+    var showFullImage = false
+    var pickedImage: UIImage? = nil
+    // 结果态
+    var saved = false
+    var savedBill: Bill? = nil
+
+    init(bill: Bill) {
+        self.existingBill = bill
+        self.merchant = bill.merchant
+        self.amountText = bill.amount > 0 ? String(format: "%.2f", bill.amount) : ""
+        self.category = bill.category
+        self.time = bill.time
+        self.isIncome = bill.isIncome
+        self.note = bill.note
+        self.imageName = bill.imageName
+    }
+
+    init() {
+        self.merchant = ""
+        self.amountText = ""
+        self.category = "餐饮"
+        self.time = .now
+        self.isIncome = false
+        self.note = ""
+        self.imageName = nil
+    }
+}
+
 // MARK: - 账单编辑（支持编辑 + 手动添加两种模式；UI/逻辑共用，仅 deleteCard 和 title 切换）
 struct EditBillView: View {
     let bill: Bill
     let isAdding: Bool          // true = 手动添加模式（不显示删除按钮，title 改"添加账单"）
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+    /// 识别引擎来源标记（1:1 关联 Bill.syncId）
+    @Query private var recogSources: [RecogSource]
 
     @State private var merchant: String
     @State private var amountText: String
@@ -871,11 +1036,20 @@ struct EditBillView: View {
     @State private var showCategoryPicker = false
     @State private var showImageSourceDialog = false
     @State private var showImagePicker = false
-    @State private var showCameraPicker = false
     @State private var showFullImage = false
     @State private var showDeleteConfirm = false
     @State private var pickedImage: UIImage? = nil
     @State private var pendingDeleteID: PersistentIdentifier? = nil
+
+    /// 添加模式下的多草稿（参照 AddFoodManualView）：每张卡是一个独立 BillDraft，
+    /// 保存后变只读摘要卡，可继续"添加账单"连续添加，不退出页面。
+    @State private var drafts: [BillDraft] = []
+
+    /// 添加模式下，被用户删除的"已保存草稿"对应的真实 Bill 的 persistentModelID。
+    /// 删除交互只做内存 removeAll，真实软删延后到 onDisappear 用 ID 版本执行，
+    /// 避免删除瞬间 syncDeleted=true 触发 @Query 重 fetch 与 ForEach 动画竞态卡死。
+    @State private var pendingDeleteBillIDs: Set<PersistentIdentifier> = []
+
 
     init(bill: Bill, isAdding: Bool = false) {
         self.bill = bill
@@ -889,23 +1063,43 @@ struct EditBillView: View {
         _note = State(initialValue: bill.note)
         _isIncome = State(initialValue: bill.isIncome)
         _imageName = State(initialValue: bill.imageName)
+        let sid = bill.syncId
+        _recogSources = Query(filter: #Predicate<RecogSource> { $0.syncId == sid })
+        // 添加模式：用 caller 传入的软删草稿 Bill 初始化第一张卡
+        if isAdding {
+            _drafts = State(initialValue: [BillDraft(bill: bill)])
+        }
+    }
+
+    /// 识别引擎来源中文标签（本地AI识别 / 云端AI…），无标记返回 nil
+    private var recogSourceLabel: String? {
+        recogSources.first.flatMap { RecogSource.displayLabel(for: $0.recogSourceRaw) }
     }
 
     var body: some View {
         NavigationStack {
             ZStack {
                 AIATheme.fillSoft.ignoresSafeArea()
-                ScrollView {
-                    VStack(spacing: 16) {
-                        infoCard
-                        incomeCard
-                        noteCard
-                        if !isAdding { deleteCard }    // 添加模式不显示删除按钮
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 16) {
+                            // 顶部锚点：删除草稿前滚回此处，归零偏移，
+                            // 避免删最后一张时 ScrollView contentOffset 越界卡死。
+                            Color.clear.frame(height: 0).id("billDraftTop")
+                            if isAdding {
+                                addMoreBody(proxy: proxy)
+                            } else {
+                                infoCard
+                                incomeCard
+                                noteCard
+                                deleteCard    // 添加模式不显示删除按钮
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                    .scrollDismissesKeyboard(.immediately)
                 }
-                .scrollDismissesKeyboard(.immediately)
             }
             .navigationTitle(isAdding ? "添加账单" : "编辑账单")
             .navigationBarTitleDisplayMode(.inline)
@@ -917,23 +1111,39 @@ struct EditBillView: View {
                     Button("取消") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }
-                        .font(AIATheme.Font.callout.weight(.semibold))
-                        .foregroundStyle(AIATheme.blue)
+                    if isAdding {
+                        // 还有待保存草稿 → "保存"（批量入库）；全部已保存 → "完成"直接关闭
+                        if drafts.contains(where: { !$0.saved }) {
+                            Button("保存") { saveAllDrafts() }
+                                .font(AIATheme.Font.callout.weight(.semibold))
+                                .foregroundStyle(AIATheme.blue)
+                        } else {
+                            Button("完成") { dismiss() }
+                                .font(AIATheme.Font.callout.weight(.semibold))
+                                .foregroundStyle(AIATheme.blue)
+                        }
+                    } else {
+                        Button("保存") { save() }
+                            .font(AIATheme.Font.callout.weight(.semibold))
+                            .foregroundStyle(AIATheme.blue)
+                    }
                 }
             }
             .confirmationDialog("添加图片", isPresented: $showImageSourceDialog, titleVisibility: .visible) {
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                    Button("拍照") { showCameraPicker = true }
+                    // 直接弹独立黑窗相机（不经 fullScreenCover，无白屏过渡）；
+                    // 结果写回 pickedImage，触发既有的 onChange 存图逻辑。
+                    Button("拍照") {
+                        CameraPresenter.shared.present { img in
+                            if let img { pickedImage = img }
+                        }
+                    }
                 }
                 Button("从相册选择") { showImagePicker = true }
                 Button("取消", role: .cancel) {}
             }
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(image: $pickedImage)
-            }
-            .fullScreenCover(isPresented: $showCameraPicker) {
-                CameraPicker(image: $pickedImage)
             }
             .fullScreenCover(isPresented: $showFullImage) {
                 if let img = LocalImageStore.load(imageName) {
@@ -969,9 +1179,395 @@ struct EditBillView: View {
         }
     }
 
+    // MARK: - 添加模式：多草稿主体
+    private func addMoreBody(proxy: ScrollViewProxy) -> some View {
+        VStack(spacing: 16) {
+            ForEach($drafts, id: \.id) { $d in
+                if d.saved, let b = d.savedBill {
+                    savedBillSummary(b, draft: $d, proxy: proxy)
+                } else {
+                    draftForm($d, proxy: proxy)
+                }
+            }
+        }
+        .onDisappear {
+            // 用户关闭整页时才真正软删被删的已保存草稿。
+            // 此刻页面已离开视图树，@Query 重 fetch 不会与删除动画竞争，无卡死风险。
+            let ids = pendingDeleteBillIDs
+            pendingDeleteBillIDs.removeAll()
+            for id in ids {
+                SafeDelete.billByID(id, in: context)
+            }
+        }
+    }
+
+    /// 未保存草稿卡：独立可编辑表单 + 底部"保存 / 删除"
+    private func draftForm(_ draft: Binding<BillDraft>, proxy: ScrollViewProxy) -> some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 0) {
+                billRow(icon: "building.2.fill", label: "商户 / 对象", text: draft.merchant, placeholder: "如 星巴克")
+                Divider().padding(.leading, 46)
+                HStack(spacing: 12) {
+                    Image(systemName: "dollarsign.circle.fill")
+                        .font(AIATheme.Font.subhead)
+                        .foregroundStyle(AIATheme.muted)
+                        .frame(width: 20, alignment: .center)
+                    Text("金额")
+                        .font(AIATheme.Font.callout)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Text("¥")
+                        .font(AIATheme.Font.headline.weight(.medium))
+                        .foregroundStyle(AIATheme.muted)
+                    TextField("0.00", text: draft.amountText)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .font(AIATheme.Font.headline.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .frame(width: 100)
+                }
+                .padding(.vertical, 14)
+                .padding(.horizontal, 14)
+                Divider().padding(.leading, 46)
+                // 分类选择行
+                let selected = draft.category.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty ? "其他" : draft.category.wrappedValue
+                Button {
+                    draft.showCategoryPicker.wrappedValue = true
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "tag.fill")
+                            .font(AIATheme.Font.subhead)
+                            .foregroundStyle(AIATheme.muted)
+                            .frame(width: 20, alignment: .center)
+                        Text("分类")
+                            .font(AIATheme.Font.callout)
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        HStack(spacing: 6) {
+                            Text(BillCategoryHelpers.icon(for: selected))
+                                .font(AIATheme.Font.subhead)
+                            Text(selected)
+                                .font(AIATheme.Font.headline.weight(.medium))
+                                .foregroundStyle(.primary)
+                            Image(systemName: "chevron.right")
+                                .font(AIATheme.Font.caption.weight(.semibold))
+                                .foregroundStyle(AIATheme.muted)
+                        }
+                    }
+                    .padding(.vertical, 14)
+                    .padding(.horizontal, 14)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                Divider().padding(.leading, 46)
+                HStack(spacing: 12) {
+                    Image(systemName: "calendar.badge.clock")
+                        .font(AIATheme.Font.subhead)
+                        .foregroundStyle(AIATheme.muted)
+                        .frame(width: 20, alignment: .center)
+                    Text("时间")
+                        .font(AIATheme.Font.callout)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    DatePicker("", selection: draft.time, displayedComponents: [.date, .hourAndMinute])
+                        .datePickerStyle(.compact)
+                        .labelsHidden()
+                }
+                .padding(.vertical, 10)
+                .padding(.horizontal, 14)
+            }
+            .card()
+
+            // 收入开关
+            HStack(spacing: 12) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(AIATheme.Font.subhead)
+                    .foregroundStyle(AIATheme.muted)
+                    .frame(width: 20, alignment: .center)
+                Text("收入（非支出）")
+                    .font(AIATheme.Font.callout)
+                    .foregroundStyle(.primary)
+                Spacer()
+                Toggle("", isOn: draft.isIncome)
+                    .labelsHidden()
+            }
+            .padding(.vertical, 10)
+            .padding(.horizontal, 14)
+            .card()
+
+            // 备注 + 图片
+            VStack(alignment: .leading, spacing: 8) {
+                Text("备注")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                TextEditor(text: draft.note)
+                    .font(AIATheme.Font.body)
+                    .foregroundStyle(.primary)
+                    .frame(minHeight: 44)
+                    .scrollContentBackground(.hidden)
+                if let img = LocalImageStore.load(draft.imageName.wrappedValue) {
+                    HStack(spacing: 12) {
+                        ZStack(alignment: .topTrailing) {
+                            Button {
+                                draft.showFullImage.wrappedValue = true
+                            } label: {
+                                Image(uiImage: img)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 64, height: 64)
+                                    .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+                            }
+                            .buttonStyle(.plain)
+
+                            Button {
+                                draft.imageName.wrappedValue = nil
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(AIATheme.Font.body)
+                                    .foregroundStyle(AIATheme.muted)
+                                    .background(Circle().fill(AIATheme.surface))
+                            }
+                            .buttonStyle(.plain)
+                            .offset(x: 6, y: -6)
+                        }
+
+                        Button {
+                            draft.showImageSourceDialog.wrappedValue = true
+                        } label: {
+                            RoundedRectangle(cornerRadius: AIATheme.rSM)
+                                .stroke(AIATheme.hairline, lineWidth: 1)
+                                .frame(width: 64, height: 64)
+                                .overlay {
+                                    Image(systemName: "plus")
+                                        .font(AIATheme.Font.headline.weight(.medium))
+                                        .foregroundStyle(AIATheme.muted)
+                                }
+                        }
+                        .buttonStyle(.plain)
+
+                        Spacer()
+                    }
+                } else {
+                    Button {
+                        draft.showImageSourceDialog.wrappedValue = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "photo.badge.plus")
+                                .font(AIATheme.Font.subhead)
+                            Text("添加图片")
+                                .font(AIATheme.Font.callout.weight(.medium))
+                        }
+                        .foregroundStyle(AIATheme.sub)
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 14)
+                        .background(AIATheme.surfaceSecondary)
+                        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(14)
+            .card()
+
+            // 底部"删除单条"：仅当草稿 ≥ 2 张时展示（刚进入 1 张时不展示）
+            if drafts.count > 1 {
+                HStack(spacing: 12) {
+                    Button {
+                        requestDeleteDraft(draft)
+                    } label: {
+                        Text("删除")
+                            .font(AIATheme.Font.callout.weight(.semibold))
+                            .foregroundStyle(AIATheme.warn)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(AIATheme.warn.opacity(0.08))
+                            .overlay(RoundedRectangle(cornerRadius: AIATheme.rMD).stroke(AIATheme.warn.opacity(0.25), lineWidth: 0.5))
+                            .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, 4)
+            }
+        }
+        .sheet(isPresented: draft.showCategoryPicker) {
+            BillCategoryPickerSheet(selection: draft.category)
+        }
+        .confirmationDialog("添加图片", isPresented: draft.showImageSourceDialog, titleVisibility: .visible) {
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                Button("拍照") {
+                    CameraPresenter.shared.present { img in
+                        if let img { draft.pickedImage.wrappedValue = img }
+                    }
+                }
+            }
+            Button("从相册选择") { draft.showImagePicker.wrappedValue = true }
+            Button("取消", role: .cancel) {}
+        }
+        .sheet(isPresented: draft.showImagePicker) {
+            ImagePicker(image: draft.pickedImage)
+        }
+        .fullScreenCover(isPresented: draft.showFullImage) {
+            if let img = LocalImageStore.load(draft.imageName.wrappedValue) {
+                FullImageView(image: img)
+            }
+        }
+        .onChange(of: draft.pickedImage.wrappedValue) { _, new in
+            guard let img = new else { return }
+            draft.pickedImage.wrappedValue = nil
+            if let name = LocalImageStore.save(img) {
+                draft.imageName.wrappedValue = name
+            }
+        }
+    }
+
+    /// 已保存摘要卡（只读，可"编辑"退回草稿或"删除"）
+    private func savedBillSummary(_ b: Bill, draft: Binding<BillDraft>, proxy: ScrollViewProxy) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Image(systemName: b.isIncome ? "arrow.down.circle.fill" : "creditcard.fill")
+                    .font(AIATheme.Font.subhead)
+                    .foregroundStyle(b.isIncome ? AIATheme.income : AIATheme.expense)
+                Text(b.merchant.isEmpty ? "未命名" : b.merchant)
+                    .font(AIATheme.Font.callout.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text(String(format: "%@¥%.2f", b.isIncome ? "+" : "-", b.amount))
+                    .font(AIATheme.Font.callout.weight(.semibold))
+                    .foregroundStyle(b.isIncome ? AIATheme.income : AIATheme.expense)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
+            .padding(.bottom, 4)
+            HStack(spacing: 6) {
+                Text(BillCategoryHelpers.icon(for: b.category.isEmpty ? "其他" : b.category))
+                    .font(AIATheme.Font.subhead)
+                Text(b.category.isEmpty ? "其他" : b.category)
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 10)
+            Divider()
+            HStack(spacing: 12) {
+                Button {
+                    draft.wrappedValue.saved = false   // 退回草稿重新编辑
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "pencil")
+                            .font(AIATheme.Font.caption)
+                        Text("编辑")
+                    }
+                    .font(AIATheme.Font.callout.weight(.medium))
+                    .foregroundStyle(AIATheme.blue)
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                Divider()
+                Button {
+                    requestDeleteDraft(draft)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "trash")
+                            .font(AIATheme.Font.caption)
+                        Text("删除")
+                    }
+                    .font(AIATheme.Font.callout.weight(.medium))
+                    .foregroundStyle(AIATheme.warn)
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.vertical, 10)
+        }
+        .card()
+    }
+
+    /// 把一张草稿持久化成真实 Bill（复用 syncAfterLocalChange 触发同步）
+    private func persistDraft(_ draft: Binding<BillDraft>) {
+        var d = draft.wrappedValue
+        let trimmed = d.merchant.trimmingCharacters(in: .whitespaces)
+        let amount = Double(d.amountText) ?? 0
+        if let b = d.existingBill {
+            b.merchant = trimmed.isEmpty ? b.merchant : trimmed
+            b.amount = amount
+            b.category = d.category.trimmingCharacters(in: .whitespaces)
+            b.time = d.time
+            b.note = d.note
+            b.isIncome = d.isIncome
+            b.imageName = d.imageName
+            b.syncDeleted = false
+            b.syncUpdatedAt = .now
+            d.savedBill = b
+        } else {
+            let b = Bill(
+                merchant: trimmed.isEmpty ? "未命名" : trimmed,
+                amount: amount,
+                category: d.category.trimmingCharacters(in: .whitespaces),
+                time: d.time,
+                confirmed: true
+            )
+            b.isIncome = d.isIncome
+            b.note = d.note
+            b.imageName = d.imageName
+            b.syncDeleted = false
+            context.insert(b)
+            d.savedBill = b
+        }
+        d.saved = true
+        draft.wrappedValue = d
+        try? context.save()
+        CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        // 全部已保存则自动关闭（与 toolbar "保存" 行为一致）
+        if !drafts.contains(where: { !$0.saved }) {
+            dismiss()
+        }
+    }
+
+    /// 请求删除一张草稿：就地实时移除该卡片，不关闭整个页面。
+    /// 删除交互全程零 SwiftData 写入：只做纯内存 removeAll（ForEach 用稳定 UUID id 正确 diff 卸载），
+    /// 真实 Bill 的软删延后到 onDisappear 用 billByID（ID 版本）执行 —— 此时页面已不在视图树，
+    /// @Query 重 fetch 不会与删除动画在主线程同步竞争，彻底消除"删第二张卡死"。
+    /// 未保存草稿本就未入库（savedBill == nil），无需记 ID。
+    private func requestDeleteDraft(_ draft: Binding<BillDraft>) {
+        let targetID = draft.wrappedValue.id
+        if let bill = draft.wrappedValue.savedBill ?? draft.wrappedValue.existingBill {
+            pendingDeleteBillIDs.insert(bill.persistentModelID)
+        }
+        drafts.removeAll { $0.id == targetID }
+    }
+
+    /// 批量保存所有未保存草稿（toolbar "保存"）
+    private func saveAllDrafts() {
+        // 先快照未保存草稿的 id，循环内不直接按下标改 drafts，避免下标越界
+        let unsavedIDs = drafts.filter { !$0.saved }.map { $0.id }
+        for id in unsavedIDs {
+            if let index = drafts.firstIndex(where: { $0.id == id }) {
+                let binding = $drafts[index]
+                persistDraft(binding)
+            }
+        }
+        // 全部保存完毕 → 关闭页面
+        dismiss()
+    }
+
     // MARK: - 卡片
     private var infoCard: some View {
         VStack(spacing: 0) {
+            if let recogSourceLabel {
+                HStack(spacing: 5) {
+                    Image(systemName: "cpu")
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.sub)
+                    Text(recogSourceLabel)
+                        .font(AIATheme.Font.micro.weight(.medium))
+                        .foregroundStyle(AIATheme.sub)
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 4)
+            }
             billRow(icon: "building.2.fill", label: "商户 / 对象", text: $merchant, placeholder: "如 星巴克")
             Divider().padding(.leading, 46)
             HStack(spacing: 12) {
@@ -1301,12 +1897,72 @@ struct BillCategoryPickerSheet: View {
     }
 }
 
+// MARK: - 待办多草稿（添加模式，参照 AddFoodManualView 的 FoodDraft / BillDraft）
+private struct TodoDraft: Identifiable {
+    let id = UUID()
+    /// 编辑/首个草稿挂靠的真实 Reminder（添加模式首个由 caller 软删传入；其余为 nil，保存时新建）
+    var existingReminder: Reminder?
+    var title: String
+    var hasDue: Bool
+    var due: Date
+    var priority: String
+    var repeatRule: String
+    var done: Bool
+    var alertItems: [AlertItem]
+    var noteText: String
+    var imageName: String?
+    // 每卡独立 UI 状态
+    var editingCustom: AlertItem? = nil
+    var showImagePicker = false
+    var showFullImage = false
+    var showImageSourceDialog = false
+    var pickedImage: UIImage? = nil
+    // 结果态
+    var saved = false
+    var savedReminder: Reminder? = nil
+
+    init(reminder: Reminder) {
+        self.existingReminder = reminder
+        self.title = reminder.title
+        let fallbackDue = reminder.due ?? Date().addingTimeInterval(3600)
+        self.due = fallbackDue
+        if reminder.due != nil {
+            self.hasDue = true
+            self.alertItems = alerts(from: reminder)
+        } else {
+            // 新增占位符（due=nil）：默认开启提醒 + 预填「准时」，与 init() 一致
+            self.hasDue = true
+            self.alertItems = [AlertItem(option: .atTime, customDate: fallbackDue)]
+        }
+        self.priority = reminder.priority
+        self.repeatRule = reminder.repeatRule
+        self.done = reminder.done
+        self.imageName = reminder.imageName
+        self.noteText = ""
+    }
+
+    init() {
+        self.title = ""
+        self.hasDue = true
+        let fallbackDue = Date().addingTimeInterval(3600)
+        self.due = fallbackDue
+        self.alertItems = [AlertItem(option: .atTime, customDate: fallbackDue)]
+        self.priority = "中"
+        self.repeatRule = "不重复"
+        self.done = false
+        self.noteText = ""
+        self.imageName = nil
+    }
+}
+
 // MARK: - 待办编辑（支持编辑 + 手动添加两种模式；UI/逻辑共用，仅 deleteCard 和 title 切换）
 struct EditTodoView: View {
     let reminder: Reminder
     let isAdding: Bool          // true = 手动添加模式（不显示删除按钮，title 改"添加待办"；save() 时草稿 syncDeleted 复活）
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+    /// 识别引擎来源标记（1:1 关联 Reminder.syncId）
+    @Query private var recogSources: [RecogSource]
 
     @State private var title: String
     @State private var hasDue: Bool
@@ -1325,12 +1981,26 @@ struct EditTodoView: View {
     @State private var showFullImage = false
     @State private var showImageSourceDialog = false
     @State private var showImagePicker = false
-    @State private var showCameraPicker = false
     @State private var pickedImage: UIImage? = nil
 
     // 删除（参照 EditBillView 模式：先 dismiss，等 onDisappear 真正软删）
     @State private var showDeleteConfirm = false
     @State private var pendingDeleteID: PersistentIdentifier? = nil
+
+    // 保存时存在空白标题 → 拦截并提示
+    @State private var showEmptyTitleAlert = false
+
+    /// 添加模式下的多草稿（参照 BillDraft / FoodDraft）：每张卡是一个独立 TodoDraft，
+    /// 保存后变只读摘要卡，可继续"添加待办"连续添加，不退出页面。
+    @State private var drafts: [TodoDraft] = []
+
+    // 删除草稿：按钮只记录待删索引（绝不在闭包里改数组/dismiss/访问 Reminder），
+    // 数组移除延后到淡出动画结束后（约 0.3s）在页面内执行，使下方内容自动顶上来并滚动；
+    // 真实 Reminder 的软删延后到 onDisappear，避免 syncDeleted 触发 @Query 重 fetch 与动画叠加卡死。
+    @State private var pendingDeleteTodoIndices: Set<TodoDraft.ID> = []
+    // 待软删的真实 Reminder 的 persistentModelID，点击删除时即记录，与数组索引解耦，
+    // 避免 onDisappear 时数组已移除导致索引失效、无法取到待删对象。
+    @State private var pendingDeleteTodoReminderIDs: [PersistentIdentifier] = []
 
     init(reminder: Reminder, isAdding: Bool = false) {
         self.reminder = reminder
@@ -1355,6 +2025,17 @@ struct EditTodoView: View {
         _repeatRule = State(initialValue: reminder.repeatRule)
         _done = State(initialValue: reminder.done)
         _imageName = State(initialValue: reminder.imageName)
+        let sid = reminder.syncId
+        _recogSources = Query(filter: #Predicate<RecogSource> { $0.syncId == sid })
+        // 添加模式：用 caller 传入的软删草稿 Reminder 初始化第一张卡
+        if isAdding {
+            _drafts = State(initialValue: [TodoDraft(reminder: reminder)])
+        }
+    }
+
+    /// 识别引擎来源中文标签（本地AI识别 / 云端AI…），无标记返回 nil
+    private var recogSourceLabel: String? {
+        recogSources.first.flatMap { RecogSource.displayLabel(for: $0.recogSourceRaw) }
     }
 
     var body: some View {
@@ -1368,20 +2049,29 @@ struct EditTodoView: View {
         // 因此本 body 直接是 ScrollView，调用方一律走 EditTodoSheet。
         ZStack {
             AIATheme.fillSoft.ignoresSafeArea()
-            ScrollView {
-                VStack(spacing: 16) {
-                    titleCard
-                    timeAlertCard
-                    // 2026-07-24 顺序调整：propertyCard（状态+设置：已完成/优先级/重复）上移
-                    // 备注 noteCard 下移 —— 用户截图反馈"先看状态/再写备注"更符合视觉流
-                    propertyCard
-                    noteCard
-                    if !isAdding { deleteCard }    // 添加模式不显示删除按钮
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 16) {
+                        // 顶部锚点：删除草稿前滚回此处，归零偏移，
+                        // 避免删最后一张时 ScrollView contentOffset 越界卡死。
+                        Color.clear.frame(height: 0).id("todoDraftTop")
+                        if isAdding {
+                            addTodoBody(proxy: proxy)
+                        } else {
+                            titleCard
+                            timeAlertCard
+                            // 2026-07-24 顺序调整：propertyCard（状态+设置：已完成/优先级/重复）上移
+                            // 备注 noteCard 下移 —— 用户截图反馈"先看状态/再写备注"更符合视觉流
+                            propertyCard
+                            noteCard
+                            if !isAdding { deleteCard }    // 添加模式不显示删除按钮
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .scrollDismissesKeyboard(.immediately)
             }
-            .scrollDismissesKeyboard(.immediately)
         }
         .navigationTitle(isAdding ? "添加待办" : "编辑待办")
         .navigationBarTitleDisplayMode(.inline)
@@ -1391,9 +2081,22 @@ struct EditTodoView: View {
                 Button("取消") { dismiss() }
             }
             ToolbarItem(placement: .confirmationAction) {
-                Button("保存") { save() }
-                    .font(AIATheme.Font.callout.weight(.semibold))
-                    .foregroundStyle(AIATheme.blue)
+                if isAdding {
+                    // 还有待保存草稿 → "保存"（批量入库）；全部已保存 → "完成"直接关闭
+                    if drafts.contains(where: { !$0.saved }) {
+                        Button("保存") { saveAllTodoDrafts() }
+                            .font(AIATheme.Font.callout.weight(.semibold))
+                            .foregroundStyle(AIATheme.blue)
+                    } else {
+                        Button("完成") { dismiss() }
+                            .font(AIATheme.Font.callout.weight(.semibold))
+                            .foregroundStyle(AIATheme.blue)
+                    }
+                } else {
+                    Button("保存") { save() }
+                        .font(AIATheme.Font.callout.weight(.semibold))
+                        .foregroundStyle(AIATheme.blue)
+                }
             }
         }
         .sheet(item: $editingCustom) { item in
@@ -1402,9 +2105,6 @@ struct EditTodoView: View {
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(image: $pickedImage)
         }
-        .fullScreenCover(isPresented: $showCameraPicker) {
-            CameraPicker(image: $pickedImage)
-        }
         .fullScreenCover(isPresented: $showFullImage) {
             if let img = LocalImageStore.load(imageName) {
                 FullImageView(image: img)
@@ -1412,7 +2112,13 @@ struct EditTodoView: View {
         }
         .confirmationDialog("添加图片", isPresented: $showImageSourceDialog, titleVisibility: .visible) {
             if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                Button("拍照") { showCameraPicker = true }
+                // 直接弹独立黑窗相机（不经 fullScreenCover，无白屏过渡）；
+                // 结果写回 pickedImage，触发既有的 onChange 存图逻辑。
+                Button("拍照") {
+                    CameraPresenter.shared.present { img in
+                        if let img { pickedImage = img }
+                    }
+                }
             }
             Button("从相册选择") { showImagePicker = true }
             Button("取消", role: .cancel) {}
@@ -1432,6 +2138,11 @@ struct EditTodoView: View {
             }
         } message: {
             Text("删除后不可恢复，确定要删除吗？")
+        }
+        .alert("待办标题不能为空", isPresented: $showEmptyTitleAlert) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text("请为每张待办填写标题后再保存。")
         }
             .onAppear {
                 // 懒加载备注：首次进入编辑页时按 syncId 取 ReminderNote（1:1，参照 FoodNote 模式）
@@ -1457,9 +2168,19 @@ struct EditTodoView: View {
     // MARK: - 卡片
     private var titleCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("内容")
-                .font(AIATheme.Font.micro)
-                .foregroundStyle(AIATheme.muted)
+            HStack(spacing: 5) {
+                Text("内容")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                if let recogSourceLabel {
+                    Text(recogSourceLabel)
+                        .font(AIATheme.Font.micro.weight(.medium))
+                        .foregroundStyle(AIATheme.sub)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(AIATheme.surfaceSecondary)
+                        .clipShape(Capsule())
+                }
+            }
             TextField("待办标题", text: $title)
                 .font(AIATheme.Font.body)
                 .foregroundStyle(.primary)
@@ -1488,7 +2209,7 @@ struct EditTodoView: View {
             toggleRow(icon: "calendar.badge.clock", label: "设置提醒时间", isOn: $hasDue)
             if hasDue {
                 Divider().padding(.leading, 46)
-                HStack(spacing: 16) {
+                HStack(spacing: 12) {
                     VStack(alignment: .center, spacing: 4) {
                         Text("日期")
                             .font(AIATheme.Font.micro)
@@ -1498,6 +2219,22 @@ struct EditTodoView: View {
                             .labelsHidden()
                     }
                     .frame(maxWidth: .infinity)
+
+                    Button {
+                        due = Calendar.current.date(byAdding: .day, value: 1, to: due)
+                            ?? due.addingTimeInterval(86400)
+                    } label: {
+                        Text("+1天")
+                            .font(AIATheme.Font.caption.weight(.medium))
+                            .foregroundStyle(AIATheme.blue)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(AIATheme.blue.opacity(0.10))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 18)
+
                     VStack(alignment: .center, spacing: 4) {
                         Text("时间")
                             .font(AIATheme.Font.micro)
@@ -1724,8 +2461,8 @@ struct EditTodoView: View {
 
     // MARK: - 提醒时间行
     private func alertRow(item: Binding<AlertItem>) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .center, spacing: 4) {
                 Menu {
                     ForEach(reminderOptions) { option in
                         Button(option.label) {
@@ -1750,7 +2487,7 @@ struct EditTodoView: View {
                     .font(AIATheme.Font.micro)
                     .foregroundStyle(AIATheme.muted)
             }
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .center)
             if item.wrappedValue.option == .custom {
                 Button(formatCustom(item.wrappedValue.customDate)) {
                     editingCustom = item.wrappedValue
@@ -1769,7 +2506,6 @@ struct EditTodoView: View {
                     .foregroundStyle(AIATheme.warn)
             }
             .buttonStyle(.plain)
-            .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] }
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 14)
@@ -1836,7 +2572,7 @@ struct EditTodoView: View {
         // 避免「设了截止时间却收不到任何提醒」的违和（用户预期=到点会响）。
         var effectiveAlerts = alertItems
         if hasDue && effectiveAlerts.isEmpty {
-            effectiveAlerts = [AlertItem(option: .atTime, customDate: due ?? Date())]
+            effectiveAlerts = [AlertItem(option: .atTime, customDate: due)]
         }
         let times = hasDue ? reminderTimes(from: effectiveAlerts, due: due) : []
         reminder.remindTimes = times
@@ -1873,6 +2609,503 @@ struct EditTodoView: View {
         try? context.save()
         dismiss()
     }
+
+    // MARK: - 添加模式：多草稿主体
+    private func addTodoBody(proxy: ScrollViewProxy) -> some View {
+        VStack(spacing: 16) {
+            ForEach($drafts, id: \.id) { $d in
+                if d.saved, let r = d.savedReminder {
+                    savedTodoSummary(r, draft: $d, proxy: proxy)
+                } else {
+                    todoForm($d, showDelete: drafts.count > 1, proxy: proxy)
+                }
+            }
+        }
+        .onDisappear {
+            // 数组移除已提前到点击删除后（淡出动画结束）在页面内执行，这里只做真实 Reminder 软删。
+            // 仅依赖点击时记录的 pendingDeleteTodoReminderIDs（persistentModelID），不捕获对象、不碰数组，
+            // 避免 syncDeleted=true 触发 @Query 重 fetch 与动画叠加主线程卡死。
+            let toDeleteIDs = pendingDeleteTodoReminderIDs
+            pendingDeleteTodoReminderIDs.removeAll()
+            pendingDeleteTodoIndices.removeAll()
+            guard !toDeleteIDs.isEmpty else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                for id in toDeleteIDs {
+                    SafeDelete.reminderByID(id, in: context)
+                }
+            }
+        }
+    }
+
+    /// 未保存草稿卡：独立可编辑表单 + 底部"删除"（仅多于 1 张时显示）
+    private func todoForm(_ draft: Binding<TodoDraft>, showDelete: Bool, proxy: ScrollViewProxy) -> some View {
+        VStack(spacing: 0) {
+            // 内容
+            VStack(alignment: .leading, spacing: 8) {
+                Text("内容")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                TextField("待办标题", text: draft.title)
+                    .font(AIATheme.Font.body)
+                    .foregroundStyle(.primary)
+            }
+            .padding(14)
+            .card()
+
+            // 时间 + 提醒
+            dueSectionDraft(draft: draft)
+                .card()
+
+            // 状态 + 设置
+            VStack(spacing: 0) {
+                toggleRow(icon: "checkmark.circle", label: "已完成", isOn: draft.done)
+                Divider().padding(.leading, 46)
+                menuRow(icon: "exclamationmark.circle", label: "优先级", selection: draft.priority, options: priorityOptions)
+                Divider().padding(.leading, 46)
+                menuRow(icon: "repeat", label: "重复", selection: draft.repeatRule, options: repeatOptions)
+            }
+            .card()
+
+            // 备注 + 图片
+            VStack(alignment: .leading, spacing: 8) {
+                Text("备注")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                TextEditor(text: draft.noteText)
+                    .font(AIATheme.Font.body)
+                    .foregroundStyle(.primary)
+                    .frame(minHeight: 44)
+                    .scrollContentBackground(.hidden)
+                imageAreaDraft(draft: draft)
+            }
+            .padding(14)
+            .card()
+
+            // 底部"删除"（仅当草稿多于 1 张时才出现，删的是单条）
+            if showDelete {
+                Button {
+                    deleteTodoDraft(draft, proxy: proxy)
+                } label: {
+                    Text("删除")
+                        .font(AIATheme.Font.callout.weight(.semibold))
+                        .foregroundStyle(AIATheme.warn)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(AIATheme.warn.opacity(0.08))
+                        .overlay(RoundedRectangle(cornerRadius: AIATheme.rMD).stroke(AIATheme.warn.opacity(0.25), lineWidth: 0.5))
+                        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+            }
+        }
+        .sheet(item: draft.editingCustom) { item in
+            customTimeSheetDraft(item: item, draft: draft)
+        }
+        .sheet(isPresented: draft.showImagePicker) {
+            ImagePicker(image: draft.pickedImage)
+        }
+        .fullScreenCover(isPresented: draft.showFullImage) {
+            if let img = LocalImageStore.load(draft.imageName.wrappedValue) {
+                FullImageView(image: img)
+            }
+        }
+        .confirmationDialog("添加图片", isPresented: draft.showImageSourceDialog, titleVisibility: .visible) {
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                Button("拍照") {
+                    CameraPresenter.shared.present { img in
+                        if let img { draft.pickedImage.wrappedValue = img }
+                    }
+                }
+            }
+            Button("从相册选择") { draft.showImagePicker.wrappedValue = true }
+            Button("取消", role: .cancel) {}
+        }
+        .onChange(of: draft.pickedImage.wrappedValue) { _, new in
+            guard let img = new else { return }
+            draft.pickedImage.wrappedValue = nil
+            if let name = LocalImageStore.save(img) {
+                draft.imageName.wrappedValue = name
+            }
+        }
+    }
+
+    /// 已保存摘要卡（只读，可"编辑"退回草稿或"删除"）
+    private func savedTodoSummary(_ r: Reminder, draft: Binding<TodoDraft>, proxy: ScrollViewProxy) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Image(systemName: r.done ? "checkmark.circle.fill" : "circle")
+                    .font(AIATheme.Font.subhead)
+                    .foregroundStyle(r.done ? AIATheme.sub : AIATheme.blue)
+                Text(r.title.isEmpty ? "未命名" : r.title)
+                    .font(AIATheme.Font.callout.weight(.semibold))
+                    .foregroundStyle(r.done ? AIATheme.muted : .primary)
+                    .strikethrough(r.done)
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
+            .padding(.bottom, 4)
+            HStack(spacing: 6) {
+                if let due = r.due {
+                    Text(AppFormat.dateTime.string(from: due))
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.muted)
+                } else {
+                    Text("未安排时间")
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.muted)
+                }
+                Text("· \(r.priority)")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 10)
+            Divider()
+            HStack(spacing: 12) {
+                Button {
+                    draft.wrappedValue.saved = false   // 退回草稿重新编辑
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "pencil")
+                            .font(AIATheme.Font.caption)
+                        Text("编辑")
+                    }
+                    .font(AIATheme.Font.callout.weight(.medium))
+                    .foregroundStyle(AIATheme.blue)
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                Divider()
+                Button {
+                    deleteTodoDraft(draft, proxy: proxy)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "trash")
+                            .font(AIATheme.Font.caption)
+                        Text("删除")
+                    }
+                    .font(AIATheme.Font.callout.weight(.medium))
+                    .foregroundStyle(AIATheme.warn)
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.vertical, 10)
+        }
+        .card()
+    }
+
+    private func imageAreaDraft(draft: Binding<TodoDraft>) -> some View {
+        let name = draft.imageName.wrappedValue
+        return Group {
+        if let img = LocalImageStore.load(name) {
+            HStack(spacing: 12) {
+                ZStack(alignment: .topTrailing) {
+                    Button {
+                        draft.showFullImage.wrappedValue = true
+                    } label: {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 64, height: 64)
+                            .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        draft.imageName.wrappedValue = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(AIATheme.Font.body)
+                            .foregroundStyle(AIATheme.muted)
+                            .background(Circle().fill(AIATheme.surface))
+                    }
+                    .buttonStyle(.plain)
+                    .offset(x: 6, y: -6)
+                }
+
+                Button {
+                    draft.showImageSourceDialog.wrappedValue = true
+                } label: {
+                    RoundedRectangle(cornerRadius: AIATheme.rSM)
+                        .stroke(AIATheme.hairline, lineWidth: 1)
+                        .frame(width: 64, height: 64)
+                        .overlay {
+                            Image(systemName: "plus")
+                                .font(AIATheme.Font.headline.weight(.medium))
+                                .foregroundStyle(AIATheme.muted)
+                        }
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+            }
+        } else {
+            Button {
+                draft.showImageSourceDialog.wrappedValue = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "photo.badge.plus")
+                        .font(AIATheme.Font.subhead)
+                    Text("添加图片")
+                        .font(AIATheme.Font.callout.weight(.medium))
+                }
+                .foregroundStyle(AIATheme.sub)
+                .padding(.vertical, 10)
+                .padding(.horizontal, 14)
+                .background(AIATheme.surfaceSecondary)
+                .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+            }
+            .buttonStyle(.plain)
+        }
+        }
+    }
+
+    // MARK: - 草稿版 dueSection（参照原 dueSection，绑定改为 draft）
+    private func dueSectionDraft(draft: Binding<TodoDraft>) -> some View {
+        VStack(spacing: 0) {
+            toggleRow(icon: "bell", label: "设置提醒时间", isOn: draft.hasDue)
+            if draft.hasDue.wrappedValue {
+                Divider().padding(.leading, 46)
+                DatePicker("", selection: draft.due, displayedComponents: [.date, .hourAndMinute])
+                    .datePickerStyle(.compact)
+                    .labelsHidden()
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 14)
+
+                if !draft.alertItems.wrappedValue.isEmpty {
+                    Divider().padding(.leading, 46)
+                    VStack(spacing: 0) {
+                        ForEach(draft.alertItems) { $item in
+                            if let idx = draft.alertItems.wrappedValue.firstIndex(where: { $0.id == item.id }),
+                               idx < draft.alertItems.wrappedValue.count - 1 {
+                                Divider().padding(.leading, 8)
+                            }
+                            alertRowDraft(item: $item, draft: draft)
+                        }
+                    }
+                }
+
+                if draft.alertItems.wrappedValue.count < 4 {
+                    Divider().padding(.leading, 46)
+                    Button {
+                        let next = defaultNextOptionDraft(count: draft.alertItems.wrappedValue.count)
+                        draft.alertItems.wrappedValue.append(AlertItem(option: next, customDate: draft.due.wrappedValue))
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus.circle.fill")
+                                .foregroundStyle(AIATheme.blue)
+                            Text("添加提醒时间")
+                                .font(AIATheme.Font.subhead)
+                                .foregroundStyle(AIATheme.blue)
+                        }
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 14)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func alertRowDraft(item: Binding<AlertItem>, draft: Binding<TodoDraft>) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .center, spacing: 4) {
+                Menu {
+                    ForEach(reminderOptions) { option in
+                        Button(option.label) {
+                            item.wrappedValue.option = option
+                            if option == .custom {
+                                draft.editingCustom.wrappedValue = item.wrappedValue
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(item.wrappedValue.option.label)
+                            .font(AIATheme.Font.subhead.weight(.medium))
+                            .foregroundStyle(.primary)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(AIATheme.Font.micro)
+                            .foregroundStyle(AIATheme.muted)
+                    }
+                }
+                .buttonStyle(.plain)
+                Text(formatAlertDraft(item.wrappedValue, due: draft.due.wrappedValue))
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            if item.wrappedValue.option == .custom {
+                Button(formatCustom(item.wrappedValue.customDate)) {
+                    draft.editingCustom.wrappedValue = item.wrappedValue
+                }
+                .font(AIATheme.Font.caption)
+                .foregroundStyle(AIATheme.blue)
+                .padding(.trailing, 4)
+            }
+            Button {
+                draft.alertItems.wrappedValue.removeAll { $0.id == item.wrappedValue.id }
+            } label: {
+                Image(systemName: "minus.circle.fill")
+                    .font(AIATheme.Font.title2)
+                    .foregroundStyle(AIATheme.warn)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+    }
+
+    private func customTimeSheetDraft(item: AlertItem, draft: Binding<TodoDraft>) -> some View {
+        NavigationStack {
+            ZStack {
+                AIATheme.fillSoft.ignoresSafeArea()
+                Form {
+                    DatePicker("提醒时间", selection: Binding(
+                        get: { item.customDate },
+                        set: { newDate in
+                            if let index = draft.alertItems.wrappedValue.firstIndex(where: { $0.id == item.id }) {
+                                draft.alertItems.wrappedValue[index].customDate = newDate
+                            }
+                        }
+                    ), displayedComponents: [.date, .hourAndMinute])
+                }
+            }
+            .navigationTitle("自定义提醒时间")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { draft.editingCustom.wrappedValue = nil }
+                }
+            }
+        }
+    }
+
+    private func formatAlertDraft(_ item: AlertItem, due: Date) -> String {
+        let time = ReminderOption.remindAt(for: due, option: item.option, custom: item.customDate)
+        guard let time else { return "无提醒" }
+        return "将在 \(AppFormat.dateTime.string(from: time)) 提醒"
+    }
+
+    private func defaultNextOptionDraft(count: Int) -> ReminderOption {
+        switch count {
+        case 0:  return .atTime
+        case 1:  return .before30
+        case 2:  return .before1Day
+        case 3:  return .before1Week
+        default: return .atTime
+        }
+    }
+
+    /// 把一张草稿持久化成真实 Reminder（复用 syncAfterLocalChange 触发同步 + 提醒调度）
+    private func persistTodo(_ draft: Binding<TodoDraft>) {
+        var d = draft.wrappedValue
+        let trimmed = d.title.trimmingCharacters(in: .whitespaces)
+        // 方案A：开关打开但无提醒节点时自动补「准时」
+        let effectiveAlerts = (d.hasDue && d.alertItems.isEmpty) ? [AlertItem(option: .atTime, customDate: d.due)] : d.alertItems
+        let times = d.hasDue ? reminderTimes(from: effectiveAlerts, due: d.due) : []
+        let noteEmpty = d.noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        if let r = d.existingReminder {
+            r.title = trimmed.isEmpty ? r.title : trimmed
+            r.due = d.hasDue ? d.due : nil
+            r.priority = d.priority
+            r.repeatRule = d.repeatRule
+            r.done = d.done
+            r.imageName = d.imageName
+            r.remindTimes = times
+            r.remindAt = times.first
+            r.syncUpdatedAt = .now
+            r.syncDeleted = false
+            d.savedReminder = r
+            applyNote(r.syncId, noteEmpty: noteEmpty, note: d.noteText)
+        } else {
+            let r = Reminder(title: trimmed.isEmpty ? "未命名" : trimmed, due: d.hasDue ? d.due : nil, done: d.done)
+            r.priority = d.priority
+            r.repeatRule = d.repeatRule
+            r.remindTimes = times
+            r.remindAt = times.first
+            r.imageName = d.imageName
+            r.syncDeleted = false
+            context.insert(r)
+            d.savedReminder = r
+            applyNote(r.syncId, noteEmpty: noteEmpty, note: d.noteText)
+        }
+        d.saved = true
+        draft.wrappedValue = d
+        try? context.save()
+        CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        if let r = d.savedReminder {
+            if d.done {
+                ReminderNotificationManager.cancel(r)
+            } else if d.hasDue {
+                ReminderNotificationManager.schedule(r)
+            } else {
+                ReminderNotificationManager.cancel(r)
+            }
+        }
+    }
+
+    /// 备注落库（按 syncId 关联 ReminderNote，复用 save() 同款逻辑）
+    private func applyNote(_ syncId: UUID, noteEmpty: Bool, note: String) {
+        let existing = try? context.fetch(FetchDescriptor<ReminderNote>(
+            predicate: #Predicate { $0.syncId == syncId })).first
+        if noteEmpty {
+            if let existing { context.delete(existing) }
+        } else if let existing {
+            existing.note = note
+            existing.updatedAt = Date.now
+        } else {
+            let rn = ReminderNote(syncId: syncId, note: note)
+            context.insert(rn)
+        }
+        try? context.save()
+    }
+
+    /// 删除一张草稿：按钮只记录待删索引（绝不在闭包里改数组/访问 Reminder），
+    /// 点击时即记录待软删的真实 Reminder 的 persistentModelID（与数组索引解耦）；
+    /// 数组移除延后到淡出动画结束后（约 0.1s）无动画执行，
+    /// 使下方内容自动顶上来并滚动；真实软删仍延后到 onDisappear 执行，
+    /// 避免 syncDeleted=true 触发 @Query 重 fetch 与转场动画叠加导致视图树损坏卡死。
+    /// 注意：removeAll 不能包在 withAnimation 里——ForEach($bindings) 转场动画与
+    /// 子视图超长修饰符链（.card() 等）不兼容，动画中途部分修饰符无法平滑插值会令
+    /// 视图树半损坏、动画结束不恢复，表现为卡片背景丢失、页面卡死。opacity 已提供视觉过渡。
+    private func deleteTodoDraft(_ draft: Binding<TodoDraft>, proxy: ScrollViewProxy) {
+        let targetID = draft.wrappedValue.id
+        // 点击当时即记录待软删的真实 Reminder 的 persistentModelID（与数组索引解耦）
+        if let rid = draft.wrappedValue.savedReminder?.persistentModelID
+            ?? draft.wrappedValue.existingReminder?.persistentModelID {
+            pendingDeleteTodoReminderIDs.append(rid)
+        }
+        // 即时移除：ForEach 用稳定 UUID id，SwiftUI 能正确 diff 卸载子视图树，
+        // Binding 随之释放不悬空。延后一帧的 removeAll 反而会在 ScrollView 滚顶
+        // 动画期间触发越界崩溃（见记忆 ID:75222852）。
+        proxy.scrollTo("todoDraftTop", anchor: .top)
+        drafts.removeAll { $0.id == targetID }
+    }
+
+    /// 批量保存所有未保存草稿（toolbar "保存"）
+    private func saveAllTodoDrafts() {
+        // 校验：任一未保存草稿标题为空 → 拦截、不关闭、提示用户
+        let hasEmpty = drafts.contains { !$0.saved && $0.title.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard !hasEmpty else {
+            showEmptyTitleAlert = true
+            return
+        }
+        for i in drafts.indices where !drafts[i].saved {
+            let d = drafts[i]
+            let binding = Binding<TodoDraft>(
+                get: { d },
+                set: { drafts[i] = $0 }
+            )
+            persistTodo(binding)
+        }
+        dismiss()   // 全部入库后自动关闭页面
+    }
 }
 
 // MARK: - 健康指标编辑
@@ -1880,6 +3113,8 @@ struct EditHealthView: View {
     let metric: HealthMetric
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+    /// 识别引擎来源标记（1:1 关联 HealthMetric.syncId）
+    @Query private var recogSources: [RecogSource]
 
     @State private var metricName: String
     @State private var valueText: String
@@ -1894,7 +3129,6 @@ struct EditHealthView: View {
     @State private var showFullImage = false
     @State private var showImageSourceDialog = false
     @State private var showImagePicker = false
-    @State private var showCameraPicker = false
     @State private var pickedImage: UIImage? = nil
 
     init(metric: HealthMetric) {
@@ -1904,6 +3138,13 @@ struct EditHealthView: View {
         _unit = State(initialValue: metric.unit)
         _date = State(initialValue: metric.date)
         _imageName = State(initialValue: metric.imageName)
+        let sid = metric.syncId
+        _recogSources = Query(filter: #Predicate<RecogSource> { $0.syncId == sid })
+    }
+
+    /// 识别引擎来源中文标签（本地AI识别 / 云端AI…），无标记返回 nil
+    private var recogSourceLabel: String? {
+        recogSources.first.flatMap { RecogSource.displayLabel(for: $0.recogSourceRaw) }
     }
 
     var body: some View {
@@ -1935,9 +3176,6 @@ struct EditHealthView: View {
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(image: $pickedImage)
             }
-            .fullScreenCover(isPresented: $showCameraPicker) {
-                CameraPicker(image: $pickedImage)
-            }
             .fullScreenCover(isPresented: $showFullImage) {
                 if let img = LocalImageStore.load(imageName) {
                     FullImageView(image: img)
@@ -1945,7 +3183,13 @@ struct EditHealthView: View {
             }
             .confirmationDialog("添加图片", isPresented: $showImageSourceDialog, titleVisibility: .visible) {
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                    Button("拍照") { showCameraPicker = true }
+                    // 直接弹独立黑窗相机（不经 fullScreenCover，无白屏过渡）；
+                    // 结果写回 pickedImage，触发既有的 onChange 存图逻辑。
+                    Button("拍照") {
+                        CameraPresenter.shared.present { img in
+                            if let img { pickedImage = img }
+                        }
+                    }
                 }
                 Button("从相册选择") { showImagePicker = true }
                 Button("取消", role: .cancel) {}
@@ -1970,6 +3214,20 @@ struct EditHealthView: View {
 
     private var metricCard: some View {
         VStack(spacing: 0) {
+            if let recogSourceLabel {
+                HStack(spacing: 5) {
+                    Image(systemName: "cpu")
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.sub)
+                    Text(recogSourceLabel)
+                        .font(AIATheme.Font.micro.weight(.medium))
+                        .foregroundStyle(AIATheme.sub)
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 4)
+            }
             VStack(alignment: .leading, spacing: 8) {
                 Text("指标")
                     .font(AIATheme.Font.micro)

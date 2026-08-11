@@ -19,11 +19,33 @@ struct SyncStats: Equatable {
     let at: Date
 }
 
-@MainActor
+    @MainActor
 final class CloudSyncManager: ObservableObject {
     static let shared = CloudSyncManager()
 
-    @Published var status: String = "未同步"
+    // 订阅权益阀门：免费版体验模式开关变化时，强制本对象发出 objectWillChange，
+    // 使 status（计算属性，含免费版禁用文案）的消费者能实时刷新。
+    private var entCancellable: AnyObject?
+
+    private init() {
+        let ent = EntitlementManager.shared
+        entCancellable = ent.objectWillChange
+            .sink { [weak self] in
+                self?.objectWillChange.send()
+            }
+    }
+
+    /// 内部原始同步文案（由 sync() 写入）。
+    @Published private(set) var rawStatus: String = "未同步"
+    /// 对外展示的同步状态文案。
+    /// 「免费版体验模式」开启时恒定显示禁用提示，优先级高于任何同步结果，
+    /// 因此开关一变化 `objectWillChange` 即触发、所有消费方实时刷新。
+    var status: String {
+        if EntitlementManager.shared.simulateFree {
+            return "免费版体验模式：云同步已禁用"
+        }
+        return rawStatus
+    }
     @Published var lastSyncAt: Date? = UserDefaults.standard.object(forKey: "aia_last_sync") as? Date
     @Published var isSyncing: Bool = false
     /// 上一次同步的增量对比数据；初始为 nil（尚未同步过）。
@@ -151,8 +173,8 @@ final class CloudSyncManager: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: "aia_auto_sync") }
     }
 
-    private static let syncEndpoint: URL = {
-        let base = RecognizeService.endpoint.absoluteString
+    private nonisolated static let syncEndpoint: URL = {
+        let base = "https://cloud1-d1ga55pizf294dbe9-1445590522.ap-shanghai.app.tcloudbase.com/recognize"
         let url = base.replacingOccurrences(of: "/recognize", with: "/sync")
         return URL(string: url)!
     }()
@@ -204,6 +226,9 @@ final class CloudSyncManager: ObservableObject {
         // 否则后台 push 会读到旧游标导致本次只做增量而非全量。
         UserDefaults.standard.removeObject(forKey: "aia_last_sync")
         Task { @MainActor in
+            // 0) 冷静期恢复：若本账号处于「已申请注销但未超 N 天」状态，先撤销待删标记，
+            //    随后下面的全量同步会把云端保留的数据拉回（= 自动反悔，无感恢复）。
+            await Self.cancelPendingDelete()
             await sync(context: context)
             // 登录后自动恢复小程序绑定（重装后重登 Apple/微信 场景）：
             // pull 时已把云端备份的绑定码写入 aia_pending_mini_bind_code，这里消费并完成重绑 + 全量重同步。
@@ -242,8 +267,14 @@ final class CloudSyncManager: ObservableObject {
     // MARK: - 主流程：先推后拉
     func sync(context: ModelContext) async {
         guard !isSyncing else { return }
+        // 免费版体验模式：云同步（push/pull）一律不可用，与真实免费档一致。
+        if EntitlementManager.shared.simulateFree {
+            rawStatus = "免费版体验模式：云同步已禁用"
+            isSyncing = false
+            return
+        }
         isSyncing = true
-        status = "同步中…"
+        rawStatus = "同步中…"
         let uid = Self.userId
         print("[sync] 开始同步 userId=\(uid)")
         do {
@@ -251,8 +282,9 @@ final class CloudSyncManager: ObservableObject {
             // 的逐条 fetch + insert 占满，导致界面完全卡死（触摸事件排不进主线程）。
             // 后台一次性 save 后，主上下文因 automaticallyMergesChangesFromParent=true 自动合并，
             // @Query 只重渲一次，不再每条插入触发一次重渲。
+            let container = AppDelegate.sharedContainer
             let (pushed, pulled) = try await Task.detached(priority: .userInitiated) { () -> ((sent: Int, upserted: Int, localTotal: Int), Int) in
-                guard let container = AppDelegate.sharedContainer else { return ((sent: 0, upserted: 0, localTotal: 0), 0) }
+                guard let container = container else { return ((sent: 0, upserted: 0, localTotal: 0), 0) }
                 let bg = ModelContext(container)
                 bg.autosaveEnabled = false
                 let pushed = try await Self.push(context: bg)
@@ -275,10 +307,10 @@ final class CloudSyncManager: ObservableObject {
                 skipped: max(0, pushed.localTotal - pushed.sent),
                 at: now
             )
-            status = "已同步 · 上传 \(pushed.upserted) 条 / 更新 \(pulled) 条"
+            rawStatus = "已同步 · 上传 \(pushed.upserted) 条 / 更新 \(pulled) 条"
             print("[sync] 同步完成 · 上传对比 → 发送 \(pushed.sent) 条 / 云端实际写入 \(pushed.upserted) 条 | 拉取 \(pulled) 条, userId=\(uid)")
         } catch {
-            status = "同步失败：\(error.localizedDescription)"
+            rawStatus = "同步失败：\(error.localizedDescription)"
             print("[sync] 同步失败：\(error.localizedDescription), userId=\(uid)")
         }
         isSyncing = false
@@ -376,6 +408,9 @@ final class CloudSyncManager: ObservableObject {
                                     "protein": f.protein,
                                     "carbs": f.carbs,
                                     "fat": f.fat,
+                                    "fiber": f.fiber as Any,
+                                    "sugar": f.sugar as Any,
+                                    "sodium": f.sodium as Any,
                                     "portion": f.portion,
                                     "meal": f.meal,
                                     "date": f.date.timeIntervalSince1970,
@@ -383,7 +418,10 @@ final class CloudSyncManager: ObservableObject {
                                     "baseCalories": f.baseCalories as Any,
                                     "baseProtein": f.baseProtein as Any,
                                     "baseCarbs": f.baseCarbs as Any,
-                                    "baseFat": f.baseFat as Any
+                                    "baseFat": f.baseFat as Any,
+                                    "baseFiber": f.baseFiber as Any,
+                                    "baseSugar": f.baseSugar as Any,
+                                    "baseSodium": f.baseSodium as Any
                                   ]))
             }
         }
@@ -408,6 +446,7 @@ final class CloudSyncManager: ObservableObject {
             if let v = s.sleep { payload["sleep"] = v }
             if let v = s.exercise { payload["exercise"] = v }
             if let v = s.calories { payload["calories"] = v }
+            if let v = s.heartRate { payload["heartRate"] = v }
             items.append(item(id: s.id, type: "manualHealth", updatedAt: s.updatedAt, deleted: false, payload: payload))
         }
         if let recognitions = try? context.fetch(FetchDescriptor<RecognitionRecord>(predicate: #Predicate { $0.syncUpdatedAt > sinceDate })) {
@@ -449,7 +488,7 @@ final class CloudSyncManager: ObservableObject {
                                   ]))
             }
         }
-        // 饮水（WaterLog）—— 让阿宝可经云端管理
+        // 饮水（WaterLog）—— 让好好记可经云端管理
         if let waters = try? context.fetch(FetchDescriptor<WaterLog>(predicate: #Predicate { $0.syncUpdatedAt > sinceDate })) {
             totalFetched += (try? context.fetchCount(FetchDescriptor<WaterLog>())) ?? 0
             print("[sync] 本地 waters 增量(脏) = \(waters.count)")
@@ -461,7 +500,24 @@ final class CloudSyncManager: ObservableObject {
                                   ]))
             }
         }
-        // 周期排程（RecurringRule）—— 让阿宝可经云端管理
+        // 睡眠（SleepSession）—— 手动入睡/醒来记录，自动记时长，让好好记可经云端管理
+        if let sleeps = try? context.fetch(FetchDescriptor<SleepSession>(predicate: #Predicate { $0.syncUpdatedAt > sinceDate })) {
+            totalFetched += (try? context.fetchCount(FetchDescriptor<SleepSession>())) ?? 0
+            print("[sync] 本地 sleeps 增量(脏) = \(sleeps.count)")
+            for s in sleeps {
+                let payload: [String: Any] = [
+                    "sleepStart": s.sleepStart.timeIntervalSince1970,
+                    "wakeAt": s.wakeAt.map { $0.timeIntervalSince1970 } ?? 0,
+                    "wakeAtNil": s.wakeAt == nil,
+                    "durationSeconds": s.durationSeconds.map { $0 } ?? 0,
+                    "durationNil": s.durationSeconds == nil,
+                    "createdAt": s.syncUpdatedAt.timeIntervalSince1970
+                ]
+                items.append(item(id: s.syncId, type: "sleep", updatedAt: s.syncUpdatedAt,
+                                  deleted: s.syncDeleted, payload: payload))
+            }
+        }
+        // 周期排程（RecurringRule）—— 让好好记可经云端管理
         if let rules = try? context.fetch(FetchDescriptor<RecurringRule>(predicate: #Predicate { $0.syncUpdatedAt > sinceDate })) {
             totalFetched += (try? context.fetchCount(FetchDescriptor<RecurringRule>())) ?? 0
             print("[sync] 本地 rules 增量(脏) = \(rules.count)")
@@ -513,7 +569,8 @@ final class CloudSyncManager: ObservableObject {
                 "targetHeightCm": UserDefaults.standard.double(forKey: "aia.targetHeightCm"),
                 "stepGoal":       UserDefaults.standard.integer(forKey: "aia.stepGoal"),
                 "sleepGoalHours": UserDefaults.standard.double(forKey: "aia.sleepGoalHours"),
-                "exerciseGoalMin":UserDefaults.standard.double(forKey: "aia.exerciseGoalMin")
+                "exerciseGoalMin":UserDefaults.standard.double(forKey: "aia.exerciseGoalMin"),
+                "fitnessGoal":    UserDefaults.standard.string(forKey: "aia.fitnessGoal") ?? "maintain"
             ]
             items.append(item(id: Self.profileHealthRecordId(for: Self.userId),
                               type: "profile",
@@ -577,6 +634,8 @@ final class CloudSyncManager: ObservableObject {
                 merged += applyChat(context: context, id: id, remoteDate: remoteDate, deleted: deleted, payload: payload)
             case "water":
                 merged += applyWater(context: context, id: id, remoteDate: remoteDate, deleted: deleted, payload: payload)
+            case "sleep":
+                merged += applySleep(context: context, id: id, remoteDate: remoteDate, deleted: deleted, payload: payload)
             case "recurring_rule":
                 merged += applyRecurring(context: context, id: id, remoteDate: remoteDate, deleted: deleted, payload: payload)
             case "profile":
@@ -719,7 +778,7 @@ final class CloudSyncManager: ObservableObject {
             let exW = existing ?? 0
             if inW > 0 { return inW }
             if exW > 0 { return exW }
-            return RecognitionSaver.weightFromPortion(portion)
+            return RecognitionSaver.weightFromPortion(portion) ?? 100
         }
         func resolveBase(_ incoming: Double?, _ total: Double, _ w: Double, _ existing: Double?) -> Double? {
             if let b = incoming, b > 0 { return b }
@@ -834,6 +893,35 @@ final class CloudSyncManager: ObservableObject {
         }
     }
 
+    private static nonisolated func applySleep(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
+        if let existing = (try? context.fetch(FetchDescriptor<SleepSession>(predicate: #Predicate { $0.syncId == id })))?.first {
+            if deleted { context.delete(existing); return 1 }
+            guard existing.syncUpdatedAt < remoteDate else { return 0 }
+            if let v = payload["sleepStart"] as? Double { existing.sleepStart = Date(timeIntervalSince1970: v) }
+            if (payload["wakeAtNil"] as? Bool) == true {
+                existing.wakeAt = nil
+            } else if let v = payload["wakeAt"] as? Double {
+                existing.wakeAt = Date(timeIntervalSince1970: v)
+            }
+            if (payload["durationNil"] as? Bool) == true {
+                existing.durationSeconds = nil
+            } else if let v = payload["durationSeconds"] as? Double {
+                existing.durationSeconds = v
+            }
+            existing.syncUpdatedAt = remoteDate
+            return 1
+        } else {
+            if deleted { return 0 }
+            let sleepStart = (payload["sleepStart"] as? Double).map { Date(timeIntervalSince1970: $0) } ?? Date()
+            let wakeAt = (payload["wakeAt"] as? Double).flatMap { (payload["wakeAtNil"] as? Bool) == true ? nil : Date(timeIntervalSince1970: $0) }
+            let durationSeconds = (payload["durationSeconds"] as? Double).flatMap { (payload["durationNil"] as? Bool) == true ? nil : $0 }
+            let s = SleepSession(sleepStart: sleepStart, wakeAt: wakeAt, durationSeconds: durationSeconds,
+                                 syncId: id, syncUpdatedAt: remoteDate)
+            context.insert(s)
+            return 1
+        }
+    }
+
     private static nonisolated func applyRecurring(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
         if let existing = (try? context.fetch(FetchDescriptor<RecurringRule>(predicate: #Predicate { $0.syncId == id })))?.first {
             if deleted { context.delete(existing); return 1 }
@@ -886,11 +974,13 @@ final class CloudSyncManager: ObservableObject {
             return 1
         } else {
             if deleted { return 0 }
-            let h = HealthMetric(metric: payload["metric"] as? String ?? "",
-                                 value: payload["value"] as? String ?? "",
-                                 unit: payload["unit"] as? String ?? "",
-                                 date: Date(timeIntervalSince1970: payload["date"] as? Double ?? Date().timeIntervalSince1970),
-                                 syncId: id, syncUpdatedAt: remoteDate)
+            let h = HealthMetric()
+            h.metric = payload["metric"] as? String ?? ""
+            h.value = payload["value"] as? String ?? ""
+            h.unit = payload["unit"] as? String ?? ""
+            h.date = Date(timeIntervalSince1970: payload["date"] as? Double ?? Date().timeIntervalSince1970)
+            h.syncId = id
+            h.syncUpdatedAt = remoteDate
             context.insert(h)
             return 1
         }
@@ -911,7 +1001,8 @@ final class CloudSyncManager: ObservableObject {
             steps: payload["steps"] as? Int,
             sleep: payload["sleep"] as? Double,
             exercise: payload["exercise"] as? Int,
-            calories: payload["calories"] as? Int
+            calories: payload["calories"] as? Int,
+            heartRate: payload["heartRate"] as? Int
         ))
         return 1
     }
@@ -970,6 +1061,7 @@ final class CloudSyncManager: ObservableObject {
             if let v = payload["stepGoal"]        as? Int    { UserDefaults.standard.set(v, forKey: "aia.stepGoal") }
             if let v = payload["sleepGoalHours"]  as? Double { UserDefaults.standard.set(v, forKey: "aia.sleepGoalHours") }
             if let v = payload["exerciseGoalMin"] as? Double { UserDefaults.standard.set(v, forKey: "aia.exerciseGoalMin") }
+            if let v = payload["fitnessGoal"]     as? String { UserDefaults.standard.set(v, forKey: "aia.fitnessGoal") }
             UserDefaults.standard.set(remoteDate.timeIntervalSince1970, forKey: "userProfileUpdatedAt")
             merged += 1
         }
@@ -1055,6 +1147,9 @@ final class CloudSyncManager: ObservableObject {
         if let waters = try? context.fetch(FetchDescriptor<WaterLog>(predicate: #Predicate { $0.syncDeleted == true })) {
             for w in waters { context.delete(w); total += 1 }
         }
+        if let sleeps = try? context.fetch(FetchDescriptor<SleepSession>(predicate: #Predicate { $0.syncDeleted == true })) {
+            for s in sleeps { context.delete(s); total += 1 }
+        }
         if let rules = try? context.fetch(FetchDescriptor<RecurringRule>(predicate: #Predicate { $0.syncDeleted == true })) {
             for r in rules { context.delete(r); total += 1 }
         }
@@ -1064,11 +1159,18 @@ final class CloudSyncManager: ObservableObject {
 
     // MARK: - 网络
     private static nonisolated func postJSON(_ body: [String: Any]) async throws -> [String: Any] {
+        // 注入付费墙身份锚点与订阅/试用状态（push 由服务端按此判定是否放行；pull 不受影响）。
+        let snap = await MainActor.run { EntitlementManager.shared.snapshot() }
+        var merged = body
+        merged["isPaid"] = snap.isPaid
+        merged["trialActive"] = snap.trialActive
+        merged["deviceId"] = snap.deviceId
+
         var req = URLRequest(url: Self.syncEndpoint)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 60
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        req.httpBody = try JSONSerialization.data(withJSONObject: merged)
 
         let (data, response) = try await URLSession.shared.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -1081,6 +1183,10 @@ final class CloudSyncManager: ObservableObject {
                           userInfo: [NSLocalizedDescriptionKey: "返回格式异常"])
         }
         guard (json["ok"] as? Bool) != false else {
+            // 付费墙：push 被拦截（试用/订阅到期，免费额度不覆盖 push）→ 抛出可识别错误，调用方停止重试。
+            if let code = json["code"] as? String, code == "sync_push_blocked" {
+                throw AIAEntitlementError(code: code)
+            }
             throw NSError(domain: "Sync", code: -2,
                           userInfo: [NSLocalizedDescriptionKey: json["error"] as? String ?? "同步失败"])
         }
@@ -1148,5 +1254,88 @@ final class CloudSyncManager: ObservableObject {
             print("[sync] listLinkedAccounts 失败: \(error.localizedDescription)")
             return []
         }
+    }
+
+    // MARK: - 应用内账户删除（苹果 Guideline 5.1.1(v) 强制）
+    /// 永久注销当前账号：云端删除该登录账号分区全部数据 → 本地全量清空 → 登出回登录页。
+    /// - 若绑定了小程序，仅清本地绑定码（不触发同步），避免把数据误推到小程序分区；
+    ///   小程序原生分区数据由小程序侧管理，不连带删除。
+    /// - 订阅需由用户在系统「设置 → Apple ID → 订阅」中先行取消，App 内无法代取消。
+    func deleteAccount(context: ModelContext) async {
+        let loginId = AuthManager.shared.userId
+        // 1) 解绑小程序（仅清本地绑定码，避免触发 sync 误推数据到小程序分区）
+        if Self.boundMiniProgramCode != nil {
+            UserDefaults.standard.removeObject(forKey: "aia_bound_user_id")
+            UserDefaults.standard.removeObject(forKey: "aia_pending_mini_bind_code")
+        }
+        // 2) 云端删除该登录账号分区全部数据（含关联映射 / 设备 / 额度）
+        let body: [String: Any] = ["action": "deleteAccount", "userId": loginId]
+        if let _ = try? await Self.postJSON(body) {
+            print("[sync] 云端账户删除成功 userId=\(loginId)")
+        } else {
+            print("[sync] 云端账户删除失败（仍继续本地清空）userId=\(loginId)")
+        }
+        // 3) 本地全量清空
+        if let container = AppDelegate.sharedContainer {
+            await Self.clearLocalAll(container: container)
+        }
+        UserDefaults.standard.removeObject(forKey: "aia_last_sync")
+        ManualHealthStore.shared.clearAll()
+        // 4) 清 Keychain 登录态并回登录页
+        AuthManager.shared.logout()
+    }
+
+    /// 撤销待删（冷静期内重新登录时调用）：若云端有本账号的待删登记且未超期，撤销之，
+    /// 业务数据自然保留，随后 `syncAfterLogin` 的全量同步会把云端数据拉回（= 自动反悔、无感恢复）。
+    /// 若已超期则云端顺手真删；若无待删记录则正常同步即可。返回是否成功恢复数据。
+    /// 云端语义变更见 `云函数/aia-sync/index.js` 的 `handleDeleteAccount`/`handleCancelDelete`：
+    /// 删除账户已改为「标记待删 + N 天冷静期」，不再即时真删。
+    @discardableResult
+    static func cancelPendingDelete() async -> Bool {
+        let loginId = AuthManager.shared.userId
+        guard !loginId.isEmpty else { return false }
+        let body: [String: Any] = ["action": "cancelDelete", "userId": loginId]
+        guard let resp = try? await Self.postJSON(body),
+              let ok = resp["ok"] as? Bool, ok else {
+            print("[sync] 撤销待删请求失败（忽略，正常同步）")
+            return false
+        }
+        let restored = (resp["restored"] as? Bool) == true
+        if restored {
+            // 仅主线程可更新 @MainActor 的 ToastCenter。
+            Task { @MainActor in
+                ToastCenter.shared.showImportant(
+                    "检测到你曾申请注销账户，已为你保留全部数据（冷静期内）。如需彻底注销，请到设置重新申请。",
+                    icon: "🛡️",
+                    accent: AIATheme.bill
+                )
+            }
+        }
+        return restored
+    }
+
+    /// 后台 ModelContext 全量删除所有业务模型（不阻塞主线程）。
+    private static func clearLocalAll(container: ModelContainer) async {
+        await Task.detached(priority: .userInitiated) {
+            let bg = ModelContext(container)
+            bg.autosaveEnabled = false
+            do {
+                let bills = try bg.fetch(FetchDescriptor<Bill>()); bills.forEach { bg.delete($0) }
+                let foods = try bg.fetch(FetchDescriptor<FoodEntry>()); foods.forEach { bg.delete($0) }
+                let reminders = try bg.fetch(FetchDescriptor<Reminder>()); reminders.forEach { bg.delete($0) }
+                let healths = try bg.fetch(FetchDescriptor<HealthMetric>()); healths.forEach { bg.delete($0) }
+                let recs = try bg.fetch(FetchDescriptor<RecognitionRecord>()); recs.forEach { bg.delete($0) }
+                let chats = try bg.fetch(FetchDescriptor<ChatMessage>()); chats.forEach { bg.delete($0) }
+                let metas = try bg.fetch(FetchDescriptor<MerchantMeta>()); metas.forEach { bg.delete($0) }
+                let waters = try bg.fetch(FetchDescriptor<WaterLog>()); waters.forEach { bg.delete($0) }
+                let sleeps = try bg.fetch(FetchDescriptor<SleepSession>()); sleeps.forEach { bg.delete($0) }
+                let rules = try bg.fetch(FetchDescriptor<RecurringRule>()); rules.forEach { bg.delete($0) }
+                let sources = try bg.fetch(FetchDescriptor<FoodSource>()); sources.forEach { bg.delete($0) }
+                try bg.save()
+                print("[sync] 本地全量清空完成")
+            } catch {
+                print("[sync] 本地全量清空失败：\(error.localizedDescription)")
+            }
+        }.value
     }
 }

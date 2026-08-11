@@ -7,7 +7,7 @@ import Combine
 enum QuickAction: String {
     case camera = "com.aia.shortcut.camera"   // 拍照记录
     case voice  = "com.aia.shortcut.voice"    // 语音记录
-    case chat   = "com.aia.shortcut.chat"     // 问阿宝AI
+    case chat   = "com.aia.shortcut.chat"     // 问好好记
     case todo   = "com.aia.shortcut.todo"     // 查待办
 }
 
@@ -32,8 +32,29 @@ final class NavigationRouter: ObservableObject {
     @Published var chatPrefill: String?
     /// 进入聊天页的来源描述（home / voice / todoReminder），传给 ChatView.entrySource
     @Published var chatEntrySource: String = "home"
+    /// 进入对话页时是否自动聚焦输入框（仅首页文字输入框置 true，其余场景不弹键盘）
+    @Published var chatAutoFocus = false
+
+    /// 「本次对话会话」起点锚点：由发起方在往对话流插入本次第一条新消息**之前**打点。
+    /// ChatView.onAppear 据此区分「历史消息」（createdAt < anchor）与「本次会话新增」（>= anchor），
+    /// 把招呼气泡钉在两者之间。ChatView 出现时消费一次即清零，避免陈旧锚点影响下次进入。
+    ///
+    /// 为什么不用固定时间窗口：旧实现取「进入时刻往前 1s」当分界，
+    /// 但首页发图链路是「同步插图 → push → 渲染 → onAppear」，慢设备/冷启动下这段延迟可能 > 1s，
+    /// 窗口会反向把刚插的新图算成历史，招呼气泡被钉到图片之后（用户实测到的 bug）。
+    /// 绝对锚点由发起方打点，不受渲染 / 动画 / 识别耗时影响。
+    ///
+    /// 注意：刻意用普通 var 而非 @Published —— 没有视图需要观察它，
+    /// 且它会在 onAppear 里被写入，@Published 会触发 "Publishing changes from within view updates" 警告。
+    var chatSessionAnchor: Date?
 
     private init() {}
+
+    /// 在插入本次会话第一条新消息（用户发图气泡 / 识别结果卡）之前调用，标记会话起点。
+    /// 必须早于任何 `context.insert(ChatMessage(...))`，否则新消息会被 ChatView 误判为历史。
+    func beginChatSession(at date: Date = .now) {
+        chatSessionAnchor = date
+    }
 
     /// 跳转文字对话页；`prefill` 会填入输入框并自动发送（用于各模块空态 CTA）。
     func navigateToChat(prefill: String? = nil) {
@@ -43,6 +64,12 @@ final class NavigationRouter: ObservableObject {
         } else {
             self.chatEntrySource = "home"
         }
+        self.navigate(.chat)
+    }
+
+    /// 从首页文字输入框进入：自动聚焦输入框、升起键盘。
+    func navigateToChatAutofocus() {
+        self.chatAutoFocus = true
         self.navigate(.chat)
     }
 
@@ -58,6 +85,7 @@ final class NavigationRouter: ObservableObject {
         case push(HomeRoute)
         case replace(HomeRoute)
         case pop
+        case popToRoot
     }
     private var pendingOp: NavOp?
     private var flushScheduled = false
@@ -92,7 +120,13 @@ final class NavigationRouter: ObservableObject {
             case .push(let r):    if self.path.last != r { self.path.append(r) }
             case .replace(let r): self.path = [r]
             case .pop:            if !self.path.isEmpty { self.path.removeLast() }
+            case .popToRoot:      self.path = []
             }
         }
+    }
+
+    /// 强制回首页根：清空整条导航栈，无论当前停在哪个深层页都弹回首页宫格主界面。
+    func popToRoot() {
+        enqueue(.popToRoot)
     }
 }

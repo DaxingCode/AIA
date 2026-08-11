@@ -1,6 +1,6 @@
 // OnboardingView.swift
-// 首次启动引导：多页轮播，介绍阿宝能做什么，并重点指向「快捷指令」配置
-// （截图无感识别 + 跟阿宝说一句话记账/提醒）。最后一步"开始使用"由调用方标记完成。
+// 首次启动引导：多页轮播，介绍好好记能做什么，并重点指向「快捷指令」配置
+// （截图无感识别 + 跟好好记说一句话记账/提醒）。最后一步"开始使用"由调用方标记完成。
 import SwiftUI
 import UIKit
 
@@ -115,7 +115,7 @@ struct OnboardingView: View {
     // MARK: - 普通页（欢迎 / 截图 / 语音 / 完成）
     private var welcomePage: some View {
         pageContent(kind: .welcome,
-                    title: "你好，我是阿宝 👋",
+                    title: "你好，我是小记 👋",
                     message: "你的专属AI助理，自动记账、记待办、记饮食、管健康，一个App全搞定")
     }
     private var screenshotPage: some View {
@@ -126,32 +126,32 @@ struct OnboardingView: View {
     private var payScreenshotPage: some View {
         pageContent(kind: .screenshot,
                     title: "付款后截屏自动记账",
-                    message: "付款完成，截一张屏，阿宝自动识别金额与商户并记账，不用手动填")
+                    message: "付款完成，截一张屏，小记自动识别金额与商户并记账，不用手动填")
     }
     private var payFoodPage: some View {
         pageContent(kind: .diet,
                     title: "吃饭拍照自动记营养",
-                    message: "吃饭时拍张照，阿宝自动识别热量、卡路里与营养元素，饮食管理零负担")
+                    message: "吃饭时拍张照，小记自动识别热量、卡路里与营养元素，饮食管理零负担")
     }
     private var notifyScreenshotPage: some View {
         pageContent(kind: .todo,
                     title: "收到通知截屏记待办",
-                    message: "收到通知时截一张屏，阿宝自动建好待办，并在指定时间提醒你")
+                    message: "收到通知时截一张屏，小记自动建好待办，并在指定时间提醒你")
     }
     private var voiceScenarioPage: some View {
         pageContent(kind: .voice,
                     title: "记账、待办、饮食，一句话搞定",
-                    message: "跟阿宝说「中午吃烤肉花了50元」，自动记一笔账单和烤肉热量\n跟阿宝说「周五提醒我交报表」，自动记好周五的待办，会自动提醒哦")
+                    message: "跟小记说「中午吃烤肉花了50元」，自动记一笔账单和烤肉热量\n跟小记说「周五提醒我交报表」，自动记好周五的待办，会自动提醒哦")
     }
     private var siriPage: some View {
         pageContent(kind: .siri,
                     title: "通过Siri记账、记待办、记饮食",
-                    message: "跟Siri说「用阿宝AI管家记」，就可以自动记账、记饮食、记待办，到点自动提醒")
+                    message: "跟Siri说「用好记」，就可以自动记账、记饮食、记待办，到点自动提醒")
     }
     private var askPage: some View {
         pageContent(kind: .ask,
-                    title: "都可以问阿宝 AI",
-                    message: "账单、饮食、待办、运动、睡眠、健康管理，都可以问「阿宝 AI」")
+                    title: "都可以问小记",
+                    message: "账单、饮食、待办、运动、睡眠、健康管理，都可以问「小记」")
     }
     private var healthPage: some View {
         pageContent(kind: .health,
@@ -167,7 +167,7 @@ struct OnboardingView: View {
                 Text("桌面长按，更快一步")
                     .font(AIATheme.Font.title1.weight(.bold))
                     .foregroundStyle(.primary)
-                Text("在手机桌面长按「阿宝AI管家」图标，无需打开 App 就能一键：")
+                Text("在手机桌面长按「好记」图标，无需打开 App 就能一键：")
                     .font(AIATheme.Font.callout)
                     .foregroundStyle(AIATheme.sub)
                     .multilineTextAlignment(.center)
@@ -178,7 +178,7 @@ struct OnboardingView: View {
             .padding(.bottom, 20)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 quickActionGridItem(icon: "checklist", text: "查待办", color: AIATheme.todo)
-                quickActionGridItem(icon: "bubble.left.fill", text: "问阿宝AI", color: AIATheme.blue)
+                quickActionGridItem(icon: "bubble.left.fill", text: "问小记", color: AIATheme.blue)
                 quickActionGridItem(icon: "camera.fill", text: "拍照记录", color: AIATheme.food)
                 quickActionGridItem(icon: "mic.fill", text: "语音记录", color: AIATheme.health)
             }
@@ -212,7 +212,7 @@ struct OnboardingView: View {
     private var donePage: some View {
         pageContent(kind: .welcome,
                     title: "一切就绪 🎉",
-                    message: "现在就去截张图，或跟阿宝说句话试试吧。随时在「设置 → 重新查看新人引导」回看。")
+                    message: "现在就去截张图，或跟小记说句话试试吧。随时在「设置 → 重新查看新人引导」回看。")
     }
 
     private func pageContent(kind: IllustrationView.Kind, title: String, message: String) -> some View {
@@ -282,7 +282,7 @@ struct OnboardingView: View {
                     .foregroundStyle(.primary)
             }
 
-            Text("添加「阿宝AI自动记账、记待办、记饮食」快捷指令；已安装同名指令时，请选择「替换」操作。")
+            Text("添加「小记自动记账、记待办、记饮食」快捷指令；已安装同名指令时，请选择「替换」操作。")
                 .font(AIATheme.Font.footnote)
                 .foregroundStyle(AIATheme.sub)
                 .lineSpacing(3)

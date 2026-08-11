@@ -31,11 +31,7 @@ struct IllustrationView: View {
 
     var body: some View {
         ZStack {
-            // 柔和光晕
-            Circle()
-                .fill(palette.primary.opacity(0.12))
-                .frame(width: size * 1.35, height: size * 1.35)
-            // 主图形：渐变圆角方块
+            // 主图形：渐变圆角方块（2026-08-05 删掉外层光晕 Circle，保留渐变方块本体）
             RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
                 .fill(LinearGradient(colors: [palette.primary, palette.secondary],
                                      startPoint: .topLeading, endPoint: .bottomTrailing))
@@ -53,7 +49,7 @@ struct IllustrationView: View {
                 .background(Circle().fill(Color(.systemBackground)).frame(width: size * 0.28, height: size * 0.28))
                 .offset(x: size * 0.4, y: -size * 0.4)
         }
-        .frame(width: size * 1.5, height: size * 1.5)
+        .frame(width: size, height: size)
     }
 }
 
@@ -132,7 +128,7 @@ struct HomeScreenQuickActionsIllustration: View {
     private var menuItems: [MenuItem] {
         [
             MenuItem(icon: "checklist", title: "查待办", color: AIATheme.todo),
-            MenuItem(icon: "bubble.left.fill", title: "问阿宝AI", color: AIATheme.blue),
+            MenuItem(icon: "bubble.left.fill", title: "问小记", color: AIATheme.blue),
             MenuItem(icon: "camera.fill", title: "拍照记录", color: AIATheme.food),
             MenuItem(icon: "mic.fill", title: "语音记录", color: AIATheme.health)
         ]

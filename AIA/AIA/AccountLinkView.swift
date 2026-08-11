@@ -3,10 +3,14 @@
 // 合并各自云端数据。关联成功后触发一次全量重同步（syncAfterLogin 已重置同步游标），
 // 把合并进主账号分区的数据拉回当前设备。
 import SwiftUI
+import SwiftData
 
 struct AccountLinkView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var auth: AuthManager
+
+    @StateObject private var sync = CloudSyncManager.shared
 
     @State private var stage: LinkStage = .options
     @State private var isLinking = false
@@ -15,6 +19,10 @@ struct AccountLinkView: View {
     @State private var linkSucceeded = false
     @State private var linkedMethods: [String] = []
     @State private var pendingUnlink: String? = nil
+
+    // 绑定小程序相关
+    @State private var bindCodeInput = ""
+    @State private var showUnbindConfirm = false
 
     private enum LinkStage { case options, phone }
 
@@ -57,7 +65,11 @@ struct AccountLinkView: View {
                 }
             } message: {
                 if let method = pendingUnlink {
-                    Text("确定解除「\(methodInfo(method).title)」与当前账号的关联吗？已合并的数据不会自动退回。")
+                    if method.hasPrefix("wx_") {
+                        Text("解除绑定后，账号数据将切回当前账号分区，小程序内的数据不会自动退回。")
+                    } else {
+                        Text("确定解除「\(methodInfo(method).title)」与当前账号的关联吗？已合并的数据不会自动退回。")
+                    }
                 }
             }
             .overlay {
@@ -76,6 +88,7 @@ struct AccountLinkView: View {
         ScrollView {
             VStack(spacing: 16) {
                 infoCard
+                miniProgramBindCard
                 linkRow(title: "关联手机号",
                         subtitle: "用另一个手机号登录，把该手机号下的数据合并到当前账号",
                         icon: "phone.fill") {
@@ -125,7 +138,7 @@ struct AccountLinkView: View {
                 Text(info.title)
                     .font(AIATheme.Font.subhead.weight(.medium))
                     .foregroundStyle(.primary)
-                Text("已关联，可合并数据")
+                Text(method.hasPrefix("wx_") ? "已绑定同步码，数据与该小程序互通" : "已关联，可合并数据")
                     .font(AIATheme.Font.caption)
                     .foregroundStyle(AIATheme.muted)
             }
@@ -149,7 +162,7 @@ struct AccountLinkView: View {
         } else if userId.hasPrefix("apple_") {
             return ("Apple 账号", "apple.logo")
         } else if userId.hasPrefix("wx_") {
-            return ("微信同步码", "bubble.left.fill")
+            return ("小程序", "qrcode")
         }
         return (userId, "link")
     }
@@ -161,8 +174,98 @@ struct AccountLinkView: View {
 
     @MainActor
     private func loadLinkedMethods() async {
-        let list = await CloudSyncManager.listLinkedAccounts(primary: auth.userId)
+        let cloud = await CloudSyncManager.listLinkedAccounts(primary: auth.userId)
+        var list = cloud.filter { !$0.hasPrefix("wx_") }
+        // 已绑定的小程序不存云端 link 表（绑定=切换同步分区，非合并映射），
+        // 本地 UserDefaults 的 aia_bound_user_id 才是事实来源；置顶展示。
+        if let wx = CloudSyncManager.boundMiniProgramCode, !wx.isEmpty, !list.contains(wx) {
+            list.insert(wx, at: 0)
+        }
         self.linkedMethods = list
+    }
+
+    // MARK: - 绑定小程序（跨端数据互通）
+    private var miniProgramBindCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("绑定小程序", systemImage: "link.badge.plus")
+                    .font(AIATheme.Font.subhead.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            if let bound = CloudSyncManager.boundMiniProgramCode {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("已绑定小程序")
+                            .font(AIATheme.Font.caption)
+                            .foregroundStyle(AIATheme.muted)
+                        Text(bound)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(AIATheme.sub)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Button {
+                        showUnbindConfirm = true
+                    } label: {
+                        Text("解绑")
+                            .font(AIATheme.Font.subhead.weight(.medium))
+                            .foregroundStyle(AIATheme.warn)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(AIATheme.warn.opacity(0.1))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+                Text("已与「好好吃饭 AI 助理」小程序绑定，饮食 / 饮水 / 待办 / 健康数据与目标设置自动互通。")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                    .lineSpacing(2)
+            } else {
+                TextField("粘贴小程序同步码（wx_ 开头）", text: $bindCodeInput)
+                    .font(AIATheme.Font.footnote)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .padding(10)
+                    .background(AIATheme.fillSoft)
+                    .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+                Button {
+                    let ok = sync.bindMiniProgram(code: bindCodeInput, context: modelContext)
+                    if ok {
+                        bindCodeInput = ""
+                        Task { await loadLinkedMethods() }
+                    } else {
+                        resultMessage = "同步码格式不正确"
+                        showResult = true
+                    }
+                } label: {
+                    Text("绑定")
+                        .font(AIATheme.Font.body.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(12)
+                        .background(AIATheme.blue)
+                        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+                }
+                .buttonStyle(.plain)
+                .disabled(bindCodeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Text("在小程序「我的 → 好记App绑定码」复制同步码并粘贴到这里即可互通。同步码即小程序的分区键，不会泄露你的微信号。")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                    .lineSpacing(2)
+            }
+        }
+        .padding(14)
+        .card()
+        .confirmationDialog("解绑小程序", isPresented: $showUnbindConfirm, titleVisibility: .visible) {
+            Button("解绑", role: .destructive) {
+                sync.unbindMiniProgram(context: modelContext)
+                Task { await loadLinkedMethods() }
+            }
+            Button("取消", role: .cancel) { }
+        } message: {
+            Text("解绑后将停止与小程序共享数据，App 回到原同步账号。已同步到小程序分区的数据仍保留在云端，不会删除。")
+        }
     }
 
     private var infoCard: some View {
@@ -272,14 +375,27 @@ struct AccountLinkView: View {
     @MainActor
     private func unlink(_ secondary: String) async {
         isLinking = true
-        let ok = await CloudSyncManager.unlinkAccount(secondary: secondary)
-        isLinking = false
-        if ok {
+        if secondary.hasPrefix("wx_") {
+            // 小程序绑定不在云端 link 表，本地清绑定码 + 全量重同步回登录账号分区
+            if let ctx = AppDelegate.sharedMainContext {
+                CloudSyncManager.shared.unbindMiniProgram(context: ctx)
+            } else {
+                UserDefaults.standard.removeObject(forKey: "aia_bound_user_id")
+            }
+            isLinking = false
             linkedMethods.removeAll { $0 == secondary }
             linkSucceeded = false
-            resultMessage = "已解除关联「\(methodInfo(secondary).title)」"
+            resultMessage = "已解除小程序绑定，数据已切回当前账号"
         } else {
-            resultMessage = "解除关联失败，请稍后重试"
+            let ok = await CloudSyncManager.unlinkAccount(secondary: secondary)
+            isLinking = false
+            if ok {
+                linkedMethods.removeAll { $0 == secondary }
+                linkSucceeded = false
+                resultMessage = "已解除关联「\(methodInfo(secondary).title)」"
+            } else {
+                resultMessage = "解除关联失败，请稍后重试"
+            }
         }
         showResult = true
     }

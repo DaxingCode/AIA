@@ -6,13 +6,11 @@ import AuthenticationServices
 struct LoginView: View {
     @EnvironmentObject private var auth: AuthManager
 
-    @State private var onePassPhone: String = "189****9919"
-    @State private var onePassCarrier: String = "中国电信"
-    @State private var isLoadingOnePass = false
+    @State private var isLoadingApple = false
     @State private var agreedToTerms = false
-    @State private var showPhoneLogin = false
     @State private var alertMessage: String?
     @State private var showAlert = false
+    @State private var browserTarget: BrowserTarget?
 
     var body: some View {
         NavigationStack {
@@ -25,30 +23,27 @@ struct LoginView: View {
                     // 顶部 Logo + 标语
                     logoSection
 
-                    Spacer().frame(height: 90)
+                    // 上方 2 份弹性空间
+                    Spacer()
+                    Spacer()
 
                     // 中间手机号 + 一键登录
                     onePassSection
 
+                    // 底部 3 份弹性空间（登录区更靠上）
                     Spacer()
-
-                    // 协议 + 第三方登录
-                    bottomSection
+                    Spacer()
+                    Spacer()
                 }
                 .padding(.horizontal, 32)
             }
-            .navigationDestination(isPresented: $showPhoneLogin) {
-                PhoneLoginView()
-            }
         }
-        .alert("提示", isPresented: $showAlert, presenting: alertMessage) { _ in
+        .alert("", isPresented: $showAlert, presenting: alertMessage) { _ in
             Button("好的") {}
         } message: { msg in
             Text(msg)
         }
-        .onAppear {
-            OnePassAuthHelper.shared.setup()
-        }
+        .inAppBrowser(target: $browserTarget)
     }
 
     // MARK: - 顶部 Logo
@@ -61,7 +56,7 @@ struct LoginView: View {
                     .scaledToFill()
                     .frame(width: 44, height: 44)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
-                Text("阿宝AI管家")
+                Text("好记")
                     .font(AIATheme.Font.display.weight(.black))
                     .foregroundStyle(AIATheme.blue)
             }
@@ -77,166 +72,101 @@ struct LoginView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: - 一键登录区
+    // MARK: - 主登录区（默认 Apple 一键登录）
     private var onePassSection: some View {
         VStack(spacing: 24) {
-            // 手机号 + 运营商提示
-            VStack(spacing: 6) {
-                Text(onePassPhone)
-                    .font(AIATheme.Font.largeTitle.weight(.semibold))
-                    .foregroundStyle(.primary)
-                Text("\(onePassCarrier)提供认证服务")
-                    .font(AIATheme.Font.caption)
-                    .foregroundStyle(AIATheme.muted)
-            }
-
             VStack(spacing: 14) {
-                // 一键登录按钮
+                // Apple 一键登录主按钮
                 Button {
-                    performOnePassLogin()
+                    performAppleLogin()
                 } label: {
-                    HStack {
-                        if isLoadingOnePass {
+                    HStack(spacing: 10) {
+                        if isLoadingApple {
                             ProgressView()
                                 .tint(.white)
                                 .scaleEffect(0.9)
+                        } else {
+                            Image(systemName: "apple.logo")
+                                .font(AIATheme.Font.title2.weight(.medium))
                         }
-                        Text("一键登录")
+                        Text("使用 Apple 一键登录")
                             .font(AIATheme.Font.headline.weight(.semibold))
                     }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 50)
-                .background {
-                    if agreedToTerms {
-                        LinearGradient.techAccent
-                    } else {
-                        AIATheme.muted.opacity(0.35)
-                    }
-                }
-                .clipShape(Capsule())
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .background(Color.black.opacity(agreedToTerms ? 1 : 0.35))
+                    .clipShape(Capsule())
+                    .shadow(
+                        color: agreedToTerms ? Color.black.opacity(0.15) : .clear,
+                        radius: 8, x: 0, y: 4
+                    )
                 }
                 .buttonStyle(.plain)
-                .disabled(isLoadingOnePass)
+                .disabled(isLoadingApple)
                 .animation(.easeInOut(duration: 0.2), value: agreedToTerms)
-
-                // 其他手机号登录
-                Button {
-                    showPhoneLogin = true
-                } label: {
-                    Text("其他手机号登录")
-                        .font(AIATheme.Font.subhead.weight(.medium))
-                        .foregroundStyle(AIATheme.blue)
-                }
-                .buttonStyle(.plain)
             }
-        }
-    }
 
-    // MARK: - 底部：协议 + 第三方登录
-    private var bottomSection: some View {
-        VStack(spacing: 28) {
-            // 用户协议
-            HStack(alignment: .top, spacing: 8) {
+            // 用户协议（位于 Apple 按钮下方）
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Button {
                     agreedToTerms.toggle()
                 } label: {
                     Image(systemName: agreedToTerms ? "checkmark.circle.fill" : "circle")
                         .font(AIATheme.Font.title3.weight(.medium))
                         .foregroundStyle(agreedToTerms ? AIATheme.blue : AIATheme.muted)
+                        // 把图标视觉中心对齐到文本首行基线，避免圆圈偏低
+                        .alignmentGuide(.firstTextBaseline) { d in
+                            d[.firstTextBaseline] - 1
+                        }
                 }
                 .buttonStyle(.plain)
 
                 agreementText
             }
-
-            // Apple + 微信
-            HStack(spacing: 28) {
-                socialButton(icon: "apple.logo", bg: .primary, fg: AIATheme.fillSoft) {
-                    performAppleLogin()
-                }
-                socialButton(icon: "bubble.left.fill", bg: Color(red: 0.12, green: 0.74, blue: 0.12), fg: .white) {
-                    performWeChatLogin()
-                }
-            }
         }
-        .padding(.bottom, 50)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     private var agreementText: some View {
-        let normal = AttributeContainer()
-            .font(Font.system(size: 12, weight: .regular))
-            .foregroundColor(AIATheme.muted)
-        let highlighted = AttributeContainer()
-            .font(Font.system(size: 12, weight: .semibold))
-            .foregroundColor(AIATheme.blue)
-
-        var str = AttributedString()
-        func append(_ text: String, _ style: AttributeContainer) {
-            var run = AttributedString(text)
-            run.mergeAttributes(style)
-            str.append(run)
-        }
-        append("我已阅读并同意 ", normal)
-        append("《天翼账号认证服务条款》", highlighted)
-        append(" 和 ", normal)
-        append("《用户协议》", highlighted)
-        append("、", normal)
-        append("《隐私政策》", highlighted)
-
-        return Text(str)
-            .onTapGesture {
-                // 点击条款可跳转 Safari；这里只做提示
-                showAlertMessage("请在项目中配置服务条款/用户协议/隐私政策 URL")
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+            Text("我已阅读并同意 ")
+                .font(Font.system(size: 12, weight: .regular))
+                .foregroundStyle(AIATheme.muted)
+            Button {
+                browserTarget = BrowserTarget(url: AppURLs.userAgreement)
+            } label: {
+                Text("《用户协议》")
+                    .font(Font.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AIATheme.blue)
+                    .underline()
             }
-    }
-
-    private func socialButton(icon: String, bg: Color, fg: Color, action: @escaping () -> Void) -> some View {
-        Button {
-            guard agreedToTerms else {
-                showAlertMessage("请先勾选用户协议")
-                return
+            .buttonStyle(.plain)
+            Text("、")
+                .font(Font.system(size: 12, weight: .regular))
+                .foregroundStyle(AIATheme.muted)
+            Button {
+                browserTarget = BrowserTarget(url: AppURLs.privacyPolicy)
+            } label: {
+                Text("《隐私政策》")
+                    .font(Font.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AIATheme.blue)
+                    .underline()
             }
-            action()
-        } label: {
-            Image(systemName: icon)
-                .font(AIATheme.Font.largeTitle.weight(.medium))
-                .foregroundStyle(fg)
-                .frame(width: 54, height: 54)
-                .background(bg)
-                .clipShape(Circle())
-                .overlay(Circle().stroke(Color.black.opacity(0.06), lineWidth: 1))
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
     }
 
     // MARK: - actions
-    private func performOnePassLogin() {
+    private func performAppleLogin() {
         guard agreedToTerms else {
-                showAlertMessage("请先勾选用户协议")
+            showAlertMessage("请先勾选用户协议和隐私政策")
             return
         }
-        isLoadingOnePass = true
-        Task {
-            let result = await OnePassAuthHelper.shared.requestToken()
-            await MainActor.run {
-                isLoadingOnePass = false
-                switch result {
-                case .success(let info):
-                    auth.login(userId: "phone_\(info.phone)",
-                               phone: info.phone,
-                               provider: .onepass)
-                case .failure(let err):
-                    showAlertMessage(err.localizedDescription)
-                }
-            }
-        }
-    }
-
-    private func performAppleLogin() {
+        isLoadingApple = true
         Task {
             let result = await AppleAuthHelper.shared.signIn()
             await MainActor.run {
+                isLoadingApple = false
                 switch result {
                 case .success(let info):
                     // 用 Apple userID 做唯一标识；邮箱/姓名仅首次有，需后端保存
@@ -248,26 +178,6 @@ struct LoginView: View {
                     if let authErr = err as? ASAuthorizationError, authErr.code == .canceled {
                         return
                     }
-                    showAlertMessage(err.localizedDescription)
-                }
-            }
-        }
-    }
-
-    private func performWeChatLogin() {
-        Task {
-            let result = await WeChatAuthHelper.shared.requestLogin()
-            await MainActor.run {
-                switch result {
-                case .success:
-                    // 真实环境：把 code 发给后端，后端换取 unionid/openid 后再登录。
-                    // 当前用 Keychain 内稳定的匿名 id（跨重装一致），避免一次性 code 当 userId
-                    // 导致每次登录都开一个新云端空间、旧数据孤立。
-                    let wxId = AuthManager.stableWeChatId
-                    auth.login(userId: wxId,
-                               name: "微信用户",
-                               provider: .wechat)
-                case .failure(let err):
                     showAlertMessage(err.localizedDescription)
                 }
             }

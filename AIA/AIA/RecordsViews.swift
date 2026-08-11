@@ -14,6 +14,73 @@ private struct ChartPoint: Identifiable {
     let value: Double
 }
 
+/// 柱状图顶部数值标注：非零才显示；千位数缩写为「k」（如 1.2k，整千显示 2k）。
+private func abbreviatedCount(_ v: Double) -> String {
+    let n = Int(v)
+    guard n > 0 else { return "" }
+    if n >= 1000 {
+        let k = Double(n) / 1000
+        return String(format: "%.1fk", k).replacingOccurrences(of: ".0", with: "")
+    }
+    return "\(n)"
+}
+
+/// 自定义「从 0 向上生长」柱状条，对齐首页 MiniBar 的 easeOut 生长观感（比 Swift Charts 在小图表里
+/// 的生长更明显、更可控）。7 根柱子错峰依次长出（每根 easeOut 0.9s，整体约 1.4s 长完），无弹簧过冲。
+/// `revealed` 由外部 barsRevealed 驱动（进入时延迟触发），柱高从 0 平滑生长到真实比例。
+private struct GrowthBars: View {
+    let data: [ChartPoint]
+    var accent: Color = AIATheme.food
+    var maxValue: Double
+    var height: CGFloat = 70
+    var revealed: Bool = false
+    /// 柱顶数值是否缩写（步数用「k」；热量图传 false 展示完整整数）。
+    var abbreviate: Bool = true
+
+    private var topLabelH: CGFloat { 11 }
+    private var usableH: CGFloat { height - topLabelH }
+
+    private func topLabel(_ v: Double) -> String {
+        abbreviate ? abbreviatedCount(v) : "\(Int(v))"
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack(alignment: .bottom, spacing: 6) {
+                ForEach(Array(data.enumerated()), id: \.offset) { idx, p in
+                    VStack(spacing: 2) {
+                        Text(topLabel(p.value))
+                            .font(AIATheme.Font.micro)
+                            .foregroundStyle(AIATheme.sub)
+                            .frame(height: topLabelH)
+                            .opacity(revealed ? 1 : 0)
+                            .animation(.easeOut(duration: 0.4).delay(Double(idx) * 0.07 + 0.45), value: revealed)
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(accent)
+                            .frame(height: revealed ? barH(p.value) : 0)
+                            .animation(.easeOut(duration: 0.9).delay(Double(idx) * 0.07), value: revealed)
+                    }
+                }
+            }
+            .frame(height: height)
+            HStack(spacing: 6) {
+                ForEach(Array(data.enumerated()), id: \.offset) { _, p in
+                    Text(p.label)
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.sub)
+                        .frame(maxWidth: .infinity)
+                        .multilineTextAlignment(.center)
+                }
+            }
+        }
+    }
+
+    private func barH(_ v: Double) -> CGFloat {
+        let m = max(maxValue, 1)
+        return max(CGFloat(v / m) * usableH, 2)
+    }
+}
+
 private let dayFmt: DateFormatter = {
     let f = DateFormatter(); f.dateFormat = "M/d"; return f
 }()
@@ -118,6 +185,13 @@ struct FoodListView: View {
     @Query(filter: #Predicate<WaterLog> { !$0.syncDeleted }) private var waterLogs: [WaterLog]
     /// 饮食记录来源标记（小程序 pull 进来的记录标记 origin="miniprogram"），用于列表展示「好好吃饭小程序」。
     @Query private var foodSources: [FoodSource]
+    /// 识别引擎来源标记（RecogSource 1:1 关联 FoodEntry.syncId），用于列表展示「本地AI识别/云端AI…」
+    @Query private var recogSources: [RecogSource]
+    private var recogSourceBySyncId: [UUID: String] {
+        Dictionary(uniqueKeysWithValues: recogSources.map { ($0.syncId, $0.recogSourceRaw) })
+    }
+    @State private var barsRevealed = false   // 近7日热量柱状图：进入时从 0 向上生长动画
+    @State private var chartWeekOffset: Int = 0   // 近7日热量图翻周：0=本周，负=过去第 |n| 周
     private var originBySyncId: [UUID: String] {
         Dictionary(uniqueKeysWithValues: foodSources.map { ($0.foodSyncId, $0.origin) })
     }
@@ -138,7 +212,9 @@ struct FoodListView: View {
     @State private var waterPressing: Bool = false
 
     /// 点行直接弹出「编辑食物」sheet（取代原来的 SelectableCard→FoodDetailView 中间层）。
-    @State private var editFood: FoodEntry? = nil
+    /// 用 PersistentIdentifier 做绑定（而非直接持有 FoodEntry?），避免 EditFoodView 内 @Query 首次加载触发
+    /// modelContext 变更通知、父视图 @Query 刷新时 FoodEntry 被 fault-in 产生 identity 抖动，导致 sheet 关闭又重开。
+    @State private var editFoodID: PersistentIdentifier? = nil
 
     // MARK: 多选删除
     @State private var multiSelectMode = false
@@ -170,24 +246,67 @@ struct FoodListView: View {
     @AppStorage("aia.age") private var ageDiet: Int = 30
     @AppStorage("aia.bioSex") private var bioSexDiet: Int = 1   // 1 = 男, 0 = 女
     @AppStorage("aia.activityLevel") private var activityLevelDiet: Int = 1
+    @AppStorage("aia.fitnessGoal") private var fitnessGoalDiet: String = "maintain"
+    private var fitnessGoal: FitnessGoal { FitnessGoal(rawValue: fitnessGoalDiet) ?? .maintain }
     private var tdeeGoalFallback: Double {
         (mifflinBMR(weightKg: weightKgDiet, heightCm: heightCmDiet, age: ageDiet, isMale: bioSexDiet == 1) ?? 0)
             * activityMultiplier(activityLevelDiet)
     }
     private var tdee: Double {
-        let actual = health.restingEnergyToday + health.activeEnergyToday
-        return actual > 0 ? actual : tdeeGoalFallback
+        // TDEE 列显示「目标值」= BMR × 活动系数，与 X/Y 进度的 Y（goal 默认值）同源。
+        // 与「今日消耗」列区分：今日消耗是 resting+active 的实际达成（tdeeCurrentValue）。
+        // 无身体数据时 tdeeGoalFallback=0，回落到 actual，避免显示 0 也保证与 今日消耗 区分失败时仍非空。
+        let target = tdeeGoalFallback
+        return target > 0 ? target : (health.restingEnergyToday + health.activeEnergyToday)
     }
     /// 与首页健康卡片 / 今日预览 / 健康管理页 TDEE 圆环同源：
     /// 已接入 HealthKit 且读到数据 → 静息+活动能量；未接入 → 手动补录活动热量。
     /// 注意：本页「TDEE」列（tdee）显示的是目标值（actual 为 0 时回落到目标），
     /// 而「今日消耗」列应显示实际达成，故用 tdeeCurrentValue 与那三处对齐。
-    private var usesHealthKit: Bool { health.authorized && health.isAvailable && health.hasHealthKitData }
+    @AppStorage(HealthMetricKind.tdee.sourceKey) private var tdeeSource: HealthSourceMode = .auto
     private var tdeeCurrentValue: Double {
-        usesHealthKit ? health.restingEnergyToday + health.activeEnergyToday : Double(ManualHealthStore.shared.activeCalories(for: Date()))
+        let day = Calendar.current.startOfDay(for: selectedDate)
+        if tdeeSource == .auto && health.authorized && health.isAvailable && health.hasHealthKitData {
+            // HealthKit 路径：按选中日期取当天活动+静息能量（近 30 天走缓存字典，更早历史回落 0）。
+            return health.tdeeActual(for: selectedDate)
+        }
+        // 手动补录路径：按选中日期查（ManualHealthStore 内部按 startOfDay 存）。
+        return Double(ManualHealthStore.shared.activeCalories(for: day))
     }
     private var goal: Double { goalIsCustom ? goalOverride : tdee }
-    private var net: Double { selectedCalories - tdee }
+
+    // MARK: 营养构成建议值（随健身目标/体重/TDEE 联动，与饮食分析「目标达成」卡同源）
+    // 依据：热量基准 = 自定义热量目标或 TDEE × 健身目标系数；碳水 50%、脂肪 25% 取 USDA DGA 45-65%/20-35% 中值。
+
+    /// 建议热量 = 自定义目标（尊重用户设定，不再乘系数）或 TDEE × 目标系数。
+    private var suggestedCalories: Double? {
+        guard goal > 0 else { return nil }
+        return goalIsCustom ? goal : goal * fitnessGoal.calorieMultiplier
+    }
+    /// 建议蛋白 = 体重 × g/kg（减脂 2.0 / 增肌 1.8 / 维持 1.2）。
+    private var suggestedProtein: Double? {
+        weightKgDiet > 0 ? weightKgDiet * fitnessGoal.proteinPerKg : nil
+    }
+    /// 营养构成建议值（6 元组：蛋白/碳水/脂肪/纤维/糖/钠）。
+    /// - 蛋白/碳水/脂肪：有体重+热量基准时按目标系数算（碳水 50%、脂肪 25% 取 USDA DGA 中值）；
+    ///   缺前提时回落硬编码通用成人参考值 75/220/55。
+    /// - 纤维/糖/钠：按「建议热量」线性缩放（与饮食分析「目标达成」卡同公式），无建议热量时回落 25/50/2000。
+    private var nutritionTargets: (protein: Int, carb: Int, fat: Int, fiber: Int, sugar: Int, sodium: Int) {
+        if let cal = suggestedCalories, let p = suggestedProtein {
+            return (
+                protein: Int(p.rounded()),
+                carb: Int((cal * 0.5 / 4).rounded()),
+                fat: Int((cal * 0.25 / 9).rounded()),
+                fiber: Int((cal * 14 / 1000).rounded()),
+                sugar: Int((cal * 0.10 / 4).rounded()),
+                sodium: Int(cal.rounded())   // 钠(mg) = 建议热量(kcal)：2000kcal 标准人对应 2000mg 钠
+            )
+        }
+        return (protein: 75, carb: 220, fat: 55, fiber: 25, sugar: 50, sodium: 2000)
+    }
+
+    /// 净热量 = 今日摄入 − 今日消耗（今日消耗取 tdeeCurrentValue，与「今日消耗」列同源）
+    private var net: Double { selectedCalories - tdeeCurrentValue }
 
     private var macros: (p: Double, c: Double, f: Double, fiber: Double, sugar: Double, sodium: Double, water: Double) {
         selectedFoods.reduce((0, 0, 0, 0, 0, 0, 0)) {
@@ -213,6 +332,7 @@ struct FoodListView: View {
         let log = WaterLog(date: selectedDate, amount: 100)
         context.insert(log)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        UsageAnalytics.logAdd("water", source: "manual")
         // 手动加水后触发增量同步，绑定后小程序可见
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
     }
@@ -414,16 +534,17 @@ struct FoodListView: View {
         }
     }
 
-    private var weekData: [ChartPoint] {
+    /// 近 7 日热量柱状数据。`offset` 为 0 表示以选中日为终点的本周，负数表示过去第 |offset| 周。
+    private func weekData(offset: Int = 0) -> [ChartPoint] {
         let cal = Calendar.current
         let day = cal.startOfDay(for: selectedDate)
+        let end = cal.date(byAdding: .day, value: offset * 7, to: day)!
         return (0..<7).map { i in
-            let d = cal.date(byAdding: .day, value: i - 6, to: day)!
+            let d = cal.date(byAdding: .day, value: i - 6, to: end)!
             let sum = foods.filter { cal.isDate($0.date, inSameDayAs: d) }.reduce(0) { $0 + $1.calories }
             return ChartPoint(label: dayFmt.string(from: d), value: sum)
         }
     }
-
     private var mealItems: [FoodEntry] {
         selectedFoods.filter { $0.meal == meal.mealString }.sorted { $0.syncUpdatedAt > $1.syncUpdatedAt }
     }
@@ -468,9 +589,12 @@ struct FoodListView: View {
         return combined.isEmpty ? Self.defaultFrequentFoods : combined
     }
 
-    /// 点「常吃食物」名称：按库内每100g营养 ×100g 入库当前餐次；无匹配则热量归零（用户可改）。
+    /// 点「常吃食物」名称：优先用营养库每100g营养 ×100g 入库当前餐次；
+    /// 库未命中时兜底复用用户最近一次同名记录的营养值（带护栏），都无则热量归零（用户可改）。
     private func saveFrequentFood(_ name: String) {
-        let ref = NutritionLibrary.shared.match(name, in: context)
+        // A 层：营养库优先（内置表 + 云端沉淀）；B 层：库不认识时复用用户历史（仅优质记录）
+        let ref: FoodRef? = NutritionLibrary.shared.match(name, in: context)
+            ?? lastReusableFoodRef(named: name)
         let weight = 100.0
         let ratio = weight / 100.0
         let entry = FoodEntry(
@@ -502,6 +626,33 @@ struct FoodListView: View {
         scrollToFoodNonce += 1
     }
 
+    /// 兜底取数（方案 B）：营养库不认识该食物时，复用用户最近一次同名饮食记录的营养值（反推每 100g）。
+    /// 护栏：① 跳过「营养全为 0」的劣质记录，避免复用「鱼腐 0」这类被记错的记录导致 0 值永久固化；
+    ///      ② 跳过无有效 weightGram 的记录（重量未知则无法反推每 100g 基准）。
+    /// 命中后返回每 100g 的 FoodRef（字段语义与营养库一致），供 saveFrequentFood 直接复用。
+    private func lastReusableFoodRef(named name: String) -> FoodRef? {
+        let sorted = foods
+            .filter { $0.name == name }
+            .sorted { $0.date > $1.date }
+        for f in sorted {
+            let total = f.calories + f.protein + f.carbs + f.fat
+            guard total > 0 else { continue }                  // ① 全 0 劣质记录跳过
+            guard let w = f.weightGram, w > 0 else { continue } // ② 无有效重量跳过
+            let r = 100.0 / w
+            return FoodRef(
+                name: name,
+                kcal: f.calories * r,
+                protein: f.protein * r,
+                carbs: f.carbs * r,
+                fat: f.fat * r,
+                fiber: f.fiber * r,
+                sugar: f.sugar * r,
+                sodium: f.sodium * r
+            )
+        }
+        return nil
+    }
+
     /// 餐次 SegmentedPicker 用的自定义 Binding：getter 返回 meal，setter 在 SegmentedPicker 写入新值时
     /// （只在用户点击按钮时发生，SegmentedPicker 首次渲染只读不写）同步设置 meal 并递增 scrollToFoodNonce，
     /// 触发 ScrollViewReader 下滚到食物条目。避免用 .onChange(of: meal) 引入的边界误触发
@@ -528,7 +679,7 @@ struct FoodListView: View {
             EmptyStateView(
                 kind: .diet,
                 title: "这餐还没记录",
-                message: "到相册选一张照片，阿宝会自动识别菜名、热量和营养元素。",
+                message: "到相册选一张照片，小记会自动识别菜名、热量和营养元素。",
                 actionTitle: "到相册选一张",
                 action: { showPicker = true },
                 footer: "点击底部拍照、相册上传食物照片\n或点击文字输入、语音输入\n也可使用AI快速记录哦"
@@ -538,7 +689,7 @@ struct FoodListView: View {
                 SelectableRow(
                     isSelecting: multiSelectMode,
                     isSelected: selectedIDs.contains(f.persistentModelID),
-                    onTap: { editFood = f },
+                    onTap: { editFoodID = f.persistentModelID },
                     onLongPress: { enterFoodMultiSelect(f.persistentModelID) },
                     onToggle: { toggleFoodSelection(f.persistentModelID) },
                     onDelete: { SafeDelete.food(f, in: context) }
@@ -553,16 +704,22 @@ struct FoodListView: View {
                                 Text(f.name)
                                     .font(AIATheme.Font.subhead.weight(.semibold))
                                     .foregroundStyle(.primary)
-                                let sourceText = (f.imageName?.isEmpty == false)
-                                    ? NSLocalizedString("food.recognized", comment: "")
-                                    : NSLocalizedString("food.by_chat", comment: "")
-                                // 重量（小程序记录常见，App 记录可选）：weightGram>0 时展示
-                                let weightText = f.weightGram.flatMap { $0 > 0 ? "\(Int($0))g" : nil }
-                                // 来源：小程序 pull 进来的记录标记「好好吃饭小程序」
-                                let originLabel = (originBySyncId[f.syncId] == "miniprogram")
-                                    ? "好好吃饭小程序"
-                                    : nil
-                                Text([f.portion, weightText, originLabel, sourceText]
+                                // 来源：优先取 FoodSource 标记的来源标签；无标记（本功能上线前的老记录）兜底：
+                                // 有图 → 图片识别，无图 → 好好记帮记
+                                // 副标题只显示「份量 · 来源」——`portion` 已自带单位/数字（如"200克"、"2个"），
+                                // 不再追加克数段（避免"200克 · 200g"、"2个 · 2g"这种重复+单位错配）。
+                                // 与对话页 ResultRowCard.foodSubtitle（ResultRowCard.swift:706、843）保持一致。
+                                let originLabel: String? = {
+                                    if let o = originBySyncId[f.syncId], let label = FoodSource.displayLabel(for: o) {
+                                        return label
+                                    }
+                                    return (f.imageName?.isEmpty == false)
+                                        ? NSLocalizedString("food.recognized", comment: "")
+                                        : NSLocalizedString("food.by_chat", comment: "")
+                                }()
+                                let recogLabel = recogSourceBySyncId[f.syncId]
+                                    .flatMap { RecogSource.displayLabel(for: $0) }
+                                Text([f.portion, originLabel, recogLabel]
                                     .compactMap { $0?.isEmpty == true ? nil : $0 }
                                     .joined(separator: " · "))
                                     .font(AIATheme.Font.micro)
@@ -603,13 +760,13 @@ struct FoodListView: View {
     private var dateTitleText: String {
         let cal = Calendar.current
         if cal.isDateInToday(selectedDate) {
-            return String(format: "今天 · %@ %@", AppFormat.date.string(from: selectedDate), weekday(for: selectedDate))
+            return String(format: "今天 · %@ %@", AppFormat.monthDay.string(from: selectedDate), weekday(for: selectedDate))
         } else if cal.isDateInYesterday(selectedDate) {
-            return String(format: "昨天 · %@ %@", AppFormat.date.string(from: selectedDate), weekday(for: selectedDate))
+            return String(format: "昨天 · %@ %@", AppFormat.monthDay.string(from: selectedDate), weekday(for: selectedDate))
         } else if cal.isDateInTomorrow(selectedDate) {
-            return String(format: "明天 · %@ %@", AppFormat.date.string(from: selectedDate), weekday(for: selectedDate))
+            return String(format: "明天 · %@ %@", AppFormat.monthDay.string(from: selectedDate), weekday(for: selectedDate))
         }
-        return String(format: "%@ %@", AppFormat.date.string(from: selectedDate), weekday(for: selectedDate))
+        return String(format: "%@ %@", AppFormat.monthDay.string(from: selectedDate), weekday(for: selectedDate))
     }
 
     private func shiftDate(by days: Int) {
@@ -622,14 +779,21 @@ struct FoodListView: View {
             Text(title)
                 .font(AIATheme.Font.micro)
                 .foregroundStyle(AIATheme.muted)
+                .lineLimit(1)
             HStack(alignment: .firstTextBaseline, spacing: 1) {
                 Text(formatValue(value))
-                    .font(AIATheme.Font.callout.weight(.semibold))
+                    .font(AIATheme.Font.subhead.weight(.semibold))
                     .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 Text(unit)
-                    .font(AIATheme.Font.caption)
+                    .font(AIATheme.Font.micro)
                     .foregroundStyle(AIATheme.sub)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
             }
+            // 整组「数值+单位」锁单行：6 列等分下极端数据（如「100mg」）也得在同一行内自压缩展示
+            .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
@@ -732,11 +896,14 @@ struct FoodListView: View {
                                     .fill(AIATheme.hairline)
                                     .frame(width: 0.5, height: 32)
 
-                                // TDEE（基础能量消耗，ink 色中性）
+                                // TDEE（基础能量消耗）
+                                // 用 .primary 而非 AIATheme.ink：ink 在 dark 模式值为 0x2c2c2e（设计用途是深色按钮背景），
+                                // 在 0x2a2a2c 卡片底上几乎同色，TDEE/今日消耗数字会"消失"。
+                                // .primary 自动深浅适配（light→黑 / dark→白），始终保持最高对比度。
                                 VStack(spacing: 2) {
                                     Text("\(Int(tdee))")
                                         .font(AIATheme.Font.title3.weight(.semibold))
-                                        .foregroundStyle(AIATheme.ink)
+                                        .foregroundStyle(.primary)
                                     Text(NSLocalizedString("food.tdeeLabel", comment: ""))
                                         .font(AIATheme.Font.micro)
                                         .foregroundStyle(AIATheme.sub)
@@ -748,11 +915,12 @@ struct FoodListView: View {
                                     .frame(width: 0.5, height: 32)
 
                                 // 今日消耗（与首页健康卡片 / 今日预览 / TDEE 圆环同源：resting+active，无 HealthKit 时走手动活动热量）
+                                // 数字用 .primary 而非 ink：见 TDEE 列注释，ink 在深色卡片底上对比度过低。
                                 VStack(spacing: 2) {
                                     Text("\(Int(tdeeCurrentValue))")
                                         .font(AIATheme.Font.title3.weight(.semibold))
-                                        .foregroundStyle(AIATheme.ink)
-                                    Text(NSLocalizedString("food.burned", comment: "") + " kcal")
+                                        .foregroundStyle(.primary)
+                                    Text(String(format: "%@ kcal", NSLocalizedString("food.burned", comment: "")))
                                         .font(AIATheme.Font.micro)
                                         .foregroundStyle(AIATheme.sub)
                                 }
@@ -765,37 +933,52 @@ struct FoodListView: View {
                     .padding(12)
                     .card(radius: AIATheme.rMD)
 
-                    // Card2 · 营养构成
-                    VStack(alignment: .leading, spacing: 8) {
-                        SectionTitle(text: NSLocalizedString("food.nutrition", comment: ""),
-                                     trailing: String(format: NSLocalizedString("food.nutritionTarget", comment: ""), 75, 220, 55))
-                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                            MacroCard(title: NSLocalizedString("food.macro.carb", comment: ""), value: "\(Int(macros.c))g", progress: macros.c / 220, color: AIATheme.amber)
-                            MacroCard(title: NSLocalizedString("food.macro.protein", comment: ""), value: "\(Int(macros.p))g", progress: macros.p / 75, color: AIATheme.blue)
-                            MacroCard(title: NSLocalizedString("food.macro.fat", comment: ""), value: "\(Int(macros.f))g", progress: macros.f / 55, color: AIATheme.green)
-                            MacroCard(title: NSLocalizedString("food.macro.fiber", comment: ""), value: "\(Int(macros.fiber))g", progress: macros.fiber / 25, color: AIATheme.health)
-                            MacroCard(title: NSLocalizedString("food.macro.sugar", comment: ""), value: "\(Int(macros.sugar))g", progress: macros.sugar / 50, color: AIATheme.food)
-                            MacroCard(title: NSLocalizedString("food.macro.sodium", comment: ""), value: "\(Int(macros.sodium))mg", progress: macros.sodium / 2000, color: AIATheme.todo)
-                        }
-                    }
-                    .padding(12)
-                    .card(radius: AIATheme.rMD)
+                    // Card2 · 营养构成（建议值随健身目标/体重/TDEE 联动，缺失时回落通用参考值）
+                    // 拆为独立子视图避开 Swift 编译器「unable to type-check」级联（参考 ChatView.buildContext 拆分经验）。
+                    let t = nutritionTargets
+                    NutritionCompositionCard(targets: t, macros: macros)
+                        .padding(12)
+                        .card(radius: AIATheme.rMD)
 
-                    if !foods.isEmpty {
-                        // Card3 · 近7日热量
-                        VStack(alignment: .leading, spacing: 8) {
-                            SectionTitle(text: NSLocalizedString("food.last7days", comment: ""))
-                            Chart(weekData) { p in
-                                LineMark(x: .value(NSLocalizedString("chart.day", comment: ""), p.label), y: .value(NSLocalizedString("chart.kcal", comment: ""), p.value))
-                                    .foregroundStyle(AIATheme.food)
-                                    .interpolationMethod(.monotone)
+                    // Card3 · 近7日热量（可左右滑动翻看过去 8 周，每屏重播生长动画）
+                    VStack(alignment: .leading, spacing: 8) {
+                            SectionTitle(text: NSLocalizedString("food.last7days", comment: ""),
+                                         trailing: chartWeekRangeLabel(offset: chartWeekOffset, base: selectedDate))
+                            TabView(selection: $chartWeekOffset) {
+                                ForEach(Array((-8)...0), id: \.self) { off in
+                                    let data = weekData(offset: off)
+                                    Group {
+                                        if data.allSatisfy({ $0.value == 0 }) {
+                                            Text(NSLocalizedString("food.week.empty", comment: ""))
+                                                .font(AIATheme.Font.micro)
+                                                .foregroundStyle(AIATheme.sub)
+                                                .multilineTextAlignment(.center)
+                                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                                        } else {
+                                            GrowthBars(data: data,
+                                                       accent: AIATheme.food,
+                                                       maxValue: data.map(\.value).max() ?? 1,
+                                                       revealed: barsRevealed,
+                                                       abbreviate: false)
+                                        }
+                                    }
+                                        .tag(off)
+                                }
                             }
-                            .frame(height: 64)
-                            .chartYScale(domain: safeYDomain(weekData.map(\.value)))
-                            .chartYAxis(.hidden).chartXAxis(.hidden)
+                            .tabViewStyle(.page(indexDisplayMode: .never))
+                            .frame(height: 100)
+                            ChartPageDots(selection: chartWeekOffset, minOffset: -8, accent: AIATheme.food)
                         }
                         .padding(12)
                         .card(radius: AIATheme.rMD)
+                        .onChange(of: chartWeekOffset) { _, _ in
+                            // 左右滑动翻到新一周时，重置并重播从 0 向上生长动画
+                            withAnimation(.none) { barsRevealed = false }
+                            Task {
+                                try? await Task.sleep(nanoseconds: 150_000_000)
+                                barsRevealed = true
+                            }
+                        }
 
                         // Card4 · 当前餐次
                         VStack(alignment: .leading, spacing: 8) {
@@ -816,7 +999,6 @@ struct FoodListView: View {
                         .id("foodListTop")
                         .padding(12)
                         .card(radius: AIATheme.rMD)
-                    }
 
                     mealItemsSection
 
@@ -842,14 +1024,30 @@ struct FoodListView: View {
     }
             AIBottomBar(prompts: [
                 AIPrompt(text: "点拍照识别、记录美食", pointsTo: .camera),
-                AIPrompt(text: "吃了什么美食？点此阿宝帮你记", pointsTo: nil),
+                AIPrompt(text: "吃了什么美食？点此小记帮你记", pointsTo: nil),
                 AIPrompt(text: "点麦克风，语音记录饮食", pointsTo: .mic),
-                AIPrompt(text: "阿宝帮总结今天的饮食情况", pointsTo: nil),
+                AIPrompt(text: "小记帮总结今天的饮食情况", pointsTo: nil),
                 AIPrompt(text: "点相册上传、记录美食", pointsTo: .album)
             ], entrySource: "food")
         }
         .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("food.navTitle"))
+        .task { UsageAnalytics.logOpen("diet") }
+        .task {
+            // 进入饮食页时延迟一帧触发近7日热量柱状图从 0 向上生长（立即改会被 .task 吞掉）
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            barsRevealed = true
+        }
+        .onChange(of: selectedDate) { _, _ in
+            chartWeekOffset = 0
+            // 切换日期时，近7日窗口与热量数据都在变，重置并重新播放从 0 向上生长动画
+            withAnimation(.none) { barsRevealed = false }
+            Task {
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                barsRevealed = true
+            }
+        }
+        .onDisappear { barsRevealed = false }
         .toolbar {
             if !multiSelectMode {
                 // 日历按钮只对「饮食记录」tab 有意义（选日期看当日饮食）
@@ -907,7 +1105,7 @@ struct FoodListView: View {
             Text(String(format: NSLocalizedString("common.deleteCount", comment: ""), selectedIDs.count))
         }
         .fullScreenCover(isPresented: $showAddFood) {
-            AddFoodManualView()
+            AddFoodManualView(initialDate: selectedDate, initialMeal: meal.mealString)
         }
         .sheet(isPresented: $showDatePicker) {
             VStack(spacing: 0) {
@@ -1023,11 +1221,13 @@ struct FoodListView: View {
             .background(Color(.systemGroupedBackground))
             .presentationDetents([.height(360)])
         }
-        .sheet(item: $editFood) { food in
-            EditFoodView(entry: food)
+        .sheet(item: $editFoodID) { id in
+            if let food = context.model(for: id) as? FoodEntry {
+                EditFoodView(entry: food)
+            }
         }
         .onAppear { meal = FoodListView.defaultMeal(for: .now) }
-        .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker)
+        .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker, navigateToChat: true)
     }
 
     private func weekday(for date: Date) -> String {
@@ -1072,7 +1272,80 @@ struct FoodListView: View {
 struct HealthListView: View {
     @Environment(\.modelContext) private var context
     @Query(filter: #Predicate { !$0.syncDeleted }, sort: \HealthMetric.date, order: .reverse) private var healths: [HealthMetric]
+    @Query(filter: #Predicate<SleepSession> { !$0.syncDeleted }, sort: \.sleepStart, order: .reverse) private var sleeps: [SleepSession]
+    /// 识别引擎来源标记（RecogSource 1:1 关联 HealthMetric.syncId），用于每行显示「本地AI识别/云端AI…」
+    @Query private var recogSources: [RecogSource]
+    private var recogSourceBySyncId: [UUID: String] {
+        Dictionary(uniqueKeysWithValues: recogSources.map { ($0.syncId, $0.recogSourceRaw) })
+    }
     @StateObject private var health = HealthManager.shared
+
+    /// 当前正在进行的睡眠会话 = 仅当「最近一条」会话还在睡（wakeAt == nil）时存在。
+    /// 口径收敛到 SleepSession.swift 的 `currentActiveSleepSession`，与首页共用同一份判定，避免两端走样。
+    private var activeSleepSession: SleepSession? {
+        currentActiveSleepSession(in: sleeps)
+    }
+
+    /// 最近一条已醒的睡眠会话（wakeAt != nil），用于「元气满满」态下方展示「上次入睡时间 + 睡眠时长」。
+    /// `sleeps` 已是 @Query 倒序，取首个 wakeAt != nil 即为最近一次。
+    private var lastFinishedSleepSession: SleepSession? {
+        sleeps.first(where: { $0.wakeAt != nil })
+    }
+
+    /// 入睡/醒来切换：空闲→写入 sleepStart 开始睡眠；在睡→写入 wakeAt 并计算时长，自动入库 + 增量同步。
+    /// 逻辑收敛到 SleepSession.swift 的 `toggleSleepSession`，与首页共用同一份实现。
+    /// 这里再叠加「与首页同口径的遮罩 + toast」：刚入睡→盖睡眠遮罩；刚醒来→居中大卡 toast（与遮罩「我醒了」同款）。
+    private func handleSleepToggle() {
+        let wasSleeping = activeSleepSession != nil
+        let start = activeSleepSession?.sleepStart ?? Date()
+        toggleSleepSession(in: context, sleeps: sleeps)   // 模型变更不包 withAnimation（项目铁律）
+        if wasSleeping {
+            // 醒来：复制首页遮罩 onWake 的 toast 口径，避免两处文案/样式漂移。
+            ToastCenter.shared.showImportant(
+                sleepSummaryText(start: start),
+                icon: "🌙",
+                accent: AIATheme.warning
+            )
+        }
+        // 副作用延后一个 runloop，避免与 SwiftData 变更同帧触发布局重入
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.35)) {
+                showSleepMask = !wasSleeping   // 刚入睡 → 盖遮罩；刚醒来 → 收遮罩
+            }
+        }
+    }
+
+    /// 睡眠时长小结文案（与首页 sleepStatusButton / 遮罩「我醒了」同口径，避免两处文案漂移）。
+    private func sleepSummaryText(start: Date) -> String {
+        let dur = Date().timeIntervalSince(start)
+        let totalMin = max(0, Int(dur / 60))
+        let h = totalMin / 60
+        let m = totalMin % 60
+        if h > 0 {
+            return "本次睡眠 \(h) 小时 \(m) 分钟"
+        } else {
+            return "本次睡眠 \(m) 分钟"
+        }
+    }
+
+    private func sleepDurationText(_ s: SleepSession) -> String {
+        formatDuration(sleepSessionDuration(s))
+    }
+    private func formatDuration(_ sec: TimeInterval) -> String {
+        let h = Int(sec) / 3600
+        let m = (Int(sec) % 3600) / 60
+        return "\(h)h\(m)m"
+    }
+    private func timeText(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f.string(from: d)
+    }
+    @State private var barsRevealed = false   // 近7日步数柱状图：进入时从 0 向上生长动画
+    @State private var chartWeekOffset: Int = 0   // 近7日步数图翻周：0=本周，负=过去第 |n| 周
+    @State private var healthRefreshTimer: Timer?
+    private let healthRefreshInterval: TimeInterval = 120   // 前台停留期间每 2 分钟刷新一次 HealthKit
+    @State private var showSleepMask = false     // 健康页入睡→盖睡眠遮罩（与首页同口径）
 
     // 健康目标（本地 @AppStorage，与饮食 aia.calorieGoalOverride 同策略，不云同步）
     @AppStorage("aia.heightCm") private var heightCm: Double = 0
@@ -1088,26 +1361,61 @@ struct HealthListView: View {
 
     // 今日达成数（手动录入，HealthKit 未接入时回退到这里，按日期隔离存储在 ManualHealthStore）。
 
-    // MARK: 圆环数据来源
-    // 已接入 HealthKit 且真正读到过非零数据 → 自动同步 HealthKit 当日数据，禁止手动修改；
-    // 未接入 HealthKit（模拟器/免费账号/被拒绝/无 entitlement）→ 回退到手动录入增量，点击圆环 +N。
-    private var usesHealthKit: Bool { health.authorized && health.isAvailable && health.hasHealthKitData }
+    // MARK: 圆环数据来源（逐指标切换）
+    // 每个指标独立选择「自动记录（HealthKit）/ 手动记录」，默认全 auto。
+    // 只有在「该指标设为 auto」且「HealthKit 真可用（已授权 + 可用 + 读到过非零数据）」时才走 HealthKit，
+    // 其余回退手动录入。未连 HealthKit 时 hkUsable=false，等价于旧的全手动行为，无需迁移。
+    @AppStorage(HealthMetricKind.steps.sourceKey)     private var stepsSource: HealthSourceMode = .auto
+    @AppStorage(HealthMetricKind.sleep.sourceKey)     private var sleepSource: HealthSourceMode = .auto
+    @AppStorage(HealthMetricKind.exercise.sourceKey)  private var exerciseSource: HealthSourceMode = .auto
+    @AppStorage(HealthMetricKind.tdee.sourceKey)      private var tdeeSource: HealthSourceMode = .auto
+    @AppStorage(HealthMetricKind.heartRate.sourceKey) private var heartRateSource: HealthSourceMode = .auto
+
+    private var hkUsable: Bool { health.authorized && health.isAvailable && health.hasHealthKitData }
+
+    // 前台停留期间的 HealthKit 周期刷新（每 healthRefreshInterval 秒一次），离开页面必须停，避免泄漏与后台空转。
+    private func startHealthRefreshTimer() {
+        healthRefreshTimer?.invalidate()
+        healthRefreshTimer = Timer.scheduledTimer(withTimeInterval: healthRefreshInterval, repeats: true) { _ in
+            Task { @MainActor in HealthManager.shared.refreshAll() }
+        }
+    }
+    private func stopHealthRefreshTimer() {
+        healthRefreshTimer?.invalidate()
+        healthRefreshTimer = nil
+    }
+
+    /// 某指标当前是否应走自动（HealthKit）记录。
+    private func isAuto(_ kind: HealthMetricKind) -> Bool {
+        let mode: HealthSourceMode = {
+            switch kind {
+            case .steps: return stepsSource
+            case .sleep: return sleepSource
+            case .exercise: return exerciseSource
+            case .tdee: return tdeeSource
+            case .heartRate: return heartRateSource
+            }
+        }()
+        return mode == .auto && hkUsable
+    }
 
     private var stepsCurrentValue: Int {
-        usesHealthKit ? Int(health.stepsToday) : ManualHealthStore.shared.steps(for: Date())
+        isAuto(.steps) ? Int(health.stepsToday) : ManualHealthStore.shared.steps(for: Date())
     }
     private var sleepCurrentValue: Double {
         let stored = healths.first(where: { $0.metric.contains("睡眠") }).flatMap { Double($0.value) } ?? 0
-        return usesHealthKit ? stored : stored + ManualHealthStore.shared.sleepHours(for: Date())
+        if isAuto(.sleep) { return stored }
+        // 手动模式：与圆环完成数据、首页「昨晚睡眠」同源（详见 manualSleepTotalHours）
+        return manualSleepTotalHours(sleeps: sleeps, healths: healths, on: Date())
     }
     private var exerciseCurrentValue: Double {
-        usesHealthKit ? health.exerciseTimeToday : health.exerciseTimeToday + Double(ManualHealthStore.shared.exerciseMinutes(for: Date()))
+        isAuto(.exercise) ? health.exerciseTimeToday : health.exerciseTimeToday + Double(ManualHealthStore.shared.exerciseMinutes(for: Date()))
     }
     /// TDEE 实际达成 = 静息能量 + 活动能量。
     /// 已接入 HealthKit 且读到数据 → 自动同步；
     /// 未接入 → 回退到手动录入的活动热量（点击圆环 +100 kcal）。
     private var tdeeCurrentValue: Double {
-        usesHealthKit
+        isAuto(.tdee)
             ? health.restingEnergyToday + health.activeEnergyToday
             : Double(ManualHealthStore.shared.activeCalories(for: Date()))
     }
@@ -1127,12 +1435,13 @@ struct HealthListView: View {
     /// 点击圆环自增：步数 +1000 / 睡眠 +1h / 运动 +10min，并触发轻触震动。
     /// HealthKit 已接入时禁止手动修改，直接返回。
     private func incrementMetric(_ kind: HealthMetricKind) {
-        guard !usesHealthKit else { return }
+        guard !isAuto(kind) else { return }
         switch kind {
         case .steps: ManualHealthStore.shared.addSteps(1000, for: Date())
         case .sleep: ManualHealthStore.shared.addSleepHours(1, for: Date())
         case .exercise: ManualHealthStore.shared.addExerciseMinutes(10, for: Date())
         case .tdee: ManualHealthStore.shared.addActiveCalories(100, for: Date())
+        case .heartRate: break   // 静息心率不是圆环，无手动自增入口
         }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
@@ -1142,7 +1451,24 @@ struct HealthListView: View {
         case .sleep: return "+1 小时"
         case .exercise: return "+10 分钟"
         case .tdee: return "+100 kcal"
+        case .heartRate: return ""
         }
+    }
+
+    /// 圆环主行/副行文案：优先实际值；无数据但有目标时，目标顶替为主行（无副行）；
+    /// 都没值显示「—」。对应未授权/无数据时圆环显示「目标 X」+ caption 的需求（2026-08-01），
+    /// 与右图"未连接"态保持一致——不再出现「— / 目标 12000」这种两行杂糅的渲染。
+    private func ringLines(current: String, hasData: Bool, goal: Int, unit: String? = nil) -> (value: String, secondary: String?) {
+        // 「目标 X」永远走 secondary 副行（micro 小字），避免无数据时把长串「目标 X」塞进
+        // value 主行（body 中等字重）导致被放大、视觉突兀（2026-08-01）。
+        let goalText = goal > 0 ? "目标 \(goal)\(unit ?? "")" : nil
+        if hasData {
+            return (current, goalText)
+        }
+        if goalText != nil {
+            return ("—", goalText)
+        }
+        return ("—", nil)
     }
 
     // 身高/体重/BMI 优先用用户档案（@AppStorage），未设置则回退到健康记录。
@@ -1170,23 +1496,176 @@ struct HealthListView: View {
     @State private var multiSelectMode = false
     @State private var selectedIDs = Set<PersistentIdentifier>()
     @State private var showDeleteConfirm = false
+    @State private var showSourceSettings = false   // 数据来源设置面板
+    @State private var showRestingHRInput = false    // 静息心率录入 sheet
 
     private var sleepHours: Double {
         healths.first(where: { $0.metric.contains("睡眠") }).flatMap { Double($0.value) } ?? 0
     }
     private func stat(_ key: String) -> String {
-        healths.first(where: { $0.metric.contains(key) }).map { "\($0.value)\($0.unit)" } ?? "—"
+        // 静息心率：自动模式下若 HealthKit 已读到值，优先显示 HealthKit 数据；
+        // 手动模式优先读 ManualHealthStore（HealthKit 静息心率不回写 healths 表，否则永远 "—"）。
+        if key == "心率" {
+            if isAuto(.heartRate), health.restingHeartRate > 0 {
+                return "\(Int(health.restingHeartRate))bpm"
+            }
+            let manual = ManualHealthStore.shared.restingHeartRate(for: Date())
+            if manual > 0 { return "\(manual)bpm" }
+        }
+        return healths.first(where: { $0.metric.contains(key) }).map { "\($0.value)\($0.unit)" } ?? "—"
     }
-    private var weekSteps: [ChartPoint] {
+    /// 近 7 日步数柱状数据。`offset` 为 0 表示本周，负数表示过去第 |offset| 周。
+    private func weekSteps(offset: Int = 0) -> [ChartPoint] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
-        let names = cal.shortWeekdaySymbols
+        let end = cal.date(byAdding: .day, value: offset * 7, to: today)!
         return (0..<7).map { i in
-            let d = cal.date(byAdding: .day, value: i - 6, to: today)!
-            let v = cal.isDateInToday(d) ? Double(health.stepsToday) : 0
-            let wd = cal.component(.weekday, from: d) - 1
-            return ChartPoint(label: names[wd], value: v)
+            let d = cal.date(byAdding: .day, value: i - 6, to: end)!
+            let dayStart = cal.startOfDay(for: d)
+            let v: Double
+            if isAuto(.steps) {
+                // 已接 HealthKit：今天用 stepsToday，历史 6 天取 stepsForDay 缓存
+                v = cal.isDateInToday(d)
+                    ? Double(health.stepsToday)
+                    : Double(health.stepsForDay[dayStart] ?? 0)
+            } else {
+                // 未接 HealthKit：按天回落到手动步数（ManualHealthStore 已按天存）
+                v = Double(ManualHealthStore.shared.steps(for: dayStart))
+            }
+            return ChartPoint(label: dayFmt.string(from: d), value: v)
         }
+    }
+
+    /// 近 7 日运动时长（分钟）柱状数据。与 `weekSteps` 同源的翻周/生长逻辑。
+    private func weekExercise(offset: Int = 0) -> [ChartPoint] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let end = cal.date(byAdding: .day, value: offset * 7, to: today)!
+        return (0..<7).map { i in
+            let d = cal.date(byAdding: .day, value: i - 6, to: end)!
+            let dayStart = cal.startOfDay(for: d)
+            let v: Double
+            if isAuto(.exercise) {
+                // 已接 HealthKit：今天用 exerciseTimeToday，历史 6 天取 exerciseLast7Days 缓存
+                v = cal.isDateInToday(d)
+                    ? health.exerciseTimeToday
+                    : health.exerciseLast7Days[dayStart] ?? 0
+            } else {
+                // 未接 HealthKit：按天回落到手动运动（ManualHealthStore 已按天存）
+                v = Double(ManualHealthStore.shared.exerciseMinutes(for: dayStart))
+            }
+            return ChartPoint(label: dayFmt.string(from: d), value: v)
+        }
+    }
+
+    /// 近 7 日睡眠时长（小时）柱状数据。与 `weekSteps` 同源的翻周/生长逻辑。
+    private func weekSleep(offset: Int = 0) -> [ChartPoint] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let end = cal.date(byAdding: .day, value: offset * 7, to: today)!
+        return (0..<7).map { i in
+            let d = cal.date(byAdding: .day, value: i - 6, to: end)!
+            let dayStart = cal.startOfDay(for: d)
+            let v: Double
+            if isAuto(.sleep) {
+                // 已接 HealthKit：取 sleepLast7Days 缓存（含今天）
+                v = health.sleepLast7Days[dayStart] ?? 0
+            } else {
+                // 未接 HealthKit：按天回落到手动睡眠（SleepSession + 手动点击；今天额外并入「睡眠」度量以与圆环同源）
+                v = manualSleepForDay(d)
+            }
+            return ChartPoint(label: dayFmt.string(from: d), value: v)
+        }
+    }
+
+    /// 是否展示「云端还没有你的健康数据」引导。
+    /// 口径必须与页面实际展示的数据源一致：仅当 已登录 + HealthMetric 表空 + 今天步数 0，
+    /// 且 用户档案未填身高/体重（否则 BMI 卡片会展示）+ 近 9 日无任何历史步数/运动/睡眠数据时，
+    /// 页面才会真正静默空白，此时才提示从云端恢复。
+    private var shouldShowCloudRestoreHint: Bool {
+        guard UserDefaults.standard.bool(forKey: "aia.isLoggedIn") else { return false }
+        guard healths.isEmpty else { return false }
+        guard stepsCurrentValue == 0 else { return false }
+        // 用户档案已填身高/体重 → 页面至少展示 BMI 卡片，不算空
+        guard weightKg <= 0 || heightCm <= 0 else { return false }
+        // 近 9 日（含今天）任意一天有步数/运动/睡眠历史 → 页面有图表，不算空
+        let hasHistory = (0...8).contains { off in
+            weekSteps(offset: -off).contains { $0.value > 0 }
+            || weekExercise(offset: -off).contains { $0.value > 0 }
+            || weekSleep(offset: -off).contains { $0.value > 0 }
+        }
+        guard !hasHistory else { return false }
+        return true
+    }
+
+    /// 手动模式下某天的睡眠时长（小时）：复用 manualSleepTotalHours，与首页「昨晚睡眠」/ 健康页睡眠圆环同源——
+    /// 今天并入「睡眠」度量残留(includeStored:true)，历史日期不并入(includeStored:false)，避免旧日期被今天残留污染。
+    private func manualSleepForDay(_ d: Date) -> Double {
+        manualSleepTotalHours(sleeps: sleeps, healths: healths, on: d, includeStored: Calendar.current.isDateInToday(d))
+    }
+
+    /// 近 7 日运动时长卡片（复用 Card B 的翻周与生长动画逻辑；与步数共用 chartWeekOffset 保持翻周联动）
+    private var exerciseWeekCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionTitle(text: "近 7 日运动时长",
+                         trailing: chartWeekRangeLabel(offset: chartWeekOffset, base: Date()),
+                         systemImage: "figure.run")
+            TabView(selection: $chartWeekOffset) {
+                ForEach(Array((-8)...0), id: \.self) { off in
+                    let data = weekExercise(offset: off)
+                    Group {
+                        if data.allSatisfy({ $0.value == 0 }) {
+                            Text("还没有运动记录，连接健康 App 或点上方圆环 +10 分钟")
+                                .font(AIATheme.Font.micro)
+                                .foregroundStyle(AIATheme.sub)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                        } else {
+                            GrowthBars(data: data,
+                                       accent: AIATheme.health,
+                                       maxValue: data.map(\.value).max() ?? 1,
+                                       revealed: barsRevealed)
+                        }
+                    }
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .frame(height: 100)
+            ChartPageDots(selection: chartWeekOffset, minOffset: -8, accent: AIATheme.health)
+        }
+        .padding(12)
+        .card(radius: AIATheme.rMD)
+    }
+
+    /// 近 7 日睡眠时长卡片（复用 Card B 的翻周与生长动画逻辑；与步数共用 chartWeekOffset 保持翻周联动）
+    private var sleepWeekCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionTitle(text: "近 7 日睡眠时长",
+                         trailing: chartWeekRangeLabel(offset: chartWeekOffset, base: Date()),
+                         systemImage: "moon.zzz.fill")
+            TabView(selection: $chartWeekOffset) {
+                ForEach(Array((-8)...0), id: \.self) { off in
+                    let data = weekSleep(offset: off)
+                    Group {
+                        if data.allSatisfy({ $0.value == 0 }) {
+                            Text("还没有睡眠记录，点上方「入睡」按钮开始记录")
+                                .font(AIATheme.Font.micro)
+                                .foregroundStyle(AIATheme.sub)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                        } else {
+                            GrowthBars(data: data,
+                                       accent: AIATheme.health,
+                                       maxValue: data.map(\.value).max() ?? 1,
+                                       revealed: barsRevealed)
+                        }
+                    }
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .frame(height: 100)
+            ChartPageDots(selection: chartWeekOffset, minOffset: -8, accent: AIATheme.health)
+        }
+        .padding(12)
+        .card(radius: AIATheme.rMD)
     }
 
     var body: some View {
@@ -1196,7 +1675,11 @@ struct HealthListView: View {
                     // 2026-07-30：重装后若云端本就没有健康数据（当初录入时未登录导致未上云），
                     // 页面会静默空白。这里在「已登录却全空」时给出明确引导：一键从云端恢复；
                     // 若恢复后仍为空，则说明云端无备份，需重新录入（本次会自动上云）。
-                    if UserDefaults.standard.bool(forKey: "aia.isLoggedIn") && healths.isEmpty && stepsCurrentValue == 0 {
+                    // 2026-08-03 修正：空态口径必须与页面实际展示的数据源一致——
+                    // 体重/身高/BMI 来自用户档案 @AppStorage，历史步数/运动/睡眠走手动/HealthKit，
+                    // 这些都不进 healths 表也不看今天步数，但只要任意一项有值页面就不会空白，
+                    // 故需一并纳入判断，避免「有数据还提示没数据」的乌龙。
+                    if shouldShowCloudRestoreHint {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack(spacing: 10) {
                                 Image(systemName: "icloud.and.arrow.down")
@@ -1228,49 +1711,74 @@ struct HealthListView: View {
                     }
                     // Card A · 今日概览（圆环 + 关键指标）
                     VStack(alignment: .leading, spacing: 12) {
+                        // 目标兜底：未手动设置或计算出 0（常见：未填体重/身高 → TDEE 算出 0）时，
+                        // 回退到系统默认目标，避免圆环出现「— / 目标为空」状态（2026-08-01）。
+                        let effectiveStepGoal     = stepGoal > 0 ? stepGoal : 10000
+                        let effectiveSleepGoal    = sleepGoalHours > 0 ? sleepGoalHours : 8
+                        let effectiveExerciseGoal = exerciseGoalMin > 0 ? exerciseGoalMin : 30
+                        let effectiveTdeeGoal     = tdeeGoal > 0 ? Int(tdeeGoal) : 2000
+
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                            let stepsRing = ringLines(current: "\(stepsCurrentValue)", hasData: stepsCurrentValue > 0, goal: effectiveStepGoal)
                             HealthRingButton(
                                 kind: .steps,
-                                value: stepsCurrentValue > 0 ? "\(stepsCurrentValue)" : "—",
+                                value: stepsRing.value,
                                 caption: NSLocalizedString("health.ring.steps", comment: ""),
-                                secondary: stepGoal > 0 ? "目标 \(stepGoal)" : nil,
-                                progress: stepGoal > 0 ? min(Double(stepsCurrentValue) / Double(stepGoal), 1) : 0,
+                                secondary: stepsRing.secondary,
+                                progress: effectiveStepGoal > 0 ? min(Double(stepsCurrentValue) / Double(effectiveStepGoal), 1) : 0,
                                 onTap: { incrementMetric(.steps) },
                                 bumpText: bumpText(.steps),
-                                enabled: !usesHealthKit
+                                enabled: !isAuto(.steps)
                             )
 
+                            let sleepRing = ringLines(
+                                current: String(format: "%.1f", sleepCurrentValue),
+                                hasData: sleepCurrentValue > 0,
+                                goal: Int(effectiveSleepGoal),
+                                unit: "h"
+                            )
                             HealthRingButton(
                                 kind: .sleep,
-                                value: sleepCurrentValue > 0 ? String(format: "%.1f", sleepCurrentValue) : "—",
+                                value: sleepRing.value,
                                 caption: NSLocalizedString("health.ring.sleep", comment: ""),
-                                secondary: sleepGoalHours > 0 ? "目标 \(Int(sleepGoalHours))h" : nil,
-                                progress: sleepGoalHours > 0 ? min(sleepCurrentValue / sleepGoalHours, 1) : 0,
+                                secondary: sleepRing.secondary,
+                                progress: effectiveSleepGoal > 0 ? min(sleepCurrentValue / effectiveSleepGoal, 1) : 0,
                                 onTap: { incrementMetric(.sleep) },
                                 bumpText: bumpText(.sleep),
-                                enabled: !usesHealthKit
+                                enabled: !isAuto(.sleep)
                             )
 
+                            let exerciseRing = ringLines(
+                                current: "\(Int(exerciseCurrentValue))",
+                                hasData: exerciseCurrentValue > 0,
+                                goal: Int(effectiveExerciseGoal),
+                                unit: "min"
+                            )
                             HealthRingButton(
                                 kind: .exercise,
-                                value: exerciseCurrentValue > 0 ? "\(Int(exerciseCurrentValue))" : "—",
+                                value: exerciseRing.value,
                                 caption: NSLocalizedString("health.ring.exercise", comment: ""),
-                                secondary: exerciseGoalMin > 0 ? "目标 \(Int(exerciseGoalMin))min" : nil,
-                                progress: exerciseGoalMin > 0 ? min(exerciseCurrentValue / exerciseGoalMin, 1) : 0,
+                                secondary: exerciseRing.secondary,
+                                progress: effectiveExerciseGoal > 0 ? min(exerciseCurrentValue / effectiveExerciseGoal, 1) : 0,
                                 onTap: { incrementMetric(.exercise) },
                                 bumpText: bumpText(.exercise),
-                                enabled: !usesHealthKit
+                                enabled: !isAuto(.exercise)
                             )
 
+                            let tdeeRing = ringLines(
+                                current: "\(Int(tdeeCurrentValue))",
+                                hasData: tdeeCurrentValue > 0,
+                                goal: effectiveTdeeGoal
+                            )
                             HealthRingButton(
                                 kind: .tdee,
-                                value: tdeeCurrentValue > 0 ? "\(Int(tdeeCurrentValue))" : "—",
+                                value: tdeeRing.value,
                                 caption: NSLocalizedString("health.ring.energy", comment: ""),
-                                secondary: tdeeGoal > 0 ? "目标 \(Int(tdeeGoal))" : nil,
-                                progress: tdeeGoal > 0 ? min(tdeeCurrentValue / tdeeGoal, 1) : 0,
+                                secondary: tdeeRing.secondary,
+                                progress: Double(effectiveTdeeGoal) > 0 ? min(tdeeCurrentValue / Double(effectiveTdeeGoal), 1) : 0,
                                 onTap: { incrementMetric(.tdee) },
                                 bumpText: bumpText(.tdee),
-                                enabled: !usesHealthKit
+                                enabled: !isAuto(.tdee)
                             )
                         }
 
@@ -1287,60 +1795,159 @@ struct HealthListView: View {
                                 StatCard(value: bmiDisplay, caption: NSLocalizedString("health.stat.bmi", comment: ""))
                             }
                             .buttonStyle(.plain)
-                            StatCard(value: stat("心率"), caption: NSLocalizedString("health.stat.restingHR", comment: ""))
+                            Button {
+                                // 自动记录模式（且 HealthKit 可用）不弹出修改窗；仅手动记录模式点击才弹
+                                if !isAuto(.heartRate) {
+                                    showRestingHRInput = true
+                                }
+                            } label: {
+                                StatCard(value: stat("心率"), caption: NSLocalizedString("health.stat.restingHR", comment: ""))
+                            }
+                            .buttonStyle(.plain)
+                            .sheet(isPresented: $showRestingHRInput) {
+                                RestingHeartRateInputSheet(
+                                    initial: isAuto(.heartRate)
+                                        ? Int(health.restingHeartRate)
+                                        : ManualHealthStore.shared.restingHeartRate(for: Date()),
+                                    onSave: { bpm in
+                                        if isAuto(.heartRate) {
+                                            health.saveHeartRate(Double(bpm))
+                                            health.fetchRestingHeartRateToday()
+                                        } else {
+                                            ManualHealthStore.shared.setRestingHeartRate(bpm, for: Date())
+                                        }
+                                    }
+                                )
+                            }
                         }
                     }
                     .padding(12)
                     .card(radius: AIATheme.rMD)
 
-                    // Card · 健康目标（点击进入可编辑）
-                    Button { NavigationRouter.shared.navigate(.healthGoals) } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "target")
-                                .font(AIATheme.Font.title3)
-                                .foregroundStyle(AIATheme.health)
-                                .frame(width: 34, height: 34)
-                                .background(AIATheme.healthBG)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("健康目标").font(AIATheme.Font.footnote.weight(.medium))
-                                Text("体重 \(weightGoalKg > 0 ? String(format: "%.1f", weightGoalKg) : "—")kg · BMI \(targetBmi.map { String(format: "%.1f", $0) } ?? "—") · 运动 \(Int(exerciseGoalMin))min")
-                                    .font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
+                    // Card · 健康目标 + 睡眠按钮：拆成两个等宽格子并排
+                    HStack(spacing: 10) {
+                        // 左格：健康目标，点击进入可编辑
+                        Button { NavigationRouter.shared.navigate(.healthGoals) } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "target")
+                                    .font(AIATheme.Font.title3)
+                                    .foregroundStyle(AIATheme.health)
+                                    .frame(width: 34, height: 34)
+                                    .background(AIATheme.healthBG)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("健康目标").font(AIATheme.Font.footnote.weight(.medium))
+                                    Text("体重 \(weightGoalKg > 0 ? String(format: "%.1f", weightGoalKg) : "—")kg · BMI \(targetBmi.map { String(format: "%.1f", $0) } ?? "—") · 运动 \(Int(exerciseGoalMin))min")
+                                        .font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
+                                }
+                                Spacer(minLength: 0)
                             }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(AIATheme.Font.caption).foregroundStyle(AIATheme.muted)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity)
                         .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        // 让整条横条（包含 padding 空白区）都可点击
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .card(radius: AIATheme.rMD)
+                        .card(radius: AIATheme.rMD)
 
-                    // Card B · 近 7 日步数（由「本周步数」上移至此，替代原体重趋势模块位置）
+                        // 右格：睡眠状态切换按钮（独立格子，填满整个模块；背景色铺满，不与左格嵌套）
+                        SleepToggleButton(activeSession: activeSleepSession,
+                                          lastFinishedSession: lastFinishedSleepSession,
+                                          onToggle: handleSleepToggle)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+
+                    // Card B · 近 7 日步数（可左右滑动翻看过去 8 周，每屏重播生长动画）
                     VStack(alignment: .leading, spacing: 8) {
-                        if !healths.isEmpty {
-                            SectionTitle(text: NSLocalizedString("health.weekSteps", comment: ""))
-                            Chart(weekSteps) { p in
-                                BarMark(x: .value(NSLocalizedString("chart.day", comment: ""), p.label), y: .value(NSLocalizedString("chart.step", comment: ""), p.value))
-                                    .foregroundStyle(AIATheme.health.opacity(0.7))
+                        SectionTitle(text: NSLocalizedString("health.weekSteps", comment: ""),
+                                     trailing: chartWeekRangeLabel(offset: chartWeekOffset, base: Date()))
+                        TabView(selection: $chartWeekOffset) {
+                            ForEach(Array((-8)...0), id: \.self) { off in
+                                let data = weekSteps(offset: off)
+                                Group {
+                                    if data.allSatisfy({ $0.value == 0 }) {
+                                        Text("还没有步数记录，连接健康 App 或点上方圆环 +1000 步")
+                                            .font(AIATheme.Font.micro)
+                                            .foregroundStyle(AIATheme.sub)
+                                            .frame(height: 70)
+                                    } else {
+                                        GrowthBars(data: data,
+                                                   accent: AIATheme.health,
+                                                   maxValue: data.map(\.value).max() ?? 1,
+                                                   revealed: barsRevealed)
+                                    }
+                                }
+                                .tag(off)
                             }
-                            .frame(height: 70)
-                            .chartYScale(domain: safeYDomain(weekSteps.map(\.value)))
-                            .chartYAxis(.hidden).chartXAxis(.hidden)
                         }
+                        .tabViewStyle(.page(indexDisplayMode: .never))
+                        .frame(height: 100)
+                        ChartPageDots(selection: chartWeekOffset, minOffset: -8, accent: AIATheme.health)
                     }
                     .padding(12)
                     .card(radius: AIATheme.rMD)
+                    .onChange(of: chartWeekOffset) { _, _ in
+                        withAnimation(.none) { barsRevealed = false }
+                        Task {
+                            try? await Task.sleep(nanoseconds: 150_000_000)
+                            barsRevealed = true
+                        }
+                    }
 
-                    // Card C · 睡眠阶段
-                    VStack(alignment: .leading, spacing: 8) {
-                        SectionTitle(text: NSLocalizedString("health.sleepStages", comment: ""))
-                        CardRow(icon: "🌙", iconBG: AIATheme.surfaceSecondary, title: String(format: NSLocalizedString("health.sleep.deep", comment: ""), 1.8), subtitle: String(format: NSLocalizedString("health.sleep.deepSub", comment: ""), 25), value: "25%")
-                        CardRow(icon: "💤", iconBG: AIATheme.surfaceSecondary, title: String(format: NSLocalizedString("health.sleep.light", comment: ""), 4.2), subtitle: NSLocalizedString("common.none", comment: ""), value: "58%")
-                        CardRow(icon: "⚡", iconBG: AIATheme.surfaceSecondary, title: String(format: NSLocalizedString("health.sleep.rem", comment: ""), 1.2), subtitle: NSLocalizedString("health.sleep.remSub", comment: ""), value: "17%")
+                    // Card B2 · 近 7 日运动时长
+                    exerciseWeekCard
+
+                    // Card B3 · 近 7 日睡眠时长
+                    sleepWeekCard
+
+                    // Card C · 最近睡眠（真实数据来自 SleepSession；深/浅/REM 待接入 HealthKit 睡眠分析）
+                    VStack(alignment: .leading, spacing: 10) {
+                        SectionTitle(text: "最近睡眠")
+                        if let s = sleeps.first {
+                            // 顶部：总时长（在睡=实时；已醒=记录值）+ 入睡/醒来时间
+                            HStack(alignment: .bottom, spacing: 8) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(s.wakeAt == nil ? "正在睡" : "睡眠时长")
+                                        .font(AIATheme.Font.micro)
+                                        .foregroundStyle(AIATheme.sub)
+                                    Text(sleepDurationText(s))
+                                        .font(.system(size: 22, weight: .semibold))
+                                        .foregroundStyle(AIATheme.health)
+                                }
+                                Spacer(minLength: 0)
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    HStack(spacing: 4) {
+                                        Text("入睡").font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
+                                        Text(timeText(s.sleepStart)).font(AIATheme.Font.footnote.weight(.medium))
+                                    }
+                                    if let w = s.wakeAt {
+                                        HStack(spacing: 4) {
+                                            Text("醒来").font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
+                                            Text(timeText(w)).font(AIATheme.Font.footnote.weight(.medium))
+                                        }
+                                    }
+                                }
+                            }
+                            Divider().padding(.vertical, 2)
+                            // 深/浅/REM：真实分期需 HealthKit 睡眠分析，暂显示占位
+                            CardRow(icon: "🌙", iconBG: AIATheme.surfaceSecondary, title: "深睡", subtitle: "待接入睡眠分析", value: "—")
+                            CardRow(icon: "💤", iconBG: AIATheme.surfaceSecondary, title: "浅睡", subtitle: "待接入睡眠分析", value: "—")
+                            CardRow(icon: "⚡", iconBG: AIATheme.surfaceSecondary, title: "REM", subtitle: "待接入睡眠分析", value: "—")
+                        } else {
+                            VStack(spacing: 8) {
+                                Image(systemName: "moon.zzz.fill")
+                                    .font(.system(size: 28))
+                                    .foregroundStyle(AIATheme.health.opacity(0.6))
+                                Text("还没有睡眠记录")
+                                    .font(AIATheme.Font.footnote.weight(.medium))
+                                Text("点上方「入睡」按钮开始记录，醒来点「醒来」自动记时长。")
+                                    .font(AIATheme.Font.micro)
+                                    .foregroundStyle(AIATheme.sub)
+                                    .multilineTextAlignment(.center)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                        }
                     }
                     .padding(12)
                     .card(radius: AIATheme.rMD)
@@ -1350,7 +1957,7 @@ struct HealthListView: View {
                         EmptyStateView(
                             kind: .health,
                             title: "还没有健康记录",
-                            message: "连接 iPhone 健康，或手动记录体重、睡眠、心率，阿宝帮你画出趋势。"
+                            message: "连接 iPhone 健康，或手动记录体重、睡眠、心率，小记帮你画出趋势。"
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
@@ -1367,7 +1974,18 @@ struct HealthListView: View {
                                     Image(systemName: "heart.circle").foregroundStyle(AIATheme.health)
                                         .frame(width: 26)
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(h.metric).font(AIATheme.Font.footnote.weight(.medium))
+                                        HStack(spacing: 4) {
+                                            Text(h.metric).font(AIATheme.Font.footnote.weight(.medium))
+                                            if let raw = recogSourceBySyncId[h.syncId],
+                                               let label = RecogSource.displayLabel(for: raw) {
+                                                Text(label)
+                                                    .font(AIATheme.Font.micro.weight(.medium))
+                                                    .foregroundStyle(AIATheme.sub)
+                                                    .padding(.horizontal, 4).padding(.vertical, 1)
+                                                    .background(AIATheme.surfaceSecondary)
+                                                    .clipShape(Capsule())
+                                            }
+                                        }
                                         Text(AppFormat.dateTime.string(from: h.date)).font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
                                     }
                                     Spacer()
@@ -1385,6 +2003,40 @@ struct HealthListView: View {
         }
         .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("health.navTitle"))
+        // 睡眠遮罩出现时，临时收起导航栏的返回 + 右上齿轮按钮，避免用户点出/打断睡眠遮罩
+        .navigationBarBackButtonHidden(showSleepMask)
+        .toolbar {
+            if !showSleepMask {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showSourceSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(AIATheme.Font.body)
+                            .foregroundStyle(AIATheme.health)
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showSourceSettings) {
+            HealthSourceSettingsView()
+        }
+        .task {
+            UsageAnalytics.logOpen("health")
+            health.refreshAll()          // 原只拉步数，现拉全部 6 项
+            startHealthRefreshTimer()    // 启动前台周期刷新
+            // 延迟一帧再触发近7日步数柱状图从 0 向上生长（立即改会被 .task 吞掉）
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            barsRevealed = true
+        }
+        .onChange(of: health.authorized) { authorized in
+            // 授权可能在进入本页后才完成，补齐定时器启动
+            if authorized { startHealthRefreshTimer() }
+        }
+        .onDisappear {
+            barsRevealed = false
+            stopHealthRefreshTimer()     // 离开页面必须停，避免泄漏与后台空转
+        }
         .overlay(alignment: .bottom) {
             if multiSelectMode {
                 MultiSelectBottomBar(
@@ -1422,6 +2074,35 @@ struct HealthListView: View {
             }
         } message: {
             Text(String(format: NSLocalizedString("common.deleteCount", comment: ""), selectedIDs.count))
+        }
+        .overlay {
+            // 睡眠遮罩：与首页同口径。健康页入睡→盖遮罩；遮罩「我醒了」→居中大卡 toast；
+            // 「先用一下 App」→仅收遮罩不结束睡眠。本页被 push 于首页同一 NavigationStack，
+            // 其 GlobalToastOverlay 在健康页同样可见，无需重复挂载。
+            if showSleepMask {
+                SleepMaskOverlay(
+                    session: activeSleepSession,
+                    onWake: {
+                        let start = activeSleepSession?.sleepStart ?? Date()
+                        toggleSleepSession(in: context, sleeps: sleeps)
+                        ToastCenter.shared.showImportant(
+                            sleepSummaryText(start: start),
+                            icon: "🌙",
+                            accent: AIATheme.warning
+                        )
+                        DispatchQueue.main.async {
+                            withAnimation(.easeOut(duration: 0.3)) { showSleepMask = false }
+                        }
+                    },
+                    onDismiss: {
+                        // 「先用一下 App」：不结束睡眠，仅收起遮罩。
+                        DispatchQueue.main.async {
+                            withAnimation(.easeOut(duration: 0.3)) { showSleepMask = false }
+                        }
+                    }
+                )
+                .transition(.opacity)
+            }
         }
     }
 
@@ -1468,6 +2149,130 @@ private enum BillFilter: String, CaseIterable {
     }
 }
 
+/// 健康页横条右侧的睡眠切换按钮：空闲显示「😴 入睡」（紫），在睡显示「☀️ 醒来 + 已睡时长」（琥珀）。
+/// 独立 Button，不嵌套在左侧健康目标按钮内（项目铁律：Button 不嵌 Button）。
+/// 用 TimelineView 每 1s 重渲一次，使「已睡时长」在睡眠中实时走动。
+private struct SleepToggleButton: View {
+    let activeSession: SleepSession?
+    /// 已醒的最近一条睡眠会话，用于「元气满满」态下方显示「上次入睡时间 + 睡眠时长」。
+    let lastFinishedSession: SleepSession?
+    let onToggle: () -> Void
+
+    /// 「正在睡」= 有进行中的会话。
+    /// activeSession 由父视图 `HealthListView.activeSleepSession` 提供，已过滤掉 wakeAt != nil 的旧数据，
+    /// 所以这里只需判断非空即可——原写法 `activeSession?.wakeAt == nil` 会在 activeSession 为 nil
+    /// （空闲 / 刚醒来）时也返回 true（nil == nil），导致醒来后按钮仍显示「正在梦乡里」。
+    private var isSleeping: Bool { activeSession != nil }
+    /// 状态色：空闲=紫（AIATheme.health），在睡=琥珀（AIATheme.warning）。
+    private var accentColor: Color { isSleeping ? AIATheme.warning : AIATheme.health }
+
+    @State private var flipped = false
+    @State private var timer: Timer?
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            Button(action: {
+                onToggle()
+                flipped = false
+            }) {
+                ZStack {
+                    frontFace
+                        .rotation3DEffect(.degrees(flipped ? 180 : 0), axis: (x: 0, y: 1, z: 0))
+                        .opacity(flipped ? 0 : 1)
+                    backFace
+                        .rotation3DEffect(.degrees(flipped ? 180 : 0), axis: (x: 0, y: 1, z: 0))
+                        .opacity(flipped ? 1 : 0)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(accentColor.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AIATheme.rMD, style: .continuous)
+                        .stroke(accentColor.opacity(0.25), lineWidth: 0.5)
+                )
+            }
+            .buttonStyle(WaterCardButtonStyle())
+        }
+        .onAppear(perform: startTimer)
+        .onDisappear(perform: stopTimer)
+    }
+
+    private var frontFace: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 6) {
+                // 图标语义是「当前状态」：在睡=moon（梦乡里），空闲=sun（元气满满）。
+                Image(systemName: isSleeping ? "moon.fill" : "sun.max.fill")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(accentColor)
+                    .frame(width: 24, height: 24)
+                    .background(accentColor.opacity(0.18))
+                    .clipShape(Circle())
+                Text(isSleeping ? "正在梦乡里💤" : "元气满满")
+                    .font(AIATheme.Font.footnote.weight(.semibold))
+                    .foregroundStyle(accentColor)
+            }
+            if isSleeping, let start = activeSession?.sleepStart {
+                Text(formatSleepDuration(Date().timeIntervalSince(start)))
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(accentColor.opacity(0.8))
+            } else if !isSleeping, let last = lastFinishedSession {
+                // 空闲态（元气满满）：下方一行小字 = 上次入睡时间 + 上次睡眠时长
+                Text("上次入睡 \(formatClock(last.sleepStart)) · \(formatSleepDuration(sleepSessionDuration(last)))")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(accentColor.opacity(0.8))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var backFace: some View {
+        VStack(spacing: 4) {
+            Image(systemName: isSleeping ? "sun.max.fill" : "moon.fill")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(accentColor)
+                .frame(width: 24, height: 24)
+                .background(accentColor.opacity(0.18))
+                .clipShape(Circle())
+            Text(isSleeping ? "点击起床" : "点击入睡")
+                .font(AIATheme.Font.footnote.weight(.semibold))
+                .foregroundStyle(accentColor)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .rotation3DEffect(.degrees(180), axis: (x: 0, y: 1, z: 0))
+    }
+
+    private func startTimer() {
+        guard !UIAccessibility.isReduceMotionEnabled else { return }
+        stopTimer()
+        timer = Timer.scheduledTimer(withTimeInterval: 2.2, repeats: true) { _ in
+            withAnimation(.easeInOut(duration: 0.9)) { flipped.toggle() }
+        }
+    }
+
+    private func stopTimer() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    /// 把 Date 格式化为「HH:mm」，用于「上次入睡时间」展示。
+    private func formatClock(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale.current
+        f.dateFormat = "HH:mm"
+        return f.string(from: d)
+    }
+
+    private func formatSleepDuration(_ sec: TimeInterval) -> String {
+        let total = Int(sec)
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        let s = total % 60
+        return "\(h)h\(m)m\(s)s"
+    }
+}
+
 struct BillListView: View {
     @Environment(\.modelContext) private var context
     @Query(filter: #Predicate { !$0.syncDeleted }, sort: \Bill.time, order: .reverse) private var bills: [Bill]
@@ -1492,7 +2297,12 @@ struct BillListView: View {
     // MARK: 商户搜索筛选（仅「全部」标签的账单详情列表）
     @State private var merchantQuery: String = ""
     @FocusState private var merchantSearchFocused: Bool
-    @State private var billScrollPosition = ScrollPosition()
+    /// 商户搜索框获得焦点时，把搜索框滚到列表顶部（ScrollViewReader + nonce 计数器触发，
+    /// 兼容 iOS 17，避免用 iOS 18 的 ScrollPosition）。非 0 才滚动，避免首次渲染误触发。
+    @State private var scrollToBillTopNonce: Int = 0
+    /// 近7日消费柱状图生长动画触发标志（进入延迟触发、离开重置，便于重播）。
+    @State private var barsRevealed = false
+    @State private var chartWeekOffset: Int = 0   // 近7日消费图翻周：0=本周，负=过去第 |n| 周
 
     private var todayBills: [Bill] {
         bills.filter { Calendar.current.isDateInToday($0.time) }
@@ -1530,6 +2340,23 @@ struct BillListView: View {
     private var weekExpenseTotal: Double { weekExpenseBills.reduce(0) { $0 + $1.amount } }
     private var weekExpenseByCategory: [(cat: String, sum: Double)] { expenseByCategory(for: weekExpenseBills) }
 
+    /// 近 7 日每日消费（支出，不含收入），用于「近7日消费」柱状图。
+    /// 顺序与热量/步数图一致：左旧 → 右今（index 0 = 6 天前，index 6 = 今天）。
+    /// 近 7 日消费柱状数据。`offset` 为 0 表示本周，负数表示过去第 |offset| 周。
+    private func weekSpend(offset: Int = 0) -> [ChartPoint] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let end = cal.date(byAdding: .day, value: offset * 7, to: today)!
+        return (0..<7).map { i in
+            let d = cal.date(byAdding: .day, value: i - 6, to: end)!
+            let start = cal.startOfDay(for: d)
+            let endDay = cal.date(byAdding: .day, value: 1, to: start)!
+            let sum = bills.filter { !$0.isIncome && $0.time >= start && $0.time < endDay }
+                            .reduce(0) { $0 + $1.amount }
+            return ChartPoint(label: dayFmt.string(from: d), value: sum)
+        }
+    }
+
     private var yearBills: [Bill] {
         let comp = Calendar.current.dateComponents([.year], from: Date())
         guard let start = Calendar.current.date(from: comp) else { return [] }
@@ -1555,7 +2382,8 @@ struct BillListView: View {
 
     private var filtered: [Bill] {
         switch filter {
-        case .all, .month, .calendar: return monthBills
+        case .all: return bills            // 全部历史账单（替代 monthBills）
+        case .month, .calendar: return monthBills
         }
     }
     /// 商户搜索筛选后的账单列表（跨月搜索）：
@@ -1663,8 +2491,7 @@ struct BillListView: View {
                         )
                 }
                 VStack(alignment: .leading, spacing: 3) {
-                    ForEach(0..<min(categories.count, 3), id: \.self) { i in
-                        let item = categories[i]
+                    ForEach(Array(categories.prefix(3)), id: \.cat) { item in
                         HStack(spacing: 4) {
                             Circle().fill(BillCategoryHelpers.color(for: item.cat)).frame(width: 6, height: 6)
                             Text(item.cat).font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
@@ -1691,8 +2518,9 @@ struct BillListView: View {
                 .padding(.top, 4)
                 .padding(.bottom, 6)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+            ScrollViewReader { billProxy in
+                ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
                     if filter == .all {
                         // 聚合入口：周期记账 / 账单导入 / 自动记账
                         // 2026-07-24：改编程式 push 走根 NavigationStack(path:)，跟 TodoToolsView 入口同源。
@@ -1724,14 +2552,13 @@ struct BillListView: View {
                         }
                         .buttonStyle(.plain)
 
-                    // Card · 月度预算
-                    VStack(alignment: .leading, spacing: 8) {
-                        SectionTitle(text: NSLocalizedString("bill.budget", comment: ""))
+                    // Card · 月度预算（去掉「预算」标题，收紧内边距让卡片更矮）
+                    VStack(alignment: .leading, spacing: 4) {
                         Button {
                             editedBudget = monthlyBudget
                             showBudgetEditor = true
                         } label: {
-                            VStack(alignment: .leading, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 4) {
                                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                                     Text(String(format: NSLocalizedString("bill.monthlyBudget", comment: ""), Int(monthlyBudget)))
                                         .font(AIATheme.Font.caption).foregroundStyle(AIATheme.sub)
@@ -1754,6 +2581,50 @@ struct BillListView: View {
                         summaryCarousel
                             .padding(12)
                             .card(radius: AIATheme.rMD)
+
+                    // Card · 近7日消费（可左右滑动翻看过去 8 周，每屏重播生长动画）
+                    VStack(alignment: .leading, spacing: 8) {
+                        SectionTitle(text: NSLocalizedString("bill.last7days", comment: ""),
+                                     trailing: chartWeekRangeLabel(offset: chartWeekOffset, base: Date()))
+                        TabView(selection: $chartWeekOffset) {
+                            ForEach(Array((-8)...0), id: \.self) { off in
+                                let data = weekSpend(offset: off)
+                                Group {
+                                    if data.allSatisfy({ $0.value == 0 }) {
+                                        Text(NSLocalizedString("bill.week.empty", comment: ""))
+                                            .font(AIATheme.Font.micro)
+                                            .foregroundStyle(AIATheme.sub)
+                                            .multilineTextAlignment(.center)
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                                    } else {
+                                        GrowthBars(data: data,
+                                                   accent: AIATheme.bill,
+                                                   maxValue: data.map(\.value).max() ?? 1,
+                                                   revealed: barsRevealed,
+                                                   abbreviate: false)
+                                    }
+                                }
+                                .tag(off)
+                            }
+                        }
+                        .tabViewStyle(.page(indexDisplayMode: .never))
+                        .frame(height: 100)
+                        ChartPageDots(selection: chartWeekOffset, minOffset: -8, accent: AIATheme.bill)
+                    }
+                    .padding(12)
+                    .card(radius: AIATheme.rMD)
+                    .task {
+                        try? await Task.sleep(nanoseconds: 150_000_000)
+                        barsRevealed = true
+                    }
+                    .onChange(of: chartWeekOffset) { _, _ in
+                        withAnimation(.none) { barsRevealed = false }
+                        Task {
+                            try? await Task.sleep(nanoseconds: 150_000_000)
+                            barsRevealed = true
+                        }
+                    }
+                    .onDisappear { barsRevealed = false }
                     }
 
                     // 商户搜索框：仅「全部」标签可见，作用于账单详情列表（跨月搜索），置于账单列表区域顶部
@@ -1825,17 +2696,17 @@ struct BillListView: View {
                             }
                             .buttonStyle(.plain)
 
-                            // 同理：monthlyGroups 派生自 @Query，用元素遍历避免下标越界。
-                            // 用 enumerated() 取 offset 作 id，避免 tuple 需 Hashable 且保证单次 render 内稳定。
-                            ForEach(Array(monthlyGroups.enumerated()), id: \.offset) { idx, group in
+                            // monthlyGroups 派生自 @Query，数组长度变化时用元素遍历避免下标越界。
+                            // 用 (year*100+month) 作稳定唯一 id，不用 offset（数组缩短时旧索引会访问越界）。
+                            ForEach(monthlyGroups.map { g in (id: g.year * 100 + g.month, group: g) }, id: \.id) { item in
                                 Button {
-                                    NavigationRouter.shared.navigate(.monthlyBillList(year: group.year, month: group.month))
+                                    NavigationRouter.shared.navigate(.monthlyBillList(year: item.group.year, month: item.group.month))
                                 } label: {
-                                    monthlySummaryRow(group)
+                                    monthlySummaryRow(item.group)
                                 }
                                 .buttonStyle(.plain)
                                 // 月份卡片之间加 hairline 分隔，最后一张不画
-                                if idx < monthlyGroups.count - 1 {
+                                if item.id != monthlyGroups.last.map({ $0.year * 100 + $0.month }) {
                                     Rectangle()
                                         .fill(AIATheme.hairline)
                                         .frame(height: 0.7)
@@ -1884,7 +2755,7 @@ struct BillListView: View {
                         // groupedByDate 派生自 @Query，导航 onAppear 的 RecurringBillManager.generateDue
                         // 插入账单/提醒时数组长度会变化，两次求值不一致会导致 groupedByDate[i] 越界闪退。
                         // 用 enumerated() 取 offset 作 id，避免 tuple 需 Hashable 且保证单次 render 内稳定。
-                        ForEach(Array(groupedByDate.enumerated()), id: \.offset) { idx, group in
+                        ForEach(Array(groupedByDate.enumerated()), id: \.element.date) { idx, group in
                             // 日期组之间加 hairline 分隔（第一个不加，避免与上方"账单详情"标题区冲突）
                             if idx > 0 {
                                 Rectangle()
@@ -1902,7 +2773,10 @@ struct BillListView: View {
                                         onTap: { editBill = b },
                                         onLongPress: { enterMultiSelect(b.persistentModelID) },
                                         onToggle: { toggleSelection(b.persistentModelID) },
-                                        onDelete: { SafeDelete.bill(b, in: context) }
+                                        onDelete: {
+                                            SafeDelete.billByID(b.persistentModelID, in: context)
+                                            CloudSyncManager.shared.syncAfterLocalChange(context: context)
+                                        }
                                     ) {
                                         groupedBillRow(b)
                                     }
@@ -1920,28 +2794,34 @@ struct BillListView: View {
                 }
                 .padding()
             }
-            AIBottomBar(prompts: [
-                AIPrompt(text: "点拍照识别、记录账单、小票", pointsTo: .camera),
-                AIPrompt(text: "今天花了多少钱？点此阿宝帮你记", pointsTo: nil),
-                AIPrompt(text: "点麦克风，语音记录账单", pointsTo: .mic),
-                AIPrompt(text: "阿宝帮总结这个月的消费情况", pointsTo: nil),
-                AIPrompt(text: "点相册上传，自动记账", pointsTo: .album)
-            ], entrySource: "bill")
-        }
-        .scrollPosition($billScrollPosition)
-        .onChange(of: merchantSearchFocused) { _, focused in
-            if focused {
+            .onChange(of: scrollToBillTopNonce) { _, _ in
+                guard scrollToBillTopNonce != 0 else { return }
                 // 等键盘布局完成后再滚动，确保搜索框稳定停在列表区域最顶部，
                 // 不被系统「最小滚动露出输入框」的键盘避让逻辑抵消。
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
                     withAnimation(.easeInOut(duration: 0.25)) {
-                        billScrollPosition.scrollTo(id: "billDetailTop", anchor: .top)
+                        billProxy.scrollTo("billDetailTop", anchor: .top)
                     }
                 }
+            }
+            }
+            AIBottomBar(prompts: [
+                AIPrompt(text: "点拍照识别、记录账单、小票", pointsTo: .camera),
+                AIPrompt(text: "今天花了多少钱？点此小记帮你记", pointsTo: nil),
+                AIPrompt(text: "点麦克风，语音记录账单", pointsTo: .mic),
+                AIPrompt(text: "小记帮总结这个月的消费情况", pointsTo: nil),
+                AIPrompt(text: "点相册上传，自动记账", pointsTo: .album)
+            ], entrySource: "bill")
+        }
+        .onChange(of: merchantSearchFocused) { _, focused in
+            if focused {
+                // 触发 ScrollViewReader 滚到搜索框顶部（billProxy 在 reader 内处理）。
+                scrollToBillTopNonce += 1
             }
         }
         .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("tab.bill"))
+        .task { UsageAnalytics.logOpen("bill") }
         .toolbar {
             if !multiSelectMode {
                 // 右上角 + 号 → 手动添加账单（与编辑账单共用 EditBillView，加 isAdding: true 切换 title + 隐藏删除按钮）
@@ -1989,7 +2869,7 @@ struct BillListView: View {
         } message: {
             Text(String(format: NSLocalizedString("common.deleteCount", comment: ""), selectedIDs.count))
         }
-        .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker)
+        .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker, navigateToChat: true)
         .sheet(isPresented: $showBudgetEditor) {
             VStack(spacing: 0) {
                 HStack {
@@ -2115,7 +2995,7 @@ struct BillListView: View {
         let expense = bills.filter { !$0.isIncome }.reduce(0) { $0 + $1.amount }
         let income = bills.filter { $0.isIncome }.reduce(0) { $0 + $1.amount }
         let isToday = Calendar.current.isDateInToday(date)
-        let dateText = isToday ? "今天 \(AppFormat.date.string(from: date))（\(weekdayText(date))）" : "\(AppFormat.date.string(from: date))（\(weekdayText(date))）"
+        let dateText = isToday ? "今天 \(AppFormat.monthDay.string(from: date))（\(weekdayText(date))）" : "\(AppFormat.monthDay.string(from: date))（\(weekdayText(date))）"
         return HStack(spacing: 0) {
             Text(dateText)
                 .font(AIATheme.Font.footnote.weight(.semibold))
@@ -2187,7 +3067,7 @@ struct BillListView: View {
                 Text(b.category.isEmpty ? NSLocalizedString("common.other", comment: "") : b.category)
                     .font(AIATheme.Font.subhead.weight(.medium))
                     .foregroundStyle(.primary)
-                Text("\(AppFormat.time.string(from: b.time)) | \(b.merchant)")
+                Text("\(AppFormat.hourMinute.string(from: b.time)) | \(b.merchant)")
                     .font(AIATheme.Font.micro)
                     .foregroundStyle(AIATheme.muted)
                     .lineLimit(1)
@@ -2203,7 +3083,8 @@ struct BillListView: View {
     }
 
     private func deleteBill(_ b: Bill) {
-        SafeDelete.bill(b, in: context)
+        SafeDelete.billByID(b.persistentModelID, in: context)
+        CloudSyncManager.shared.syncAfterLocalChange(context: context)
     }
 
     // MARK: - 账单日历视图（在日历查看）
@@ -2296,12 +3177,15 @@ struct BillListView: View {
 
                         // 选中日期账单列表：行间 hairline 分隔（深色模式 0.7pt 物理宽度足够醒目）
                         ForEach(Array(dayBills.enumerated()), id: \.element.persistentModelID) { idx, b in
-                            Button {
-                                editBill = b
-                            } label: {
+                            SelectableRow(
+                                isSelecting: false,
+                                isSelected: false,
+                                onTap: { editBill = b },
+                                onToggle: {},
+                                onDelete: { deleteBill(b) }
+                            ) {
                                 groupedBillRow(b)
                             }
-                            .buttonStyle(.plain)
                             // 行间分隔：让位 62pt（icon 42 + 间距 12 + 缓冲 8），最后一行不画
                             if idx < dayBills.count - 1 {
                                 Rectangle()
@@ -2401,6 +3285,11 @@ private enum TodoFilter: String, CaseIterable {
 struct ReminderListView: View {
     @Environment(\.modelContext) private var context
     @Query(filter: #Predicate<Reminder> { !$0.syncDeleted }) private var reminders: [Reminder]
+    /// 识别来源标记（RecogSource 1:1 关联 Reminder.syncId），用于每行显示「本地AI识别/云端AI…」
+    @Query private var recogSources: [RecogSource]
+    private var recogSourceBySyncId: [UUID: String] {
+        Dictionary(uniqueKeysWithValues: recogSources.map { ($0.syncId, $0.recogSourceRaw) })
+    }
     @State private var filter: TodoFilter = .active
     @State private var calendarMonth = Date()
     @State private var selectedDate: Date? = Date()
@@ -2415,6 +3304,47 @@ struct ReminderListView: View {
     @State private var multiSelectMode = false
     @State private var selectedIDs = Set<PersistentIdentifier>()
     @State private var showDeleteConfirm = false
+
+    // MARK: 长按拖动改期（方案 A：长按整行 = 抬起，拖到日期 header 改 due）
+    /// key=TodoGroup?：
+    ///   - .day(d) 表示某天的 header
+    ///   - .overdue 表示「已逾期事件」header
+    ///   - nil 表示「未安排」组
+    /// 收集各 header 的全局矩形，拖动中实时命中检测。
+    private struct TodoHeaderFrameKey: PreferenceKey {
+        static var defaultValue: [TodoGroup?: CGRect] { [:] }
+        static func reduce(value: inout [TodoGroup?: CGRect], nextValue: () -> [TodoGroup?: CGRect]) {
+            for (k, v) in nextValue() { value[k] = v }
+        }
+    }
+    /// 收集每个待办行的全局矩形 + 所属分组，用于拖动时计算「行级插入点」，
+    /// 从而实现「拖动时其余行实时让位（live reflow）」的直观反馈。
+    /// 用显式结构体（而非元组）承载：Swift 中元组不遵守 Equatable 协议，
+    /// 会导致 [String: Tuple] 无法满足 onPreferenceChange 要求的 Equatable。
+    private struct TodoRowFrame: Equatable {
+        let frame: CGRect
+        let group: TodoGroup
+    }
+    private struct TodoRowFrameKey: PreferenceKey {
+        static var defaultValue: [String: TodoRowFrame] { [:] }
+        static func reduce(value: inout [String: TodoRowFrame],
+                          nextValue: () -> [String: TodoRowFrame]) {
+            for (k, v) in nextValue() { value[k] = v }
+        }
+    }
+    @State private var draggingSyncId: String? = nil   // 正在拖动改期的待办 syncId
+    @State private var isDragging = false
+    @State private var hoverGroup: TodoGroup?? = nil    // 当前悬停的组（外层 nil=未悬停在任何 header；内层 nil=未安排组）
+    @State private var hoveringHeader = false           // 是否真的悬停在某个 header 上
+    @State private var headerFrames: [TodoGroup?: CGRect] = [:]
+    // 行级实时让位（live reflow）所需状态：
+    @State private var rowFrames: [String: TodoRowFrame] = [:]
+    @State private var dragLocation: CGPoint = .zero      // 手指当前全局坐标（LongPressDragView.onChanged）
+    @State private var dragStartLocation: CGPoint = .zero  // 长按成立时手指坐标，用于判定"是否已移动"
+    @State private var dragGrabOffset: CGSize = .zero      // 手指相对行中心的偏移，浮起卡片保持该相对关系避免跳位
+    @State private var dropIndex: DropIndex? = nil  // 目标插入点（所在组 + 组内索引）
+    @State private var draggedRowHeight: CGFloat = 56     // 被拖行高度，用于让位位移量
+    @State private var longPressArmed = false           // 长按成立后临时启用改期拖拽（默认 false → 不挂任何手势，滚动不受扰）
     private var active: [Reminder] {
         // 含「未安排截止」的待办：due == nil 的也保留在底部，以保持与首页宫格 `recentTodos` 的来源一致。
         // 这样「测试不提醒」这种测试用例在两个地方都能看到、能删能改。
@@ -2440,23 +3370,49 @@ struct ReminderListView: View {
         default:     return (NSLocalizedString("todo.priority.medium", comment: ""), AIATheme.amber)
         }
     }
-    private var groupedByDate: [(date: Date?, reminders: [Reminder])] {
+    /// 待办分组键：`overdue`(已逾期) / `day(Date)`(某天) / `unscheduled`(未安排)。
+    /// overdue 永远是第一组、unscheduled 永远是最后一组；中间按日期排序。
+    /// 拖拽时的目标插入点（所在组 + 组内索引）。用显式结构体以满足 Equatable，
+    /// 供 `.animation(value:)` 使用（匿名标签元组 `(group:at:)` 不自动遵守 Equatable）。
+    private struct DropIndex: Equatable {
+        let group: TodoGroup
+        let at: Int
+    }
+    private enum TodoGroup: Hashable {
+        case overdue
+        case day(Date)
+        case unscheduled
+    }
+
+    private var groupedByDate: [(group: TodoGroup, reminders: [Reminder])] {
         let cal = Calendar.current
-        let grouped = Dictionary(grouping: list) { r -> Date? in
-            r.due.map { cal.startOfDay(for: $0) }
-        }
+        let today = cal.startOfDay(for: Date())
         // 排序方向按当前 filter 区分：
         //   - 未完成：日期升序（最早/快过期的在前——"先做快过期的"）
         //   - 已完成：日期倒序（最近完成日期在前——用户视角"最近都完成了什么"）
         let descending = filter == .finished
+        // 已完成项不存在"逾期"概念（逾期描述的是「截止日早于今天」，
+        // 已完成项的 due 是历史截止日，按"今天"比对总会落在 overdue，体感违和），
+        // 所以只在未完成列表里走 .overdue 分支；已完成列表全部按 due 日期正常分组。
+        let showOverdue = filter != .finished
+        let grouped = Dictionary(grouping: list) { r -> TodoGroup in
+            guard let due = r.due else { return .unscheduled }
+            let day = cal.startOfDay(for: due)
+            if showOverdue && day < today { return .overdue }
+            return .day(day)
+        }
         return grouped.sorted { a, b in
             switch (a.key, b.key) {
-            case (nil, nil): return false
-            case (nil, _): return false
-            case (_, nil): return true
-            case let (d1?, d2?): return descending ? d1 > d2 : d1 < d2
+            case (.overdue, .overdue): return false
+            case (.overdue, _): return true                          // 已逾期永远在最前
+            case (_, .overdue): return false
+            case (.unscheduled, .unscheduled): return false
+            case (.unscheduled, _): return false                    // 未安排永远在最底
+            case (_, .unscheduled): return true
+            case let (.day(d1), .day(d2)): return descending ? d1 > d2 : d1 < d2
+            default: return false
             }
-        }.map { (date: $0.key, reminders: $0.value.sorted {
+        }.map { (group: $0.key, reminders: $0.value.sorted {
             // 同组内：未完成升序（早 due 先）、已完成倒序（晚 due 后完成的在前）
             let l = ($0.due ?? .distantPast), r = ($1.due ?? .distantPast)
             return descending ? l > r : l < r
@@ -2474,22 +3430,67 @@ struct ReminderListView: View {
         default: return ""
         }
     }
-    private func dateHeader(_ date: Date?, reminders: [Reminder]) -> some View {
-        let dateText: String
-        if let d = date {
-            let isToday = Calendar.current.isDateInToday(d)
-            dateText = isToday ? "今天 \(AppFormat.date.string(from: d))（\(weekdayText(d))）" : "\(AppFormat.date.string(from: d))（\(weekdayText(d))）"
-        } else {
-            dateText = "未安排"
-        }
-        return HStack(spacing: 0) {
-            Text(dateText)
-                .font(AIATheme.Font.footnote.weight(.semibold))
-                .foregroundStyle(.primary)
-            Spacer()
-            Text("\(reminders.count)项")
-                .font(AIATheme.Font.micro)
-                .foregroundStyle(AIATheme.muted)
+    @ViewBuilder
+    private func dateHeader(_ group: TodoGroup, reminders: [Reminder]) -> some View {
+        switch group {
+        case .overdue:
+            // 「已逾期事件」是计算状态，但仍可作为长按拖拽目标：
+            // 拖到这儿等于"恢复一个逾期项到逾期区"——通常不会有人这么干，但实现上跟其他 header 一致。
+            let highlighted = isDragging && hoveringHeader && hoverGroup == .some(.overdue)
+            HStack(spacing: 0) {
+                Text("已逾期事件")
+                    .font(AIATheme.Font.footnote.weight(.semibold))
+                    .foregroundStyle(highlighted ? AIATheme.over.opacity(0.85) : AIATheme.over)
+                Spacer()
+                Text("\(reminders.count)项")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+            }
+            .padding(.vertical, 4)
+            .background(highlighted ? AIATheme.over.opacity(0.12) : Color.clear)
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(key: TodoHeaderFrameKey.self, value: [TodoGroup.overdue: geo.frame(in: .global)])
+                }
+            )
+        case .day(let date):
+            let isToday = Calendar.current.isDateInToday(date)
+            let dateText = isToday ? "今天 \(AppFormat.monthDay.string(from: date))（\(weekdayText(date))）" : "\(AppFormat.monthDay.string(from: date))（\(weekdayText(date))）"
+            let highlighted = isDragging && hoveringHeader && hoverGroup == .some(.day(date))
+            HStack(spacing: 0) {
+                Text(dateText)
+                    .font(AIATheme.Font.footnote.weight(.semibold))
+                    .foregroundStyle(highlighted ? AIATheme.blue : .primary)
+                Spacer()
+                Text("\(reminders.count)项")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+            }
+            .padding(.vertical, 4)
+            .background(highlighted ? AIATheme.blue.opacity(0.12) : Color.clear)
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(key: TodoHeaderFrameKey.self, value: [TodoGroup.day(date): geo.frame(in: .global)])
+                }
+            )
+        case .unscheduled:
+            let highlighted = isDragging && hoveringHeader && hoverGroup == .some(nil)
+            HStack(spacing: 0) {
+                Text("未安排")
+                    .font(AIATheme.Font.footnote.weight(.semibold))
+                    .foregroundStyle(highlighted ? AIATheme.blue : .primary)
+                Spacer()
+                Text("\(reminders.count)项")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+            }
+            .padding(.vertical, 4)
+            .background(highlighted ? AIATheme.blue.opacity(0.12) : Color.clear)
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(key: TodoHeaderFrameKey.self, value: [nil: geo.frame(in: .global)])
+                }
+            )
         }
     }
 
@@ -2504,96 +3505,40 @@ struct ReminderListView: View {
             .padding(.top, 4)
             .padding(.bottom, 6)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    // 提醒设置 / 自动记待办 入口
-                    Button {
-                        NavigationRouter.shared.navigate(HomeRoute.todoTools)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "gearshape.2.fill")
-                                .font(AIATheme.Font.title3)
-                                .foregroundStyle(AIATheme.todo)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("提醒设置 / 自动记待办")
-                                    .font(AIATheme.Font.subhead.weight(.semibold))
-                                    .foregroundStyle(.primary)
-                                Text("设置默认提醒时间、截屏自动识别待办")
-                                    .font(AIATheme.Font.micro)
-                                    .foregroundStyle(AIATheme.muted)
-                            }
-                            Spacer(minLength: 0)
-                            Image(systemName: "chevron.right")
-                                .font(AIATheme.Font.footnote.weight(.medium))
-                                .foregroundStyle(AIATheme.muted)
-                        }
-                        .padding(12)
-                        .card()
-                    }
-                    .buttonStyle(.plain)
-
-                    if filter == .calendar {
-                        calendarView
-                    } else if list.isEmpty {
-                        let emptyTitle: String = switch filter {
-                        case .finished: "自动记待办"
-                        case .active: "还没有待办"
-                        case .calendar: ""
-                        }
-                        if filter == .finished {
-                            // 已完成空态：引导用户配置快捷指令自动记录
-                            EmptyStateView(
-                                kind: .todo,
-                                title: emptyTitle,
-                                message: "设置快捷指令，自动记录待办",
-                                actionTitle: "查看教程",
-                                action: { NavigationRouter.shared.navigate(.autoSetup) }
-                            )
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        } else {
-                            EmptyStateView(
-                                kind: .todo,
-                                title: emptyTitle,
-                                message: "跟阿宝说一句话就能建待办，例如「周五提醒我交报表」。",
-                                actionTitle: "叫阿宝提醒我",
-                                action: { NavigationRouter.shared.navigateToChat(prefill: "2分钟后提醒我打开阿宝AI管家app") }
-                            )
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
-                    } else {
-                        // 直接遍历元素（不再用 ForEach(0..<count) + groupedByDate[i] 下标）：
-                        // groupedByDate 派生自 @Query，导航 onAppear 的 RecurringBillManager.generateDue
-                        // 插入账单/提醒时数组长度会变化，两次求值不一致会导致 groupedByDate[i] 越界闪退。
-                        // 用 enumerated() 取 offset 作 id，避免 tuple 需 Hashable 且保证单次 render 内稳定。
-                        ForEach(Array(groupedByDate.enumerated()), id: \.offset) { _, group in
-                            VStack(alignment: .leading, spacing: 8) {
-                                dateHeader(group.date, reminders: group.reminders)
-                                ForEach(group.reminders) { r in
-                                    todoRow(r)
-                                }
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal)
-                .padding(.bottom)
-            }
-            // 禁用列表变化/空态切换的隐式动画，避免最后一条删除时动画叠加卡死。
-            .animation(nil, value: list.count)
-            .animation(nil, value: filter)
+            todoListView()
             AIBottomBar(prompts: [
                 AIPrompt(text: "点拍照识别、记录待办", pointsTo: .camera),
-                AIPrompt(text: "有什需要提醒的吗？点此阿宝帮你记", pointsTo: nil),
+                AIPrompt(text: "有什需要提醒的吗？点此小记帮你记", pointsTo: nil),
                 AIPrompt(text: "点麦克风，语音记录待办", pointsTo: .mic),
-                AIPrompt(text: "阿宝帮总结最近有什么事要做", pointsTo: nil),
+                AIPrompt(text: "小记帮总结最近有什么事要做", pointsTo: nil),
                 AIPrompt(text: "点相册上传，自动识别待办", pointsTo: .album)
             ], entrySource: "todo")
         }
         .background(Color(.secondarySystemBackground))
         .navigationTitle(LocalizedStringKey("tab.todo"))
+        .task { UsageAnalytics.logOpen("todo") }
         .toolbar {
             if !multiSelectMode {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        multiSelectMode = true
+                    } label: {
+                        Image(systemName: "checkmark.circle")
+                            .font(AIATheme.Font.body.weight(.semibold))
+                            .foregroundStyle(AIATheme.blue)
+                    }
+                }
                 addTodoToolbarItem
+            } else {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        multiSelectMode = false
+                        selectedIDs.removeAll()
+                    } label: {
+                        Text("取消").font(AIATheme.Font.body.weight(.semibold)).foregroundStyle(AIATheme.blue)
+                    }
+                }
             }
         }
         .overlay(alignment: .bottom) {
@@ -2763,8 +3708,8 @@ struct ReminderListView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 20)
                     } else {
-                    ForEach(dayTodos) { r in
-                        todoRow(r)
+                    ForEach(Array(dayTodos.enumerated()), id: \.element.persistentModelID) { idx, r in
+                        todoRow(r, group: .day(selected), indexInGroup: idx)
                     }
                     }
                 }
@@ -2839,20 +3784,257 @@ struct ReminderListView: View {
     /// 抽成独立 helper（不在 body 内联 ZStack）—— 加 toolbar + 双 sheet 后 body modifier 链
     /// 总深度让 Swift 编译器类型推断超时（2026-07-24 踩坑）。
     @ViewBuilder
-    private func todoRow(_ r: Reminder) -> some View {
+    private func todoRow(_ r: Reminder, group: TodoGroup, indexInGroup: Int) -> some View {
+        // 长按整行起拖：改用 UIKit 的 `LongPressDragView`（单一 UILongPressGestureRecognizer
+        // 承担「长按判定 + 后续拖动」两个阶段），SwiftUI 手势的三种写法均已失败，见
+        // LongPressDragView.swift 文件头的踩坑记录。
+        //
+        // 行为：长按 0.5s 内不 claim 事件 → ScrollView 上下滚动 100% 正常；
+        //      长按成立(.began) → onDragBegan 起拖；手指移动(.changed) → onDragChanged 更新插入点；
+        //      松手(.ended/.cancelled) → onDragEnded 落位。
+        let lifted = isDragging && draggingSyncId == r_escapedSyncId(r)
+        let pushDown = shouldPushDown(group: group, index: indexInGroup)
         ZStack(alignment: .leading) {
             SelectableRow(
                 isSelecting: multiSelectMode,
                 isSelected: selectedIDs.contains(r.persistentModelID),
                 onTap: { editTodo = r },
-                onLongPress: { enterTodoMultiSelect(r.persistentModelID) },
+                // 长按已由 UIKit LongPressDragView 统一接管（长按=起拖改期），
+                // 不传 onLongPress → SelectableRow 内部不挂 SwiftUI 长按手势，
+                // 避免两个 0.5s 长按互抢 touch、并消除重复震动。
                 onToggle: { toggleTodoSelection(r.persistentModelID) },
-                onDelete: { SafeDelete.reminder(r, in: context) }
+                onDelete: { SafeDelete.reminder(r, in: context) },
+                // 长按起拖中摘掉本行左滑手势，避免水平拖动同时误露「删除」按钮
+                disableSwipe: longPressArmed
             ) {
                 todoRowContent(r)
                     .contentShape(RoundedRectangle(cornerRadius: 14))
             }
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(
+                        key: TodoRowFrameKey.self,
+                        value: [r.syncId.uuidString: TodoRowFrame(frame: geo.frame(in: .global), group: group)]
+                    )
+                }
+            )
             todoDoneButton(r)
+
+            // UIKit 长按起拖：挂在最上层。本 view 始终 hitTest→self（始终在响应链里），
+            // 长按手势才收得到 began/changed；点击/左滑/滚动靠 gr.cancelsTouchesInView=false
+            // 透传给下层 SelectableRow，不靠 hitTest 拦截，故三态并存。allowsHitTesting(true)
+            // 仅为默认开启，无副作用。
+            LongPressDragView(
+                isEnabled: !multiSelectMode,
+                onBegan: { loc in beginTodoDrag(r, at: loc) },
+                onChanged: { loc in updateTodoDrag(r, at: loc) },
+                onEnded: { _ in endTodoDrag(r) }
+            )
+            .allowsHitTesting(true)
+        }
+        // 浮起 + live reflow：被拖行原位置留淡影，插入点之后的同行实时下移让位。
+        .scaleEffect(lifted ? 1.03 : 1.0)
+        .opacity(lifted ? 0.35 : 1.0)
+        .offset(y: pushDown ? draggedRowHeight : 0)
+        .shadow(color: lifted ? .black.opacity(0.15) : .clear, radius: 8, y: 4)
+            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isDragging)
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: dropIndex)
+    }
+
+    // MARK: - 待办改期拖拽：三阶段处理（由 LongPressDragView 的 UIKit 手势驱动）
+
+    /// 长按成立：标记本行为「拖拽中」，记录行高与起始位置。此时手指尚未移动，
+    /// 不立即 `isDragging=true`（浮起留到确实移动 >=10pt 后，避免纯长按误浮起）。
+    private func beginTodoDrag(_ r: Reminder, at loc: CGPoint) {
+        guard !multiSelectMode else { return }
+        longPressArmed = true
+        draggingSyncId = r.syncId.uuidString
+        let f = rowFrames[r.syncId.uuidString]?.frame
+        draggedRowHeight = f?.height ?? 56
+        // 记录长按成立时的手指坐标作为位移基准（原代码错用行中心 midX/midY，
+        // 导致手指按在行左右两端时 moved 一上来就 >10 或永远不达标，卡片浮不起来）
+        dragStartLocation = loc
+        // 手指相对行中心的偏移：浮起卡片保持该相对关系，不会瞬间跳到手指中心
+        dragGrabOffset = f.map { CGSize(width: $0.midX - loc.x, height: $0.midY - loc.y) } ?? .zero
+        dragLocation = loc
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    /// 长按成立后手指移动：超过 10pt 才真正浮起，并实时计算插入点（行间 or 组 header）。
+    private func updateTodoDrag(_ r: Reminder, at loc: CGPoint) {
+        guard longPressArmed, !multiSelectMode else { return }
+        guard draggingSyncId == r.syncId.uuidString else { return }
+
+        if !isDragging {
+            // 与长按成立时的手指坐标比较（而非行中心），阈值降到 6pt：
+            // 长按后手指本就基本静止，10pt 在慢速拖动时迟迟不达标，表现就是
+            // "有震动但卡片不浮起"。
+            let moved = hypot(loc.x - dragStartLocation.x, loc.y - dragStartLocation.y)
+            guard moved >= 6 else { return }
+            isDragging = true
+        }
+        dragLocation = loc
+
+        // —— 行级插入点：优先看落在哪两行之间；否则回退到整组 header ——
+        var hit: (sid: String, frame: CGRect, group: TodoGroup)? = nil
+        for (sid, val) in rowFrames where val.frame.contains(loc) {
+            hit = (sid, val.frame, val.group); break
+        }
+        if let h = hit {
+            let upper = loc.y < h.frame.midY
+            let grp = groupedByDate.first { $0.group == h.group }?.reminders ?? []
+            if let idx = grp.firstIndex(where: { $0.syncId.uuidString == h.sid }) {
+                dropIndex = DropIndex(group: h.group, at: upper ? idx : idx + 1)
+                hoverGroup = h.group
+                hoveringHeader = false
+            }
+        } else {
+            var g: TodoGroup?? = .none
+            for (key, fr) in headerFrames where fr.contains(loc) { g = .some(key); break }
+            if let gg = g {
+                let resolvedGroup: TodoGroup = gg ?? .unscheduled
+                dropIndex = DropIndex(group: resolvedGroup, at: 0)
+                hoverGroup = gg
+                hoveringHeader = true
+            } else {
+                dropIndex = nil
+                hoverGroup = nil
+                hoveringHeader = false
+            }
+        }
+    }
+
+    /// 松手/取消：若确实拖动过且悬停在某组上则改期，随后清空全部拖拽状态。
+    private func endTodoDrag(_ r: Reminder) {
+        guard draggingSyncId == r.syncId.uuidString else { return }
+        if let target = hoverGroup, isDragging {
+            moveDue(r, to: target)
+        }
+        draggingSyncId = nil
+        dropIndex = nil
+        hoverGroup = nil
+        hoveringHeader = false
+        isDragging = false
+        longPressArmed = false
+        dragGrabOffset = .zero
+        dragStartLocation = .zero
+    }
+
+    /// 取待办 syncId 字符串，用于「当前抬起行」判定（避免直接在绑定闭包里反复取 uuidString）。
+    private func r_escapedSyncId(_ r: Reminder) -> String { r.syncId.uuidString }
+
+    /// 当前行是否应「下移让位」：拖动中且本行位于目标插入点之后（同组）。
+    private func shouldPushDown(group: TodoGroup, index: Int) -> Bool {
+        guard let drop = dropIndex, drop.group == group, isDragging else { return false }
+        return index >= drop.at
+    }
+
+    /// 拖动时浮起的待办快照。定位交给外层 overlay 的 GeometryReader（同源测量全局原点），
+    /// 这里只负责渲染 + 宽度，不再做坐标换算，避免与原点的两套坐标系错位导致卡片偏离手指。
+    @ViewBuilder
+    private func draggedRowOverlay() -> some View {
+        if isDragging,
+           let sid = draggingSyncId,
+           let rem = list.first(where: { $0.syncId.uuidString == sid }),
+                   let fr = rowFrames[sid] {
+                    todoRowContent(rem)
+                        .frame(width: fr.frame.width)
+                .shadow(color: .black.opacity(0.2), radius: 12, y: 6)
+                .scaleEffect(1.02)
+        }
+    }
+
+    /// 待办列表主体（ScrollView）。抽成独立函数以规避 body 的 modifier 链类型推断超时。
+    private func todoListView() -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                // 提醒设置 / 自动记待办 入口
+                Button {
+                    NavigationRouter.shared.navigate(HomeRoute.todoTools)
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "gearshape.2.fill")
+                            .font(AIATheme.Font.title3)
+                            .foregroundStyle(AIATheme.todo)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("提醒设置 / 自动记待办")
+                                .font(AIATheme.Font.subhead.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text("设置默认提醒时间、截屏自动识别待办")
+                                .font(AIATheme.Font.micro)
+                                .foregroundStyle(AIATheme.muted)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(AIATheme.Font.footnote.weight(.medium))
+                            .foregroundStyle(AIATheme.muted)
+                    }
+                    .padding(12)
+                    .card()
+                }
+                .buttonStyle(.plain)
+
+                if filter == .calendar {
+                    calendarView
+                } else if list.isEmpty {
+                    let emptyTitle: String = switch filter {
+                    case .finished: "自动记待办"
+                    case .active: "还没有待办"
+                    case .calendar: ""
+                    }
+                    if filter == .finished {
+                        // 已完成空态：引导用户配置快捷指令自动记录
+                        EmptyStateView(
+                            kind: .todo,
+                            title: emptyTitle,
+                            message: "设置快捷指令，自动记录待办",
+                            actionTitle: "查看教程",
+                            action: { NavigationRouter.shared.navigate(.autoSetup) }
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        EmptyStateView(
+                            kind: .todo,
+                            title: emptyTitle,
+                            message: "跟小记说一句话就能建待办，例如「周五提醒我交报表」。",
+                            actionTitle: "叫小记提醒我",
+                            action: { NavigationRouter.shared.navigateToChat(prefill: "2分钟后提醒我打开「好记」App") }
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                } else {
+                    // 直接遍历元素（不再用 ForEach(0..<count) + groupedByDate[i] 下标）：
+                    // groupedByDate 派生自 @Query，导航 onAppear 的 RecurringBillManager.generateDue
+                    // 插入账单/提醒时数组长度会变化，两次求值不一致会导致 groupedByDate[i] 越界闪退。
+                    // 用 group 本身作 id（TodoGroup 已 Hashable，分组结果中每个 group 值唯一），
+                    // 避免用 \.offset 作 id 在 @Query 异步填充/同步刷新导致组数变化时 SwiftUI diff 越界崩溃。
+                    ForEach(Array(groupedByDate.enumerated()), id: \.element.group) { _, group in
+                        VStack(alignment: .leading, spacing: 8) {
+                            dateHeader(group.group, reminders: group.reminders)
+                            ForEach(Array(group.reminders.enumerated()), id: \.element.persistentModelID) { idx, r in
+                                todoRow(r, group: group.group, indexInGroup: idx)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal)
+            .padding(.bottom)
+        }
+        // 禁用列表变化/空态切换的隐式动画，避免最后一条删除时动画叠加卡死。
+        .animation(nil, value: list.count)
+        .animation(nil, value: filter)
+        .onPreferenceChange(TodoHeaderFrameKey.self) { headerFrames = $0 }
+        .onPreferenceChange(TodoRowFrameKey.self) { rowFrames = $0 }
+        // 浮起快照覆盖层：用 overlay 自身的 GeometryReader 测量全局原点，
+        // 与 .position 定位坐标系严格同源，滚动/刷新都不会产生累积偏移。
+        .overlay {
+            GeometryReader { gp in
+                let origin = gp.frame(in: .global).origin
+                draggedRowOverlay()
+                    .position(x: dragLocation.x - origin.x + dragGrabOffset.width,
+                              y: dragLocation.y - origin.y + dragGrabOffset.height)
+            }
         }
     }
 
@@ -2880,9 +4062,23 @@ struct ReminderListView: View {
                 Text(r.title).font(AIATheme.Font.footnote.weight(.medium))
                     .strikethrough(r.done)
                     .foregroundStyle(r.done ? AIATheme.sub : .primary)
-                if let due = r.due {
-                    Text(AppFormat.dateTime.string(from: due))
-                        .font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
+                HStack(spacing: 4) {
+                    if let due = r.due {
+                        Text(AppFormat.dateTime.string(from: due))
+                            .font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
+                    } else {
+                        Text("未安排")
+                            .font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
+                    }
+                    if let raw = recogSourceBySyncId[r.syncId],
+                       let label = RecogSource.displayLabel(for: raw) {
+                        Text(label)
+                            .font(AIATheme.Font.micro.weight(.medium))
+                            .foregroundStyle(AIATheme.sub)
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(AIATheme.surfaceSecondary)
+                            .clipShape(Capsule())
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -2912,6 +4108,7 @@ struct ReminderListView: View {
         // 用户反馈点击圆圈后想停留在当前页签（如「待办」），不要自动跳到「已完成」。
         // 直接同步改 done，@Query 会在下一帧自然重 fetch 一次，当前行从列表消失即可。
         r.done.toggle()
+        if !wasDone { UsageAnalytics.log("todo_done") }
         // 通知调度延后到下一帧，不阻塞当前点击事件。
         // 显式 context.save() 也去掉，由 SwiftData autosave 处理。
         DispatchQueue.main.async {
@@ -2924,6 +4121,54 @@ struct ReminderListView: View {
                 // 如果是重复待办，自动创建下一个周期的新实例
                 createNextRepeatReminder(r)
             }
+        }
+    }
+
+    /// 长按拖动改期：保留原时分秒，仅换日期；remindTimes 按偏移量同步。
+    /// target 为 TodoGroup?：
+    ///   - .day(d) → 把 due 改为 d 当天（保留时分秒）
+    ///   - .overdue → 「已逾期事件」是计算状态，没有具体日期目标，保持原 due 不变（无副作用）。
+    ///   - nil → 拖到「未安排」组，清空 due 与提醒。
+    private func moveDue(_ r: Reminder, to target: TodoGroup?) {
+        let cal = Calendar.current
+        var changed = false
+        switch target {
+        case .some(.day(let date)):
+            let day = cal.startOfDay(for: date)
+            if let old = r.due {
+                let t = cal.dateComponents([.hour, .minute, .second], from: old)
+                guard let newDue = cal.date(bySettingHour: t.hour ?? 0, minute: t.minute ?? 0, second: t.second ?? 0, of: day) else { return }
+                let delta = newDue.timeIntervalSince(old)
+                r.due = newDue
+                if !r.remindTimes.isEmpty {
+                    r.remindTimes = r.remindTimes.map { $0.addingTimeInterval(delta) }
+                }
+                changed = true
+            } else {
+                // 原「未安排」→ 拖到具体某天，默认 9:00
+                r.due = cal.date(bySettingHour: 9, minute: 0, second: 0, of: day)
+                changed = true
+            }
+        case .some(.overdue):
+            // 已逾期是显示分组（按"截止日<今天"过滤得到），不是日期目标；
+            // 拖到此区不改 due。给一个轻微震动确认意图但不弹成功提示。
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            return
+        case .some(.unscheduled), .none:
+            // PreferenceKey 实际只会上报 .day/.overdue/nil 三种 key，
+            // 不会上来 .some(.unscheduled)；但保持 switch 穷尽（多兜一个分支）。
+            r.due = nil
+            r.remindTimes = []
+            changed = true
+        }
+        guard changed else { return }
+        r.syncUpdatedAt = .now
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        // 副作用延后到下一帧，不阻塞拖动手势；
+        // 不主动 context.save()，由 SwiftData autosave 持久化，@Query 自动重分组。
+        DispatchQueue.main.async {
+            if r.due != nil { ReminderNotificationManager.schedule(r) }
+            else { ReminderNotificationManager.cancel(r) }
         }
     }
 
@@ -2979,6 +4224,8 @@ struct ReminderListView: View {
             return cal.date(byAdding: .month, value: 3, to: due)
         case "semiannual":
             return cal.date(byAdding: .month, value: 6, to: due)
+        case "yearly":
+            return cal.date(byAdding: .year, value: 1, to: due)
         default:
             return nil
         }
@@ -3208,7 +4455,63 @@ private struct DietAnalysisView: View {
     @Query(filter: #Predicate { !$0.syncDeleted }, sort: \FoodEntry.date, order: .reverse)
     private var foods: [FoodEntry]
     @Query(filter: #Predicate<WaterLog> { !$0.syncDeleted }) private var waterLogs: [WaterLog]
+    @Query(filter: #Predicate<HealthMetric> { !$0.syncDeleted }, sort: \HealthMetric.date, order: .reverse)
+    private var healthMetrics: [HealthMetric]
     @State private var period: DietPeriod = .thisWeek
+
+    // 目标达成层依赖：健身目标（BodyDataView 选择）+ TDEE 五件套（与饮食记录页/健康目标页同键）
+    @AppStorage("aia.fitnessGoal") private var fitnessGoalRaw: String = "maintain"
+    @AppStorage("aia.heightCm") private var heightCm: Double = 0
+    @AppStorage("aia.weightKg") private var weightKg: Double = 0
+    @AppStorage("aia.age") private var age: Int = 30
+    @AppStorage("aia.bioSex") private var bioSex: Int = 1
+    @AppStorage("aia.activityLevel") private var activityLevel: Int = 1
+    @StateObject private var health = HealthManager.shared
+
+    // MARK: - 目标达成计算
+
+    private var goal: FitnessGoal { FitnessGoal(rawValue: fitnessGoalRaw) ?? .maintain }
+
+    /// 当前体重：@AppStorage 优先，无则回落到 HealthMetric 最新体重记录（与身体数据页同口径）。
+    private var weightForGoal: Double? {
+        if weightKg > 0 { return weightKg }
+        return healthMetrics.first { $0.metric.contains("体重") || $0.metric.lowercased().contains("weight") }
+            .flatMap { Double($0.value) }
+    }
+
+    /// TDEE：与饮食记录页同源（HealthKit 真实静息+活动能量，无则回落到 BMR × 活动系数）。
+    private var tdeeValue: Double {
+        let actual = health.restingEnergyToday + health.activeEnergyToday
+        if actual > 0 { return actual }
+        return (mifflinBMR(weightKg: weightKg, heightCm: heightCm, age: age, isMale: bioSex == 1) ?? 0)
+            * activityMultiplier(activityLevel)
+    }
+
+    /// 目标热量 = TDEE × 目标系数（TDEE 为 0 视为不可用）
+    private var calorieTarget: Double? {
+        tdeeValue > 0 ? tdeeValue * goal.calorieMultiplier : nil
+    }
+
+    /// 目标蛋白 = 体重 × g/kg（体重缺失时不可用）
+    private var proteinTarget: Double? {
+        weightForGoal.map { $0 * goal.proteinPerKg }
+    }
+
+    /// 周期日均摄入（热量 kcal / 蛋白 g / 纤维·糖·钠），与 nutritionCards 同口径
+    private var periodAvg: (cal: Double, protein: Double, fiber: Double, sugar: Double, sodium: Double) {
+        let (s, e) = period.range()
+        let dayCount = max(1, Calendar.current.dateComponents([.day], from: s, to: e).day ?? 1)
+        var calSum = 0.0, proteinSum = 0.0, fiberSum = 0.0, sugarSum = 0.0, sodiumSum = 0.0
+        for f in periodFoods {
+            calSum += f.calories
+            proteinSum += f.protein
+            fiberSum += f.fiber
+            sugarSum += f.sugar
+            sodiumSum += f.sodium
+        }
+        let dc = Double(dayCount)
+        return (cal: calSum / dc, protein: proteinSum / dc, fiber: fiberSum / dc, sugar: sugarSum / dc, sodium: sodiumSum / dc)
+    }
 
     /// 当前周期内的食物（半开区间 [start, end)）
     private var periodFoods: [FoodEntry] {
@@ -3295,16 +4598,217 @@ private struct DietAnalysisView: View {
                 LazyVGrid(columns: [
                     GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())
                 ], spacing: 8) {
-                    ForEach(0..<nutritionCards.count, id: \.self) { i in
-                        let c = nutritionCards[i]
+                    ForEach(nutritionCards, id: \.label) { c in
                         DietNutritionCard(label: c.label, value: c.value, color: c.color)
                     }
+                }
+
+                // 5. 目标达成（减脂/增肌/维持 对比层）：热量/蛋白目标 = TDEE × 系数 / 体重 × g/kg；
+                //    纤维/糖/钠目标按「目标热量（calorieTarget = TDEE × 系数，即本卡顶部显示的“目标热量”）」线性缩放，与热量行同源一致。
+                SectionTitle(text: NSLocalizedString("diet.analysis.goalTarget", comment: ""), trailing: nil)
+                if let cal = calorieTarget {
+                    GoalCheckCard(
+                        goal: goal,
+                        calorieTarget: calorieTarget,
+                        proteinTarget: proteinTarget,
+                        avgCal: periodAvg.cal,
+                        avgProtein: periodAvg.protein,
+                        fiberTarget: cal * 14 / 1000,
+                        sugarTarget: cal * 0.10 / 4,
+                        // 钠按目标热量线性缩放：2000kcal 标准人对应 2000mg 钠，即 钠(mg) = 目标热量(kcal)。
+                        // 用户原公式「建议热量 × 1000 ÷ 2000 × 2000」字面化简 = 目标热量 × 1000（2000kcal→2,000,000mg，不符合实际），
+                        // 此处按营养学合理口径实现（如需严格按字面请改为 `cal * 1000`）。
+                        sodiumTarget: cal,
+                        avgFiber: periodAvg.fiber,
+                        avgSugar: periodAvg.sugar,
+                        avgSodium: periodAvg.sodium,
+                        headerCalorie: cal
+                    )
+                } else {
+                    DietAnalysisNoWeightCard()
                 }
 
                 // 底部留白
                 Color.clear.frame(height: 80)
             }
             .padding(12)
+        }
+    }
+}
+
+/// 饮食分析：体重缺失时的降级提示卡
+private struct DietAnalysisNoWeightCard: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(AIATheme.Font.footnote)
+                .foregroundStyle(AIATheme.warn)
+            Text(NSLocalizedString("diet.analysis.noWeight", comment: ""))
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.sub)
+            Spacer()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AIATheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+        .overlay(
+            RoundedRectangle(cornerRadius: AIATheme.rMD)
+                .stroke(AIATheme.hairline, lineWidth: 0.5)
+        )
+    }
+}
+
+/// 饮食分析：目标达成卡（减脂/增肌/维持 × 实际摄入对比）
+/// 顶行 = 目标标识 + 目标热量；下方两行进度条分别对比热量与蛋白。
+/// 热量状态：ratio <0.95 偏低(warn) / 0.95~1.05 达标(ok) / >1.05 超出(over)
+/// 蛋白状态：实际 ≥ 推荐 达标(ok)，否则 偏低(warn)
+private struct GoalCheckCard: View {
+    let goal: FitnessGoal
+    let calorieTarget: Double?      // 热量目标（TDEE × 系数），无 TDEE 时为 nil
+    let proteinTarget: Double?      // 蛋白目标（体重 × g/kg），无体重时为 nil
+    let avgCal: Double
+    let avgProtein: Double
+    // 以下三项目标按「建议热量」线性缩放（与体重/TDEE 无关，goal > 0 即可用）
+    let fiberTarget: Double
+    let sugarTarget: Double
+    let sodiumTarget: Double
+    let avgFiber: Double
+    let avgSugar: Double
+    let avgSodium: Double
+    let headerCalorie: Double       // 顶部「目标热量」显示用（calorieTarget ?? 建议热量）
+
+    private var calState: (label: String, color: Color) {
+        guard let ct = calorieTarget, ct > 0 else { return (NSLocalizedString("diet.analysis.goalLow", comment: ""), AIATheme.warn) }
+        let ratio = avgCal / ct
+        if ratio < 0.95 { return (NSLocalizedString("diet.analysis.goalLow", comment: ""), AIATheme.warn) }
+        if ratio > 1.05 { return (NSLocalizedString("diet.analysis.goalOver", comment: ""), AIATheme.over) }
+        return (NSLocalizedString("diet.analysis.goalMet", comment: ""), AIATheme.ok)
+    }
+    private var proteinState: (label: String, color: Color) {
+        guard let pt = proteinTarget, pt > 0 else { return (NSLocalizedString("diet.analysis.goalLow", comment: ""), AIATheme.warn) }
+        return avgProtein >= pt
+            ? (NSLocalizedString("diet.analysis.goalMet", comment: ""), AIATheme.ok)
+            : (NSLocalizedString("diet.analysis.goalLow", comment: ""), AIATheme.warn)
+    }
+    /// 通用达标状态：lowerIsBetter=true 表示「越低越好」（糖/钠上限），false 表示「越高越好」（纤维下限）
+    private func macroState(actual: Double, target: Double, lowerIsBetter: Bool) -> (label: String, color: Color) {
+        guard target > 0 else { return (NSLocalizedString("diet.analysis.goalLow", comment: ""), AIATheme.warn) }
+        if lowerIsBetter {
+            return actual <= target * 1.05
+                ? (NSLocalizedString("diet.analysis.goalMet", comment: ""), AIATheme.ok)
+                : (NSLocalizedString("diet.analysis.goalOver", comment: ""), AIATheme.over)
+        } else {
+            return actual >= target * 0.95
+                ? (NSLocalizedString("diet.analysis.goalMet", comment: ""), AIATheme.ok)
+                : (NSLocalizedString("diet.analysis.goalLow", comment: ""), AIATheme.warn)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: goal.icon)
+                    .font(AIATheme.Font.footnote.weight(.semibold))
+                    .foregroundStyle(AIATheme.health)
+                Text(goal.label)
+                    .font(AIATheme.Font.footnote.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text(String(format: "%@ %d kcal/天",
+                            NSLocalizedString("diet.analysis.calorieTarget", comment: ""),
+                            Int(headerCalorie)))
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.sub)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+            }
+            if let ct = calorieTarget {
+                goalRow(
+                    label: NSLocalizedString("diet.analysis.calorieTarget", comment: ""),
+                    detail: String(format: "%.0f / %.0f kcal", avgCal, ct),
+                    ratio: ct > 0 ? min(avgCal / ct, 1) : 0,
+                    badge: calState.label,
+                    color: calState.color
+                )
+            }
+            if let pt = proteinTarget {
+                goalRow(
+                    label: NSLocalizedString("diet.analysis.proteinTarget", comment: ""),
+                    detail: String(format: "%.1f / %.1f g", avgProtein, pt),
+                    ratio: pt > 0 ? min(avgProtein / pt, 1) : 0,
+                    badge: proteinState.label,
+                    color: proteinState.color
+                )
+            }
+            // 按建议热量线性缩放的三项微量营养素目标
+            let fiberSt = macroState(actual: avgFiber, target: fiberTarget, lowerIsBetter: false)
+            goalRow(
+                label: NSLocalizedString("food.macro.fiber", comment: ""),
+                detail: String(format: "%.1f / %.1f g", avgFiber, fiberTarget),
+                ratio: fiberTarget > 0 ? min(avgFiber / fiberTarget, 1) : 0,
+                badge: fiberSt.label,
+                color: fiberSt.color
+            )
+            let sugarSt = macroState(actual: avgSugar, target: sugarTarget, lowerIsBetter: true)
+            goalRow(
+                label: NSLocalizedString("food.macro.sugar", comment: ""),
+                detail: String(format: "%.1f / %.1f g", avgSugar, sugarTarget),
+                ratio: sugarTarget > 0 ? min(avgSugar / sugarTarget, 1) : 0,
+                badge: sugarSt.label,
+                color: sugarSt.color
+            )
+            let sodiumSt = macroState(actual: avgSodium, target: sodiumTarget, lowerIsBetter: true)
+            goalRow(
+                label: NSLocalizedString("food.macro.sodium", comment: ""),
+                detail: String(format: "%.0f / %.0f mg", avgSodium, sodiumTarget),
+                ratio: sodiumTarget > 0 ? min(avgSodium / sodiumTarget, 1) : 0,
+                badge: sodiumSt.label,
+                color: sodiumSt.color
+            )
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AIATheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+        .overlay(
+            RoundedRectangle(cornerRadius: AIATheme.rMD)
+                .stroke(AIATheme.hairline, lineWidth: 0.5)
+        )
+    }
+
+    private func goalRow(label: String, detail: String, ratio: Double, badge: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(label)
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.sub)
+                    .lineLimit(1)
+                Spacer()
+                Text(detail)
+                    .font(AIATheme.Font.micro.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                Text(badge)
+                    .font(AIATheme.Font.micro.weight(.semibold))
+                    .foregroundStyle(color)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(color.opacity(0.12))
+                    .clipShape(Capsule())
+                    .lineLimit(1)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(AIATheme.fillSoft)
+                    Capsule()
+                        .fill(color)
+                        .frame(width: max(6, min(CGFloat(ratio), 1) * geo.size.width))
+                }
+            }
+            .frame(height: 6)
         }
     }
 }
@@ -3393,7 +4897,167 @@ private struct WaterCardButtonStyle: ButtonStyle {
 // 同时上浮一个「+N 单位」飘字（仿饮水卡 FloatBadge，圆环在 Grid 内，飘字向上溢出不被裁切）。
 // 用 `HealthMetricKind` 区分三环（与 HealthMetric @Model 命名区分，避免冲突）。
 
-enum HealthMetricKind { case steps, sleep, exercise, tdee }
+enum HealthMetricKind: String {
+    case steps, sleep, exercise, tdee, heartRate
+
+    var title: String {
+        switch self {
+        case .steps: return "步数"
+        case .sleep: return "睡眠"
+        case .exercise: return "运动"
+        case .tdee: return "总消耗"
+        case .heartRate: return "静息心率"
+        }
+    }
+    /// 拼接 @AppStorage 的 key，便于每个指标单独持久化数据来源。
+    var sourceKey: String { "aia.health.source." + self.rawValue }
+}
+
+/// 每个健康指标的数据来源：自动记录（同步 HealthKit）/ 手动记录（沿用原手动录入）。
+enum HealthSourceMode: String {
+    case auto, manual
+}
+
+// MARK: - 健康数据来源设置面板
+// 逐指标切换「自动记录（HealthKit）/ 手动记录」，持久化到 @AppStorage（key 见 HealthMetricKind.sourceKey）。
+// 未连接 HealthKit 时「自动」实际会回退手动，故给出提示；自动模式下圆环 / +N 入口已在 HealthListView 被禁用。
+private struct HealthSourceSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var health = HealthManager.shared
+
+    @AppStorage(HealthMetricKind.steps.sourceKey)     private var stepsSource: HealthSourceMode = .auto
+    @AppStorage(HealthMetricKind.sleep.sourceKey)     private var sleepSource: HealthSourceMode = .auto
+    @AppStorage(HealthMetricKind.exercise.sourceKey)  private var exerciseSource: HealthSourceMode = .auto
+    @AppStorage(HealthMetricKind.tdee.sourceKey)      private var tdeeSource: HealthSourceMode = .auto
+    @AppStorage(HealthMetricKind.heartRate.sourceKey) private var heartRateSource: HealthSourceMode = .auto
+
+    private func binding(for kind: HealthMetricKind) -> Binding<HealthSourceMode> {
+        switch kind {
+        case .steps: return $stepsSource
+        case .sleep: return $sleepSource
+        case .exercise: return $exerciseSource
+        case .tdee: return $tdeeSource
+        case .heartRate: return $heartRateSource
+        }
+    }
+
+    // MARK: HealthKit 授权状态卡：已授权绿标 / 未授权可点授权 / 失败黄标可重试 / 不可用置灰
+    private var authorizationCard: some View {
+        let isUnavailable = !health.isAvailable
+        let isFailed = health.authorizationFailed
+        let isAuthorized = health.authorized
+
+        let title: String
+        let subtitle: String
+        let icon: String
+        let accent: Color
+
+        if isUnavailable {
+            title = "Apple 健康不可用"
+            subtitle = "当前设备或模拟器不支持 HealthKit，无法使用自动记录。"
+            icon = "heart.slash"
+            accent = AIATheme.muted
+        } else if isAuthorized {
+            title = "Apple 健康已授权"
+            subtitle = "本 App 可自动同步步数、睡眠、运动、心率等数据。"
+            icon = "heart.fill"
+            accent = AIATheme.ok
+        } else if isFailed {
+            title = "HealthKit 授权失败"
+            subtitle = "可能是账号未开通 HealthKit 能力，点击重试。"
+            icon = "exclamationmark.triangle.fill"
+            accent = AIATheme.warning
+        } else {
+            title = "连接 Apple 健康"
+            subtitle = "授权后，选择「自动记录」的指标将自动同步 HealthKit 数据。"
+            icon = "heart"
+            accent = AIATheme.health
+        }
+
+        return Button {
+            guard !isUnavailable, !isAuthorized else { return }
+            HealthManager.shared.requestAuthorizationForSettings()
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundStyle(accent)
+                    .frame(width: 28)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(AIATheme.Font.body.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(subtitle)
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.muted)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(2)
+                }
+
+                Spacer()
+
+                if isAuthorized {
+                    Text("已授权")
+                        .font(AIATheme.Font.micro.weight(.semibold))
+                        .foregroundStyle(AIATheme.ok)
+                } else if !isUnavailable {
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(AIATheme.iconInactive)
+                }
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, AIATheme.rMD)
+        }
+        .disabled(isUnavailable || isAuthorized)
+        .buttonStyle(PressableCardStyle())
+        .contentShape(RoundedRectangle(cornerRadius: AIATheme.rLG))
+        .card()
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    authorizationCard
+                }
+
+                Section {
+                    ForEach([HealthMetricKind.steps,
+                             .sleep,
+                             .exercise,
+                             .tdee,
+                             .heartRate], id: \.self) { kind in
+                        HStack {
+                            Text(kind.title)
+                                .font(AIATheme.Font.body)
+                            Spacer()
+                            Picker("", selection: binding(for: kind)) {
+                                Text("自动记录").tag(HealthSourceMode.auto)
+                                Text("手动记录").tag(HealthSourceMode.manual)
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(width: 168)
+                        }
+                    }
+                } header: {
+                    Text("数据来源")
+                } footer: {
+                    Text("选择「自动记录」，则会自动同步 Apple 健康（HealthKit）数据；选择「手动记录」，需返回健康管理页点击对应模块录入数据，例如点击「睡眠圆环」即可记录睡眠时长。")
+                }
+            }
+            .navigationTitle("健康管理数据来源")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { dismiss() }
+                        .font(AIATheme.Font.body.weight(.semibold))
+                }
+            }
+        }
+    }
+}
 
 private struct HealthRingButton: View {
     let kind: HealthMetricKind
@@ -3454,6 +5118,101 @@ private struct RingFloatBadgeView: View {
                     onDone()
                 }
             }
+    }
+}
+
+// MARK: - 柱状图翻周辅助（饮食 / 健康 / 账单三图共用）
+
+/// 底部小圆点指示器：高亮当前所在周（`selection` 为 0 表示本周，负数表示过去第 |n| 周）。
+private struct ChartPageDots: View {
+    let selection: Int
+    let minOffset: Int
+    let accent: Color
+
+    private var count: Int { (0 - minOffset) + 1 }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(0..<count, id: \.self) { i in
+                let off = minOffset + i
+                Circle()
+                    .fill(off == selection ? accent : AIATheme.muted.opacity(0.25))
+                    .frame(width: 6, height: 6)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 2)
+    }
+}
+
+/// 当前翻到的周范围文字：`offset` 为 0 显示「本周」，历史周显示「M/d–M/d」
+/// （`base` 为窗口终点锚定的日，饮食页=选中日，健康/账单页=今天）。
+private func chartWeekRangeLabel(offset: Int, base: Date) -> String {
+    let cal = Calendar.current
+    let end = cal.date(byAdding: .day, value: offset * 7, to: cal.startOfDay(for: base))!
+    let start = cal.date(byAdding: .day, value: -6, to: end)!
+    if offset == 0 {
+        return ""
+    }
+    return "\(dayFmt.string(from: start))–\(dayFmt.string(from: end))"
+}
+
+// MARK: - 饮食记录：营养构成卡（标题 + 6 个 MacroCard，每卡显示「实际 / 建议」+ 进度条）
+/// 整体抽为独立子视图，避开父级 body 表达式在 Swift 编译器里的「unable to type-check」级联卡死。
+/// - targets：6 元建议量（蛋白/碳水/脂肪/纤维/糖/钠）
+/// - macros：7 元今日实际摄入（蛋白/碳水/脂肪/纤维/糖/钠/水）
+private struct NutritionCompositionCard: View {
+    let targets: (protein: Int, carb: Int, fat: Int, fiber: Int, sugar: Int, sodium: Int)
+    let macros: (p: Double, c: Double, f: Double, fiber: Double, sugar: Double, sodium: Double, water: Double)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // 建议量已下沉到各 MacroCard 标题后，顶部 trailing 汇总行移除
+            SectionTitle(text: NSLocalizedString("food.nutrition", comment: ""), trailing: nil)
+            LazyVGrid(columns: [
+                GridItem(.flexible()),
+                GridItem(.flexible()),
+                GridItem(.flexible())
+            ], spacing: 8) {
+                MacroCard(title: NSLocalizedString("food.macro.carb", comment: ""),
+                          value: valueText(macros.c, "g"),
+                          targetText: valueText(Double(targets.carb), "g"),
+                          progress: progress(actual: macros.c, target: targets.carb),
+                          color: AIATheme.amber)
+                MacroCard(title: NSLocalizedString("food.macro.protein", comment: ""),
+                          value: valueText(macros.p, "g"),
+                          targetText: valueText(Double(targets.protein), "g"),
+                          progress: progress(actual: macros.p, target: targets.protein),
+                          color: AIATheme.blue)
+                MacroCard(title: NSLocalizedString("food.macro.fat", comment: ""),
+                          value: valueText(macros.f, "g"),
+                          targetText: valueText(Double(targets.fat), "g"),
+                          progress: progress(actual: macros.f, target: targets.fat),
+                          color: AIATheme.green)
+                MacroCard(title: NSLocalizedString("food.macro.fiber", comment: ""),
+                          value: valueText(macros.fiber, "g"),
+                          targetText: valueText(Double(targets.fiber), "g"),
+                          progress: progress(actual: macros.fiber, target: targets.fiber),
+                          color: AIATheme.health)
+                MacroCard(title: NSLocalizedString("food.macro.sugar", comment: ""),
+                          value: valueText(macros.sugar, "g"),
+                          targetText: valueText(Double(targets.sugar), "g"),
+                          progress: progress(actual: macros.sugar, target: targets.sugar),
+                          color: AIATheme.food)
+                MacroCard(title: NSLocalizedString("food.macro.sodium", comment: ""),
+                          value: valueText(macros.sodium, "mg"),
+                          targetText: valueText(Double(targets.sodium), "mg"),
+                          progress: progress(actual: macros.sodium, target: targets.sodium),
+                          color: AIATheme.todo)
+            }
+        }
+    }
+
+    private func valueText(_ value: Double, _ unit: String) -> String {
+        String(Int(value.rounded())) + unit
+    }
+    private func progress(actual: Double, target: Int) -> Double {
+        target > 0 ? actual / Double(target) : 0
     }
 }
 

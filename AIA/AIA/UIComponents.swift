@@ -29,172 +29,8 @@ func safeYDomain(_ values: [Double], fallback: ClosedRange<Double> = 0...100) ->
     return (minV - pad)...(maxV + pad)
 }
 
-// MARK: - 自适应颜色（跟随系统浅/深）
-extension UIColor {
-    convenience init(hex: UInt64) {
-        let r = CGFloat((hex >> 16) & 0xFF) / 255
-        let g = CGFloat((hex >> 8)  & 0xFF) / 255
-        let b = CGFloat(hex & 0xFF) / 255
-        self.init(red: r, green: g, blue: b, alpha: 1)
-    }
-    /// 跟随系统：浅色用 light，深色用 dark
-    convenience init(light: UInt64, dark: UInt64) {
-        self.init { traits in
-            traits.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light)
-        }
-    }
-}
-
-extension Color {
-    init(hex: UInt64) {
-        let r = Double((hex >> 16) & 0xFF) / 255
-        let g = Double((hex >> 8)  & 0xFF) / 255
-        let b = Double(hex & 0xFF) / 255
-        self.init(.sRGB, red: r, green: g, blue: b, opacity: 1)
-    }
-    /// 跟随系统浅/深动态色
-    static func adaptive(light: UInt64, dark: UInt64) -> Color {
-        Color(UIColor(light: light, dark: dark))
-    }
-}
-
-// MARK: - 外观模式（浅色 / 深色 / 跟随系统）
-/// 持久化键：UserDefaults 的 `aia.appearance`，值为 rawValue（system/light/dark）。
-enum AppearanceMode: String, CaseIterable, Identifiable {
-    case system, light, dark
-    var id: String { rawValue }
-
-    /// 设置页分段标题
-    var title: String {
-        switch self {
-        case .system: return "跟随系统"
-        case .light:  return "浅色"
-        case .dark:   return "深色"
-        }
-    }
-
-    /// 系统图标（用于设置项左侧装饰）
-    var systemImage: String {
-        switch self {
-        case .system: return "circle.lefthalf.filled"
-        case .light:  return "sun.max.fill"
-        case .dark:   return "moon.fill"
-        }
-    }
-
-    /// 映射到 SwiftUI ColorScheme；system 返回 nil（即不覆盖，跟随系统）
-    var colorScheme: ColorScheme? {
-        switch self {
-        case .system: return nil
-        case .light:  return .light
-        case .dark:   return .dark
-        }
-    }
-
-    /// 从持久化字符串解析，非法值兜底为 system
-    init(raw: String) {
-        self = AppearanceMode(rawValue: raw) ?? .system
-    }
-}
-
-// MARK: - 设计令牌（统一视觉语言，浅/深自适应）
-enum AIATheme {
-    // 主强调色（沿用科技蓝）
-    static let blue   = Color(hex: 0x378add)
-    static let green  = Color(hex: 0x1d9e75)
-    static let amber  = Color(hex: 0xe0a23a)
-    static let purple = Color(hex: 0x9b59b6)
-    static let ink    = Color.adaptive(light: 0x1f2937, dark: 0x2c2c2e)   // 深底（按钮背景，配白字）
-    static let warn   = Color.adaptive(light: 0xe0564b, dark: 0xff6f61)
-    static let ok     = Color.adaptive(light: 0x3b6d11, dark: 0x7ed957)
-
-    // 语义文字
-    static let sub   = Color.adaptive(light: 0x5f5e5a, dark: 0xa1a1a6)
-    static let muted = Color.adaptive(light: 0x8a9099, dark: 0x8e8e93)
-    static let iconInactive = Color.adaptive(light: 0xc9ced3, dark: 0x5a5a5e)
-
-    // 语义表面（卡片/内层/分隔，自动适配深浅）
-    static let surface          = Color.adaptive(light: 0xf7f9fb, dark: 0x1c1c1e)
-    static let surfaceSecondary = Color.adaptive(light: 0xf1f3f5, dark: 0x2a2a2c)
-    // 深色值再提到 0x636366（系统深色 fill 3）：原 0x545458 虽解决了 0x3a3a3c 颜色对比，
-    // 但 0.5pt 细线物理宽度太弱，深色模式卡片上仍「细到几乎看不见」；0x636366 对比度再强一档。
-    // 配套 RecordsViews 行间分隔线宽 0.5→0.7 视觉权重 +40%，两步合击让深色模式分隔清晰可辨。
-    // light 保持 0xe6e9ec 不动。
-    static let hairline         = Color.adaptive(light: 0xe6e9ec, dark: 0x636366)
-    static let fillSoft         = Color.adaptive(light: 0xeef1f4, dark: 0x2c2c2e)
-    static let track            = Color.adaptive(light: 0xe3e7ea, dark: 0x363638)
-
-    // 模块底色：与 food/health/bill/todo 语义色同 hue 的淡 tint（深浅自适应），
-    // 保证宫格卡片 ↔ 首页时间线圆点 ↔ 各列表标签 三处颜色完全统一，靠色相即可秒认类型。
-    static let dietBG   = Color.adaptive(light: 0xfbf0db, dark: 0x2a2416)  // 饮食·琥珀淡底
-    static let healthBG = Color.adaptive(light: 0xf3e9f9, dark: 0x241b2c)  // 健康·紫淡底
-    static let billBG   = Color.adaptive(light: 0xe3f6ef, dark: 0x15251e)  // 账单·绿淡底
-    static let todoBG   = Color.adaptive(light: 0xe7f1fc, dark: 0x16242f)  // 待办·蓝淡底
-
-    // MARK: 类型语义色（圆点 / 标签 / 图表分段，深浅自适应）
-    // 蓝色只保留作品牌主操作色；四类记录各配稳定 hue，全局统一使用，靠颜色即可秒认类型。
-    static let food   = Color.adaptive(light: 0xd98e1f, dark: 0xf2b04a)  // 饮食·暖琥珀
-    static let health = Color.adaptive(light: 0x9b59b6, dark: 0xc187e0)  // 健康·紫
-    static let bill   = Color.adaptive(light: 0x1d9e75, dark: 0x4cc79a)  // 账单·森绿
-    static let todo   = Color.adaptive(light: 0x378add, dark: 0x6fb0f0)  // 待办·科技蓝
-
-    // 收支语义（个人记账：收入绿 / 支出红；注意股票视图若以后加需反过来用「红涨绿跌」）
-    static let income  = Color.adaptive(light: 0x1d9e75, dark: 0x4cc79a)  // 收入·绿
-    static let expense = Color.adaptive(light: 0xe0564b, dark: 0xff6f61)  // 支出·红
-    // 预算健康度：预警琥珀 → 超支深红
-    static let warning = Color.adaptive(light: 0xba7517, dark: 0xe0a23a)  // 预算预警
-    static let over    = Color.adaptive(light: 0x791f1f, dark: 0xc4453f)  // 超支
-
-    // 圆角尺度
-    static let rLG: CGFloat = 18
-    static let rMD: CGFloat = 14
-    static let rSM: CGFloat = 10
-    static let rXS: CGFloat = 8
-
-    // MARK: - 字体令牌（统一字号阶梯，消除散写 .system(size:)）
-    // 命名按角色；尺寸与既有设计像素对齐，并吸附到统一阶梯（9/10pt 提到 11pt，满足最小可读规范）。
-    // 权重用 .weight() 叠加，例如 AIATheme.Font.subhead.weight(.medium)。
-    enum Font {
-        // 注意：enum 名为 Font，内部必须用 SwiftUI.Font 限定，否则 Font 会被解析成此 enum 自身而编译报错。
-        static let micro     = SwiftUI.Font.system(size: 11)   // 最小可读：原 9/10pt 统一提到 11pt
-        static let caption   = SwiftUI.Font.system(size: 12)
-        static let footnote  = SwiftUI.Font.system(size: 13)
-        static let subhead   = SwiftUI.Font.system(size: 14)
-        static let callout   = SwiftUI.Font.system(size: 15)
-        static let body      = SwiftUI.Font.system(size: 16)
-        static let headline  = SwiftUI.Font.system(size: 17)
-        static let title3    = SwiftUI.Font.system(size: 18)
-        static let title2    = SwiftUI.Font.system(size: 20)
-        static let title1    = SwiftUI.Font.system(size: 22)
-        static let largeTitle = SwiftUI.Font.system(size: 24)
-        static let display   = SwiftUI.Font.system(size: 28)
-        static let hero      = SwiftUI.Font.system(size: 34)
-        static let ultra     = SwiftUI.Font.system(size: 40)
-    }
-
-    // 柔和阴影（深色下由 hairline 提供分隔）
-    static let cardShadow = Color.black.opacity(0.06)
-    static let cardShadowRadius: CGFloat = 10
-    static let cardShadowY: CGFloat = 3
-    // 按压抬升时的更强阴影
-    static let cardShadowStrong = Color.black.opacity(0.12)
-
-    // MARK: - 动效令牌（统一缓动与时长；所有动效须尊重减弱动态效果）
-    /// 用户是否开启「减弱动态效果」——动效据此降级为无动画。
-    static var motionReduce: Bool {
-        UIAccessibility.isReduceMotionEnabled
-    }
-    enum Motion {
-        /// 按压回弹（卡片/按钮）
-        static let press    = Animation.spring(response: 0.32, dampingFraction: 0.6)
-        /// 描边生长（环形 / 账单 donut）
-        static let draw     = Animation.easeOut(duration: 0.8)
-        /// 进度条 / 数值增长
-        static let progress = Animation.easeOut(duration: 0.6)
-        /// 进度条填充淡出（热启动专用）：颜色褪去而非宽度收缩，避免「变短」观感。
-        static let progressFade = Animation.easeOut(duration: 0.16)
-    }
-}
+// MARK: - 设计令牌层（AIATheme / AppearanceMode / Color 扩展）已抽入 AIAKit
+// 主 App 通过 `import AIAKit` 获得同名类型，调用点无需改动。
 
 // MARK: - 统一卡片样式（表面色 + 细描边 + 柔和投影）
 struct CardModifier: ViewModifier {
@@ -317,6 +153,59 @@ struct Pill: View {
     }
 }
 
+// MARK: - Pro 皇冠徽章（会员头像右上角探出）
+/// 在头像右上角叠加一枚金黄渐变皇冠，呼应小红书/微博/Twitter 的认证徽章位置。
+/// 仅用于「用户本人」头像（首页 / 设置页 / 我的账号页），不用于对话页 agent 头像。
+struct ProAvatarBadge: View {
+    /// 徽章直径，按头像尺寸等比取（72 头像→24，56→20，36→14）。
+    let diameter: CGFloat
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(LinearGradient(
+                    colors: [Color(red: 1.00, green: 0.82, blue: 0.32),
+                             Color(red: 0.99, green: 0.66, blue: 0.18)],
+                    startPoint: .top, endPoint: .bottom))
+                .frame(width: diameter, height: diameter)
+            Image(systemName: "crown.fill")
+                .font(.system(size: diameter * 0.55, weight: .bold))
+                .foregroundStyle(.white)
+        }
+        .overlay(Circle().strokeBorder(Color.white, lineWidth: max(1.5, diameter * 0.06)))
+        .shadow(color: .black.opacity(0.18), radius: 1.5, x: 0, y: 1)
+        .accessibilityLabel("Pro 会员")
+    }
+}
+
+extension View {
+    /// 条件叠加 Pro 皇冠徽章。皇冠斜戴在圆环右上角，底部贴着圆环外缘，不拦截点击。
+    @ViewBuilder
+    func proAvatarBadge(isPro: Bool, badgeDiameter: CGFloat) -> some View {
+        if isPro {
+            self.overlay(alignment: .topTrailing) {
+                GeometryReader { gp in
+                    let size = gp.size
+                    let center = CGPoint(x: size.width / 2, y: size.height / 2)
+                    let radius = min(size.width, size.height) / 2
+                    // 1 点钟方向：从 12 点（-90°）顺时针 30° = -60°
+                    let angle = -60.0 * .pi / 180
+                    // 徽章中心沿外缘放置，使其底部（旋转后）贴着圆环外环
+                    let dist = radius + badgeDiameter * 0.3
+                    let x = center.x + dist * cos(angle)
+                    let y = center.y + dist * sin(angle)
+                    ProAvatarBadge(diameter: badgeDiameter)
+                        .rotationEffect(.degrees(45), anchor: .bottom)
+                        .position(x: x, y: y)
+                }
+                .allowsHitTesting(false)
+            }
+        } else {
+            self
+        }
+    }
+}
+
 // MARK: - 单进度环（步数/睡眠）
 struct RingView: View {
     let value: String
@@ -414,14 +303,36 @@ struct DonutView: View {
 struct MacroCard: View {
     let title: String
     let value: String
+    /// 建议摄入量文本（如 "25g" / "2000mg"），传 nil 则不显示后缀。
+    /// 渲染为 "0g / 25g"——主数值保持 subhead 大字，建议量跟随后用 muted 微缩以弱化次要信息。
+    var targetText: String? = nil
     var progress: Double = 0
     var color: Color = AIATheme.blue
     @State private var drawn: Double = 0   // 进度条生长动画的当前进度（0→progress）
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(value).font(AIATheme.Font.subhead.weight(.medium))
-            Text(title).font(AIATheme.Font.micro).foregroundStyle(AIATheme.muted)
+            Text(value)
+                .font(AIATheme.Font.subhead.weight(.medium))
+                .frame(maxWidth: .infinity, alignment: .center)
+            // 标题 + 建议量同行（还原紧凑布局）。3 列窄格下 4 字标题"膳食纤维"+"建议 27g"容易溢出，
+            // 故字号从 micro(11pt) 调小到 10pt、字间距收窄到 3，并加 minimumScaleFactor 兜底，
+            // 让"膳食纤维"能完整显示而非截断成"膳食…"。
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 10))
+                    .foregroundStyle(AIATheme.muted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                if let target = targetText {
+                    Text("建议\(target)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(AIATheme.muted)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
             GeometryReader { geo in
                 Capsule().fill(AIATheme.track)
                     .overlay(alignment: .leading) {
@@ -564,8 +475,12 @@ struct CardRow: View {
 struct SectionTitle: View {
     let text: String
     var trailing: String? = nil
+    var systemImage: String? = nil
     var body: some View {
-        HStack {
+        HStack(spacing: 6) {
+            if let img = systemImage {
+                Image(systemName: img).foregroundStyle(AIATheme.health)
+            }
             Text(text).font(AIATheme.Font.caption.weight(.medium)).foregroundStyle(AIATheme.muted)
             Spacer()
             if let t = trailing { Text(t).font(AIATheme.Font.micro).foregroundStyle(AIATheme.muted) }
@@ -574,65 +489,58 @@ struct SectionTitle: View {
     }
 }
 
-// MARK: - 相机/相册 → 云端识别 → 结果确认页 的复用流程
+// MARK: - 相机/相册 → 云端识别 → 对话气泡 的复用流程
 // AIBottomBar 与首页快捷操作「拍照记录」共用，避免重复实现识别链路。
-enum CameraCoverItem: Identifiable {
-    case recognizing(UIImage)
-    case present(RecognitionPresent)
-    var id: String {
-        switch self {
-        case .recognizing(let img):
-            // 用图片 hash 唯一化 id，避免连续两次 fullScreenCover 冲突
-            return "recognizing-\(img.hashValue)"
-        case .present(let p): return "present-\(p.id)"
-        }
-    }
-}
+//
+// **v2 改造（2026-08-02）**：删掉了"识别中"全屏 cover（CameraCoverItem.recognizing + RecognizingOverlay）。
+// 原因：用户已经能看到自己发的图，识别中全屏浮层是多余的——而且会"盖住"对话页，反而看不清好好记。
+// 现在识别中直接展示对话页面，发图消息会先出现、识别卡片随后跟上，全屏遮罩一律不再用。
 
 extension View {
     /// 挂载「相机/相册拍照 → 云端识别 → 结果确认页」完整流程。
     /// - Parameters:
     ///   - showCamera: 调用方控制拉起相机（如点按钮、快捷操作）。
     ///   - showPicker: 调用方控制拉起相册（如相机不可用时「改用相册」）。
-    func cameraRecognitionFlow(showCamera: Binding<Bool>, showPicker: Binding<Bool>) -> some View {
-        modifier(CameraRecognitionFlowModifier(showCamera: showCamera, showPicker: showPicker))
+    ///   - navigateToChat: 识别结束后是否跳到对话页看好好记回复（非对话页入口应传 true）。
+    func cameraRecognitionFlow(showCamera: Binding<Bool>, showPicker: Binding<Bool>,
+                               navigateToChat: Bool = false) -> some View {
+        modifier(CameraRecognitionFlowModifier(showCamera: showCamera, showPicker: showPicker,
+                                               navigateToChat: navigateToChat))
     }
 }
 
 struct CameraRecognitionFlowModifier: ViewModifier {
     @Binding var showCamera: Bool
     @Binding var showPicker: Bool
+    /// true = 识别完自动跳对话页（首页底部栏等非对话页入口）；false = 留在原页（对话页自身）
+    var navigateToChat: Bool = false
     @Environment(\.modelContext) private var context
 
     @State private var pickedImage: UIImage?
-    @State private var coverItem: CameraCoverItem?
     @State private var errorMessage: String?
     @State private var cameraUnavailable = false
 
     func body(content: Content) -> some View {
         content
-            // 相机不可用时（模拟器等）不直接开 CameraView，转「相机不可用」提示并可改用相册
+            // 相机不可用时（模拟器等）不直接开系统相机，转「相机不可用」提示并可改用相册；
+            // 可用时直接调 CameraPresenter 弹独立黑窗（不经 fullScreenCover，无白屏过渡），
+            // 并立即把 showCamera 复位，保证下次点按仍能触发 onChange。
             .onChange(of: showCamera) { _, new in
-                if new && !UIImagePickerController.isSourceTypeAvailable(.camera) {
-                    showCamera = false
+                guard new else { return }
+                showCamera = false
+                guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
                     cameraUnavailable = true
+                    return
+                }
+                CameraPresenter.shared.present { img in
+                    if let img { runRecognize(img) }
                 }
             }
-            .fullScreenCover(isPresented: $showCamera) { CameraView(image: $pickedImage) }
             .sheet(isPresented: $showPicker) { ImagePicker(image: $pickedImage) }
             .onChange(of: pickedImage) { _, new in
                 if let img = new {
                     runRecognize(img)
                     pickedImage = nil
-                }
-            }
-            .fullScreenCover(item: $coverItem) { item in
-                switch item {
-                case .recognizing(let img):
-                    RecognizingOverlay(image: img, onBack: { coverItem = nil })
-                case .present(let p):
-                    makeResultConfirmView(p)
-                        .environment(\.modelContext, context)
                 }
             }
             .alert("提示", isPresented: Binding(
@@ -650,132 +558,106 @@ struct CameraRecognitionFlowModifier: ViewModifier {
     }
 
     private func runRecognize(_ img: UIImage) {
-        runImageRecognition(image: img, context: context, coverItem: $coverItem, errorMessage: $errorMessage)
-    }
-}
-
-/// 识别中浮层：背景展示用户提交的照片（模糊化），中央显示双行提示 + spinner，底部「返回」按钮。
-struct RecognizingOverlay: View {
-    let image: UIImage
-    let onBack: () -> Void
-
-    /// 入场动画状态：返回按钮从「下方 8pt + 透明」上滑淡入到正确位置。
-    @State private var appeared = false
-
-    var body: some View {
-        GeometryReader { proxy in
-            ZStack {
-                // 背景：用户照片撑满 + 模糊
-                // 关键：scaledToFill 在 GeometryReader→ZStack→fullScreenCover 嵌套下
-                // 不会自动锚定到容器中心，必须显式 frame(maxWidth:maxHeight:) + clipped()
-                // 才能让照片居中裁剪、水平不偏移。
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-                    .blur(radius: 25)
-                    .ignoresSafeArea()
-
-                // 半透明白色遮罩，让文字可读
-                Color.white.opacity(0.45)
-                    .ignoresSafeArea()
-
-                // 中央：spinner + 双行文字
-                // 关键：`.position(x: W/2, y: H/2)` 绝对锚定到屏幕几何中心，
-                // 100% 水平 + 垂直居中，与设备/字号/安全区/Dynamic Island 无关。
-                // 前版用 `VStack.frame(maxWidth: .infinity, alignment: .center) + .padding(.horizontal, 32)`，
-                // 在 GeometryReader→ZStack→fullScreenCover 嵌套 + iPhone 15 Pro Max 真机上仍有偏差。
-                // 改走几何锚定彻底绕开 ZStack 的 alignment 行为不确定性。
-                VStack(spacing: 14) {
-                    ProgressView()
-                        .controlSize(.large)
-                        .tint(AIATheme.food)
-                    VStack(spacing: 4) {
-                        Text("阿宝AI正在识别中")
-                            .font(AIATheme.Font.body.weight(.semibold))
-                            .foregroundStyle(.primary)
-                            .multilineTextAlignment(.center)
-                        Text("账单、食物、通知都能识别哦")
-                            .font(AIATheme.Font.footnote)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                }
-                .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
-
-                // 底部 1/3 位置：返回按钮（中心锚定到距顶 2/3 屏高）
-                Button {
-                    onBack()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chevron.left")
-                            .font(AIATheme.Font.footnote.weight(.semibold))
-                        Text("返回")
-                            .font(AIATheme.Font.subhead.weight(.medium))
-                    }
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 12)
-                    .background(.ultraThinMaterial)
-                    .clipShape(Capsule())
-                }
-                .position(x: proxy.size.width / 2,
-                          y: proxy.size.height * 2 / 3 + (appeared ? 0 : 8))
-                .opacity(appeared ? 1 : 0)
-                .onAppear {
-                    // 尊重「减弱动态效果」：开启时直接置位，不播放动画
-                    guard !AIATheme.motionReduce else {
-                        appeared = true
-                        return
-                    }
-                    withAnimation(.easeOut(duration: 0.35)) {
-                        appeared = true
-                    }
-                }
-            }
+        // 拍照/选图完成这一瞬间立即跳对话页（先看到「你发的图」+「好好记正在识别…」加载条），
+        // 不再等云端识别完成。已在对话页时（navigateToChat=false）不重复跳。
+        // runImageRecognition.finish 里仍保留兜底跳转（path.last != r 幂等守卫，不会双跳）。
+        if navigateToChat {
+            // 招呼气泡定位锚点：必须打在「插入本次第一条新消息」之前
+            // （runImageRecognition 内会同步 appendUserImageMessage 插图），
+            // 否则 ChatView 会把这张新图算成历史，招呼气泡排到图片后面。
+            NavigationRouter.shared.beginChatSession()
+            NavigationRouter.shared.navigateToChat()
         }
+        runImageRecognition(image: img, context: context,
+                            errorMessage: $errorMessage, navigateToChat: navigateToChat)
     }
 }
 
-/// 公共识别入口：任意视图拿到 UIImage 后调用，统一走「识别中 → 结果确认页」流程。
-/// 按「图片自动识别」设置分流：需要弹出 → 结果确认页；静默保存 → 关 cover + toast 引导；
-/// 全关（丢弃）→ 关 cover + toast 提示可去设置调整（相机/相册是用户主动识别，静默无反馈会像坏了）。
+/// 跨视图共享：图片识别进行中信号。
+/// runImageRecognition 开始/结束置位；ChatView 输入栏上方的加载提示据此显示「好好记正在识别...」。
+/// 用单例而非 @State 绑定，避免用户中途退出对话页导致绑定失效/崩溃。
+/// 普通 ObservableObject（非 @MainActor）：其置位/复位调用点均为主线程（UI 事件 / MainActor.run 内），
+/// 不引入跨 actor 隔离约束，避免 runImageRecognition（非隔离自由函数）编译报错。
+final class RecognitionActivity: ObservableObject {
+    static let shared = RecognitionActivity()
+    @Published var isRecognizing = false
+}
+
+/// 公共识别入口：任意视图拿到 UIImage 后调用，统一走「像微信一样发给好好记」的流程——
+/// 先把用户这张图作为一条用户消息插进对话流，识别完成后好好记在同一条对话里回结果卡片。
+/// 结果按「识别自动处理」设置分流（自动保存 / 待确认 / 丢弃），全程不再弹全屏确认页。
+/// - Parameter navigateToChat: 识别结束后是否跳到对话页看好好记回复。
+///   非对话页入口（首页底部栏、四宫格快捷操作等）必须传 true，否则用户留在原页看不到回复；
+///   ChatView 自身的拍照/相册/文件入口传 false，避免在对话页上再压一层对话页。
 func runImageRecognition(image: UIImage,
                          context: ModelContext,
-                         coverItem: Binding<CameraCoverItem?>,
-                         errorMessage: Binding<String?>) {
-    coverItem.wrappedValue = .recognizing(image)
+                         errorMessage: Binding<String?>,
+                         navigateToChat: Bool = false) {
+    // 先发图：像微信一样，对话流里先出现「你发的这张图」，好好记随后回识别卡片。
+    // 返回的文件名同时给识别结果复用，同一张原图不必落盘两次。
+    // 所有调用点都来自 UI 事件（主线程），assumeIsolated 成立。
+    // 2026-08-02：删掉了原「识别中」全屏 cover（`coverItem` 参数已移除），识别中直接展示对话页。
+    let presavedName = MainActor.assumeIsolated {
+        appendUserImageMessage(image: image, context: context)
+    }
+    // 图片已 insert 进对话流，但 ChatView 的消息列表是手动 fetch 的 @State（非 @Query，非响应式），
+    // 不会因 insert 自动刷新。这里主动广播滚动信号，让「你发的图」立刻显示并贴底，
+    // 而不是憋到识别完成时 processRecognition 的 save/广播才和识别结果卡一起冒出来。
+    NotificationCenter.default.post(name: Notification.Name("AIA.chatScrollToBottom"), object: nil)
+
+    /// 识别进行中：点亮对话页输入栏上方的「好好记正在识别...」加载提示。
+    RecognitionActivity.shared.isRecognizing = true
+
+    /// 好好记的收尾回复 + 可选跳转。用户已经「发了图」，任何分支都必须有回应，否则像石沉大海。
+    @MainActor func finish(reply: String?) {
+        if let reply { context.insert(ChatMessage(role: .ai, text: reply)) }
+        if navigateToChat { NavigationRouter.shared.navigateToChat() }
+        RecognitionActivity.shared.isRecognizing = false
+        // 识别收尾插入的消息（付费墙/失败等任何分支）需要让对话页手动 fetch 的消息列表刷新；
+        // ChatView 的 messages 是非响应式 @State，不主动广播就要退出重进对话页才看得到。
+        NotificationCenter.default.post(name: Notification.Name("AIA.chatScrollToBottom"), object: nil)
+    }
+
     Task {
         do {
             let output = try await RecognizeService.recognizeWithLocalPriority(image: image, in: context)
-            // 用户已点返回关闭 cover：丢弃结果，避免覆盖已关闭状态
-            guard coverItem.wrappedValue != nil else { return }
             let res = output.result
             let rawText = output.rawText
+            let outcome = await Task { @MainActor in
+                await RecognitionSaver.processRecognition(result: res, rawText: rawText, image: image,
+                                                          context: context, source: output.source,
+                                                          entryOrigin: "image",
+                                                          presavedImageName: presavedName)
+            }.value
             await MainActor.run {
-                let outcome = RecognitionSaver.processRecognition(result: res, rawText: rawText, image: image, context: context, source: output.source)
                 switch outcome {
-                case .present(let present):
-                    coverItem.wrappedValue = .present(present)
-                case .silentlySaved(let savedTypes):
-                    coverItem.wrappedValue = nil
-                    ToastCenter.shared.show(ImageAutoRecogSettings.silentSaveToast(savedTypes: savedTypes))
+                case .inserted:
+                    try? context.save()
+                    finish(reply: nil)
                 case .nothing:
-                    coverItem.wrappedValue = nil
-                    ToastCenter.shared.show("识别完成，但按当前设置未保存，可在「设置 → 图片自动识别」中调整")
+                    // 按设置丢弃或未识别到内容
+                    finish(reply: "这张图我没识别到可记录的内容～可以在「设置 → 识别结果保存方式设置」里调整保存策略。")
                 }
             }
         } catch let decoding as DecodingError {
             await MainActor.run {
                 errorMessage.wrappedValue = "云端返回格式不对：\(decoding.localizedDescription)"
-                coverItem.wrappedValue = nil
+                finish(reply: "这张图识别失败了：云端返回格式不对，稍后再试试～")
             }
         } catch {
             await MainActor.run {
-                errorMessage.wrappedValue = "识别失败：\(error.localizedDescription)"
-                coverItem.wrappedValue = nil
+                if error is AIAEntitlementError {
+                    // 付费墙拦截（免费版无云端视觉）：只给一条带升级 Pro 入口的引导气泡，
+                    // 不弹系统 Alert（否则会露出 entitlement_denied:xxx 生硬错误码，体验差）。
+                    finish(reply: UPGRADE_PRO_PREFIX + "这张图用本地AI识别失败了，如果你想体验更好，可升级 Pro版会员后，使用云端大模型AI进行识别。")
+                } else {
+                    errorMessage.wrappedValue = "识别失败：\(error.localizedDescription)"
+                    finish(reply: "这张图识别失败了：\(error.localizedDescription)")
+                }
             }
+        }
+        await MainActor.run {
+            RecognitionActivity.shared.isRecognizing = false
         }
     }
 }
@@ -826,11 +708,11 @@ struct AIBottomBar: View {
 
     init(prompts: [AIPrompt]? = nil, entrySource: String = "home") {
         self.prompts = prompts ?? [
-            AIPrompt(text: "问问阿宝AI", pointsTo: nil),
+            AIPrompt(text: "问问小记", pointsTo: nil),
             AIPrompt(text: "点拍照能自动识别哦", pointsTo: .camera),
-            AIPrompt(text: "叫阿宝AI帮记", pointsTo: nil),
+            AIPrompt(text: "叫小记帮记", pointsTo: nil),
             AIPrompt(text: "点麦克风可语音输入哦", pointsTo: .mic),
-            AIPrompt(text: "叫阿宝AI帮总结", pointsTo: nil),
+            AIPrompt(text: "叫小记帮总结", pointsTo: nil),
             AIPrompt(text: "点相册可上传、识别哦", pointsTo: .album)
         ]
         self.entrySource = entrySource
@@ -853,7 +735,7 @@ struct AIBottomBar: View {
             .buttonStyle(.plain)
 
             // 中间滚动文案区（浅灰填充的小胶囊，与外部大胶囊形成双层视觉层次）
-            Button { router.chatEntrySource = entrySource; router.navigate(.chat) } label: {
+            Button { router.chatEntrySource = entrySource; router.navigateToChatAutofocus() } label: {
                 HStack {
                     Spacer()
                     ZStack(alignment: .center) {
@@ -910,7 +792,8 @@ struct AIBottomBar: View {
         )
         // 左右 20pt 边距 → 与首页「今日事项预览」气泡同宽，整页对齐
         .padding(.horizontal, 20).padding(.bottom, 10)
-        .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker)
+        // 底部栏出现在首页/各模块页（不含对话页），识别完要把用户带到对话页看好好记回复
+        .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker, navigateToChat: true)
         .task {
             guard prompts.count > 1 else { return }
             var idx = promptIndex

@@ -3,12 +3,12 @@
 import SwiftUI
 
 // MARK: - 可配置项
-// 做好的「阿宝AI自动记账、记待办、记饮食」快捷指令的托管链接，填在这里即可在 App 内一键跳转安装。
+// 做好的「小记自动记账、记待办、记饮食」快捷指令的托管链接，填在这里即可在 App 内一键跳转安装。
 // 支持两种形式：
 // 1) .shortcut 文件直链 → 用 "shortcuts://import-shortcut?url=..." 打开；
 // 2) iCloud 共享链接  → 直接用 "https://www.icloud.com/shortcuts/..." 打开。
 // 若为空，则「去添加」按钮会提示先填入托管链接。
-let kShortcutFileURL: String = "https://www.icloud.com/shortcuts/e58878795cb2447c87efa99b55e86dfc"
+let kShortcutFileURL: String = "https://www.icloud.com/shortcuts/c0dc9c80f294447a8fa1d5a562e58141"
 
 /// 自动截屏识别的触发方式
 enum TriggerType: String, CaseIterable, Identifiable {
@@ -69,21 +69,21 @@ enum TriggerType: String, CaseIterable, Identifiable {
             return [
                 "打开手机「设置」→「辅助功能」→「触控」→「辅助触控」。",
                 "打开「辅助触控」开关。",
-                "在「自定操作」里选择「单点 / 轻点两下 / 长按」作为触发方式，并选择「阿宝AI自动记账、记待办、记饮食」。",
+                "在「自定操作」里选择「单点 / 轻点两下 / 长按」作为触发方式，并选择「小记自动记账、记待办、记饮食」。",
                 "设置完毕，付款或截屏后，点/敲小白点即可自动识别。"
             ]
         case .backTap:
             return [
                 "打开手机「设置」→「辅助功能」→「触控」→「轻点背面」。",
                 "选择「轻点两下」或「轻点三下」。",
-                "在列表里找到并选择「阿宝AI自动记账、记待办、记饮食」。",
+                "在列表里找到并选择「小记自动记账、记待办、记饮食」。",
                 "设置完毕，截屏后轻敲手机背面即可触发识别。"
             ]
         case .actionButton:
             return [
                 "打开手机「设置」→「操作按钮」。",
                 "把操作按钮功能滑动到「快捷指令」。",
-                "选择「阿宝AI自动记账、记待办、记饮食」。",
+                "选择「小记自动记账、记待办、记饮食」。",
                 "设置完毕，长按侧边操作按钮即可触发识别。"
             ]
         case .controlCenter:
@@ -91,7 +91,7 @@ enum TriggerType: String, CaseIterable, Identifiable {
                 "打开手机「设置」→「控制中心」。",
                 "在「更多控制」里找到「快捷指令」并点击绿色「+」添加。",
                 "从屏幕右上角下滑打开控制中心，长按「快捷指令」图标。",
-                "选择「阿宝AI自动记账、记待办、记饮食」即可运行；也可在快捷指令 App 里把它设成控制中心专用指令。"
+                "选择「小记自动记账、记待办、记饮食」即可运行；也可在快捷指令 App 里把它设成控制中心专用指令。"
             ]
         }
     }

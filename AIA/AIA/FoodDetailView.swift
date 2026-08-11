@@ -7,6 +7,23 @@ struct FoodDetailView: View {
     let entry: FoodEntry
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+    /// 按 entry.syncId 取该饮食记录的来源标记（1:1）
+    @Query private var sources: [FoodSource]
+    /// 识别引擎来源标记（1:1 关联 FoodEntry.syncId）
+    @Query private var recogSources: [RecogSource]
+
+    init(entry: FoodEntry) {
+        self.entry = entry
+        let sid = entry.syncId
+        _sources = Query(filter: #Predicate<FoodSource> { $0.foodSyncId == sid })
+        _recogSources = Query(filter: #Predicate<RecogSource> { $0.syncId == sid })
+    }
+
+    /// 识别引擎来源中文标签（本地AI识别 / 云端AI…），无标记返回 nil
+    private var recogSourceLabel: String? {
+        recogSources.first.flatMap { RecogSource.displayLabel(for: $0.recogSourceRaw) }
+    }
+
     @State private var toast: String?
     @State private var showEdit = false
     @State private var pendingDeleteID: PersistentIdentifier? = nil
@@ -15,6 +32,17 @@ struct FoodDetailView: View {
         let f = DateFormatter(); f.dateFormat = "HH:mm"; return f.string(from: entry.date)
     }
     private var portionLabel: String { entry.portion.isEmpty ? "1 份" : entry.portion }
+
+    /// 来源标签：优先取 FoodSource 标记；无标记（老记录）兜底为「图片识别 / 好好记帮记」
+    private var sourceLabel: String {
+        if let o = sources.first?.origin, let label = FoodSource.displayLabel(for: o) { return label }
+        return entry.imageName != nil ? NSLocalizedString("food.recognized", comment: "")
+                                      : NSLocalizedString("food.by_chat", comment: "")
+    }
+    private var sourceIcon: String {
+        if let o = sources.first?.origin { return FoodSource.icon(for: o) }
+        return entry.imageName != nil ? "photo" : "message"
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -49,7 +77,7 @@ struct FoodDetailView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("份量 \(portionLabel)")
                             .font(AIATheme.Font.footnote.weight(.medium))
-                            .foregroundStyle(AIATheme.ink)
+                            .foregroundStyle(.primary)
                         Text("\(entry.meal) · \(timeLabel)")
                             .font(AIATheme.Font.micro)
                             .foregroundStyle(AIATheme.sub)
@@ -67,6 +95,24 @@ struct FoodDetailView: View {
                     macroRow("糖", entry.sugar, entry.baseSugar ?? entry.sugar, "g", AIATheme.warn)
                     macroRow("钠", entry.sodium, entry.baseSodium ?? entry.sodium, "mg", AIATheme.warning)
                 }
+
+                SectionTitle(text: "来源")
+                HStack(spacing: 8) {
+                    Image(systemName: sourceIcon).foregroundStyle(AIATheme.sub)
+                    Text(sourceLabel).font(AIATheme.Font.footnote).foregroundStyle(.primary)
+                    if let recogSourceLabel {
+                        Text(recogSourceLabel)
+                            .font(AIATheme.Font.micro.weight(.medium))
+                            .foregroundStyle(AIATheme.sub)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(AIATheme.surfaceSecondary)
+                            .clipShape(Capsule())
+                    }
+                    Spacer()
+                }
+                .padding(12)
+                .background(AIATheme.surfaceSecondary)
+                .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
 
                 if entry.imageName != nil {
                     SectionTitle(text: "识别原图")
