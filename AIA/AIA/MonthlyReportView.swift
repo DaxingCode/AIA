@@ -225,7 +225,7 @@ private struct ReportCardView: View {
             // 头部
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("好记")
+                    Text("好记AI")
                         .font(AIATheme.Font.footnote.weight(.semibold))
                         .foregroundStyle(AIATheme.blue)
                     Text("月度账单报告")
@@ -301,7 +301,7 @@ private struct ReportCardView: View {
             Divider()
             HStack(spacing: 4) {
                 Spacer(minLength: 0)
-                Text("由 好记 生成 · 共 \(data.billCount) 笔")
+                Text("由 好记AI 生成 · 共 \(data.billCount) 笔")
                     .font(AIATheme.Font.micro)
                     .foregroundStyle(AIATheme.muted)
             }
