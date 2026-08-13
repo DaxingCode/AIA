@@ -26,7 +26,6 @@
 		A1B2C3020000000000000016 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3020000000000000006 /* Models.swift */; };
 		A1B2C3020000000000000017 /* RecognitionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3020000000000000007 /* RecognitionTypes.swift */; };
 		A1B2C3020000000000000018 /* RecurringRule.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3020000000000000008 /* RecurringRule.swift */; };
-		A1B2C3020000000000000019 /* WidgetNavIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3020000000000000009 /* WidgetNavIntent.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -107,7 +106,6 @@
 		A1B2C3020000000000000006 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		A1B2C3020000000000000007 /* RecognitionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecognitionTypes.swift; sourceTree = "<group>"; };
 		A1B2C3020000000000000008 /* RecurringRule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecurringRule.swift; sourceTree = "<group>"; };
-		A1B2C3020000000000000009 /* WidgetNavIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetNavIntent.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -267,7 +265,6 @@
 				A1B2C3020000000000000006 /* Models.swift */,
 				A1B2C3020000000000000007 /* RecognitionTypes.swift */,
 				A1B2C3020000000000000008 /* RecurringRule.swift */,
-				A1B2C3020000000000000009 /* WidgetNavIntent.swift */,
 			);
 			path = AIAKit;
 			sourceTree = "<group>";
@@ -524,7 +521,6 @@
 				A1B2C3020000000000000016 /* Models.swift in Sources */,
 				A1B2C3020000000000000017 /* RecognitionTypes.swift in Sources */,
 				A1B2C3020000000000000018 /* RecurringRule.swift in Sources */,
-				A1B2C3020000000000000019 /* WidgetNavIntent.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -712,7 +708,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = AIA/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "好记";
+				INFOPLIST_KEY_CFBundleDisplayName = "好记AI";
 				INFOPLIST_KEY_NSCameraUsageDescription = "好记需要相机权限来拍小票、食物或物品照片，用于自动识别与记录。";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "把步数、体重、心率交给好记吧～ 它会算出你的每日净热量，并画出健康趋势，这些数据都在本机处理。";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "好记会把你记录的热量、体重等同步到「健康」App，方便你在一处查看，也能让推荐更贴合你。";
@@ -720,8 +716,6 @@
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "好记需要相册权限来把识别原图保存到你的相册。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "好记会把你说的话转成文字，用于记录饮食、账单、待办和健康数据。";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
-				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
-				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
@@ -767,7 +761,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = AIA/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "好记";
+				INFOPLIST_KEY_CFBundleDisplayName = "好记AI";
 				INFOPLIST_KEY_NSCameraUsageDescription = "好记需要相机权限来拍小票、食物或物品照片，用于自动识别与记录。";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "把步数、体重、心率交给好记吧～ 它会算出你的每日净热量，并画出健康趋势，这些数据都在本机处理。";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "好记会把你记录的热量、体重等同步到「健康」App，方便你在一处查看，也能让推荐更贴合你。";
@@ -775,8 +769,6 @@
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "好记需要相册权限来把识别原图保存到你的相册。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "好记会把你说的话转成文字，用于记录饮食、账单、待办和健康数据。";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
-				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
-				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
