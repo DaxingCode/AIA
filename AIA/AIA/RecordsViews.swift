@@ -185,7 +185,7 @@ struct FoodListView: View {
     @Query(filter: #Predicate<WaterLog> { !$0.syncDeleted }) private var waterLogs: [WaterLog]
     /// 饮食记录来源标记（小程序 pull 进来的记录标记 origin="miniprogram"），用于列表展示「好好吃饭小程序」。
     @Query private var foodSources: [FoodSource]
-    /// 识别引擎来源标记（RecogSource 1:1 关联 FoodEntry.syncId），用于列表展示「本地AI识别/云端AI…」
+    /// 识别引擎来源标记（RecogSource 1:1 关联 FoodEntry.syncId），用于列表展示「免费版AI识别/Pro版AI…」
     @Query private var recogSources: [RecogSource]
     private var recogSourceBySyncId: [UUID: String] {
         Dictionary(uniqueKeysWithValues: recogSources.map { ($0.syncId, $0.recogSourceRaw) })
@@ -200,6 +200,7 @@ struct FoodListView: View {
     @State private var showDatePicker: Bool = false
     @State private var showGoalEditor: Bool = false
     @State private var editedGoal: Double = 0
+    @State private var showCalorieGoalAlert: Bool = false   // 热量目标为 0 → 弹窗引导去健康目标页
     @State private var showCamera = false
     @State private var showPicker = false
     @State private var showAddFood = false
@@ -257,7 +258,7 @@ struct FoodListView: View {
         // 与「今日消耗」列区分：今日消耗是 resting+active 的实际达成（tdeeCurrentValue）。
         // 无身体数据时 tdeeGoalFallback=0，回落到 actual，避免显示 0 也保证与 今日消耗 区分失败时仍非空。
         let target = tdeeGoalFallback
-        return target > 0 ? target : (health.restingEnergyToday + health.activeEnergyToday)
+        return target > 0 ? target : (ManualHealthStore.shared.healthKitValue("activeCalories", for: Date()) + ManualHealthStore.shared.healthKitValue("restingCalories", for: Date()))
     }
     /// 与首页健康卡片 / 今日预览 / 健康管理页 TDEE 圆环同源：
     /// 已接入 HealthKit 且读到数据 → 静息+活动能量；未接入 → 手动补录活动热量。
@@ -267,8 +268,9 @@ struct FoodListView: View {
     private var tdeeCurrentValue: Double {
         let day = Calendar.current.startOfDay(for: selectedDate)
         if tdeeSource == .auto && health.authorized && health.isAvailable && health.hasHealthKitData {
-            // HealthKit 路径：按选中日期取当天活动+静息能量（近 30 天走缓存字典，更早历史回落 0）。
-            return health.tdeeActual(for: selectedDate)
+            // HealthKit 路径：按选中日期取当天活动+静息能量（.hk 落库值，持久化，含更早历史）。
+            return ManualHealthStore.shared.healthKitValue("activeCalories", for: day)
+                + ManualHealthStore.shared.healthKitValue("restingCalories", for: day)
         }
         // 手动补录路径：按选中日期查（ManualHealthStore 内部按 startOfDay 存）。
         return Double(ManualHealthStore.shared.activeCalories(for: day))
@@ -705,7 +707,7 @@ struct FoodListView: View {
                                     .font(AIATheme.Font.subhead.weight(.semibold))
                                     .foregroundStyle(.primary)
                                 // 来源：优先取 FoodSource 标记的来源标签；无标记（本功能上线前的老记录）兜底：
-                                // 有图 → 图片识别，无图 → 好好记帮记
+                                // 有图 → 图片识别，无图 → 好记AI帮记
                                 // 副标题只显示「份量 · 来源」——`portion` 已自带单位/数字（如"200克"、"2个"），
                                 // 不再追加克数段（避免"200克 · 200g"、"2个 · 2g"这种重复+单位错配）。
                                 // 与对话页 ResultRowCard.foodSubtitle（ResultRowCard.swift:706、843）保持一致。
@@ -855,7 +857,7 @@ struct FoodListView: View {
                                 showGoalEditor = true
                             } label: {
                                 HStack(spacing: 4) {
-                                    Pill(text: "\(Int(selectedCalories)) / \(Int(goal))")
+                                    Pill(text: goal > 0 ? "\(Int(selectedCalories)) / \(Int(goal))" : "点击设置目标")
                                     Image(systemName: "pencil")
                                         .font(AIATheme.Font.micro)
                                         .foregroundStyle(AIATheme.muted)
@@ -876,7 +878,7 @@ struct FoodListView: View {
                             .buttonStyle(.plain)
                         }
 
-                        MiniBar(value: goal > 0 ? selectedCalories / goal : 0, color: AIATheme.food)
+                        MiniBar(value: goal > 0 ? selectedCalories / goal : 0, color: AIATheme.food, delay: 0.15)
 
                         // 3 列热量指标：净热量 / TDEE / 今日消耗（等宽 + 细竖线分隔）
                         HStack(spacing: 8) {
@@ -1037,6 +1039,11 @@ struct FoodListView: View {
             // 进入饮食页时延迟一帧触发近7日热量柱状图从 0 向上生长（立即改会被 .task 吞掉）
             try? await Task.sleep(nanoseconds: 150_000_000)
             barsRevealed = true
+            // 热量目标为 0（未设置）→ 弹窗引导用户去健康目标页录入身高体重自动生成
+            if goal <= 0 {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                showCalorieGoalAlert = true
+            }
         }
         .onChange(of: selectedDate) { _, _ in
             chartWeekOffset = 0
@@ -1228,6 +1235,15 @@ struct FoodListView: View {
         }
         .onAppear { meal = FoodListView.defaultMeal(for: .now) }
         .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker, navigateToChat: true)
+        // 热量目标为 0（未设置）→ 居中弹窗引导去健康目标页录入身高体重自动生成
+        .centeredAlert(
+            isPresented: $showCalorieGoalAlert,
+            title: "亲，你还未设置每日热量目标哦",
+            message: "录入身高、体重等信息，自动生成目标",
+            dismissTitle: "去设置",
+            onDismiss: { NavigationRouter.shared.navigate(.healthGoals) },
+            secondaryTitle: "稍后"
+        )
     }
 
     private func weekday(for date: Date) -> String {
@@ -1273,7 +1289,7 @@ struct HealthListView: View {
     @Environment(\.modelContext) private var context
     @Query(filter: #Predicate { !$0.syncDeleted }, sort: \HealthMetric.date, order: .reverse) private var healths: [HealthMetric]
     @Query(filter: #Predicate<SleepSession> { !$0.syncDeleted }, sort: \.sleepStart, order: .reverse) private var sleeps: [SleepSession]
-    /// 识别引擎来源标记（RecogSource 1:1 关联 HealthMetric.syncId），用于每行显示「本地AI识别/云端AI…」
+    /// 识别引擎来源标记（RecogSource 1:1 关联 HealthMetric.syncId），用于每行显示「免费版AI识别/Pro版AI…」
     @Query private var recogSources: [RecogSource]
     private var recogSourceBySyncId: [UUID: String] {
         Dictionary(uniqueKeysWithValues: recogSources.map { ($0.syncId, $0.recogSourceRaw) })
@@ -1296,23 +1312,40 @@ struct HealthListView: View {
     /// 逻辑收敛到 SleepSession.swift 的 `toggleSleepSession`，与首页共用同一份实现。
     /// 这里再叠加「与首页同口径的遮罩 + toast」：刚入睡→盖睡眠遮罩；刚醒来→居中大卡 toast（与遮罩「我醒了」同款）。
     private func handleSleepToggle() {
-        let wasSleeping = activeSleepSession != nil
-        let start = activeSleepSession?.sleepStart ?? Date()
-        toggleSleepSession(in: context, sleeps: sleeps)   // 模型变更不包 withAnimation（项目铁律）
-        if wasSleeping {
-            // 醒来：复制首页遮罩 onWake 的 toast 口径，避免两处文案/样式漂移。
-            ToastCenter.shared.showImportant(
-                sleepSummaryText(start: start),
-                icon: "🌙",
-                accent: AIATheme.warning
-            )
-        }
-        // 副作用延后一个 runloop，避免与 SwiftData 变更同帧触发布局重入
-        DispatchQueue.main.async {
-            withAnimation(.easeOut(duration: 0.35)) {
-                showSleepMask = !wasSleeping   // 刚入睡 → 盖遮罩；刚醒来 → 收遮罩
+        // toggle 返回切换后的真实结果：nil=已醒来（之前在睡），非 nil=刚入睡（新建会话）。
+        // 用返回值而非 wasSleeping 快照判断：@Query 闭包快照在 iCloud 同步/冷启动延迟时
+        // 可能尚未包含活跃会话，导致误判 wasSleeping=false 而不弹 toast。
+        let activeAfter = toggleSleepSession(in: context, sleeps: sleeps)   // 模型变更不包 withAnimation（项目铁律）
+        let didWake = (activeAfter == nil)
+        let start = activeSleepSession?.sleepStart
+                 ?? ContentView.activeSleepSessionStartFallback(context: context)
+        if didWake {
+            // 醒来：复制首页遮罩 onWake 的 toast 口径，避免两处文案/样式漂移。延后到遮罩淡出后弹。
+            let toastStart = start
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                ToastCenter.shared.showImportant(
+                    sleepSummaryText(start: toastStart),
+                    icon: "🌙",
+                    accent: AIATheme.warning
+                )
             }
         }
+        withAnimation(.easeOut(duration: 0.35)) {
+            showSleepMask = (activeAfter != nil)   // 刚入睡 → 盖遮罩；刚醒来 → 收遮罩
+        }
+    }
+
+    /// 自动恢复睡眠遮罩（与首页 ContentView.restoreSleepMaskIfNeeded 同口径）：
+    /// 有进行中的会话、本会话未被主动收起过、且未超 maxAutoRestoreHours 才盖；
+    /// 超时视为「忘了点醒来的孤儿数据」不盖（页面按钮仍是 🌙，可自行点醒）。
+    /// 冷启动/进入健康页时调用，杀 App 重开也一样生效。
+    private func restoreSleepMaskIfNeeded() {
+        guard !showSleepMask else { return }
+        guard let active = activeSleepSession else { return }
+        guard sharedSleepMaskDismissedSessionID != active.syncId else { return }
+        let maxAutoRestoreHours: Double = 14
+        guard Date().timeIntervalSince(active.sleepStart) < maxAutoRestoreHours * 3600 else { return }
+        withAnimation(.easeOut(duration: 0.35)) { showSleepMask = true }
     }
 
     /// 睡眠时长小结文案（与首页 sleepStatusButton / 遮罩「我醒了」同口径，避免两处文案漂移）。
@@ -1346,6 +1379,9 @@ struct HealthListView: View {
     @State private var healthRefreshTimer: Timer?
     private let healthRefreshInterval: TimeInterval = 120   // 前台停留期间每 2 分钟刷新一次 HealthKit
     @State private var showSleepMask = false     // 健康页入睡→盖睡眠遮罩（与首页同口径）
+    @State private var showHealthGoalsAlert = false  // 未录入健康目标→弹窗提醒
+    // 「先用一下 App」收起记忆与首页共享（sharedSleepMaskDismissedSessionID，进程内、不持久化）：
+    // 杀 App 重开 → 值重置为 nil → 只要没点醒来，重开进健康页就自动盖回。
 
     // 健康目标（本地 @AppStorage，与饮食 aia.calorieGoalOverride 同策略，不云同步）
     @AppStorage("aia.heightCm") private var heightCm: Double = 0
@@ -1371,7 +1407,7 @@ struct HealthListView: View {
     @AppStorage(HealthMetricKind.tdee.sourceKey)      private var tdeeSource: HealthSourceMode = .auto
     @AppStorage(HealthMetricKind.heartRate.sourceKey) private var heartRateSource: HealthSourceMode = .auto
 
-    private var hkUsable: Bool { health.authorized && health.isAvailable && health.hasHealthKitData }
+    private var hkUsable: Bool { health.authorized && health.isAvailable }
 
     // 前台停留期间的 HealthKit 周期刷新（每 healthRefreshInterval 秒一次），离开页面必须停，避免泄漏与后台空转。
     private func startHealthRefreshTimer() {
@@ -1400,23 +1436,30 @@ struct HealthListView: View {
     }
 
     private var stepsCurrentValue: Int {
-        isAuto(.steps) ? Int(health.stepsToday) : ManualHealthStore.shared.steps(for: Date())
+        isAuto(.steps) ? Int(ManualHealthStore.shared.healthKitValue("steps", for: Date())) : ManualHealthStore.shared.steps(for: Date())
     }
     private var sleepCurrentValue: Double {
-        let stored = healths.first(where: { $0.metric.contains("睡眠") }).flatMap { Double($0.value) } ?? 0
-        if isAuto(.sleep) { return stored }
+        if isAuto(.sleep) {
+            // 自动模式：优先读 HealthKit 落库值（.hk 槽位，已持久化），兼容旧 HealthMetric 体检记录兜底。
+            let hk = ManualHealthStore.shared.healthKitValue("sleep", for: Date())
+            if hk > 0 { return hk }
+            return healths.first(where: { $0.metric.contains("睡眠") }).flatMap { Double($0.value) } ?? 0
+        }
         // 手动模式：与圆环完成数据、首页「昨晚睡眠」同源（详见 manualSleepTotalHours）
         return manualSleepTotalHours(sleeps: sleeps, healths: healths, on: Date())
     }
     private var exerciseCurrentValue: Double {
-        isAuto(.exercise) ? health.exerciseTimeToday : health.exerciseTimeToday + Double(ManualHealthStore.shared.exerciseMinutes(for: Date()))
+        isAuto(.exercise)
+            ? ManualHealthStore.shared.healthKitValue("exercise", for: Date())
+            : health.exerciseTimeToday + Double(ManualHealthStore.shared.exerciseMinutes(for: Date()))
     }
     /// TDEE 实际达成 = 静息能量 + 活动能量。
-    /// 已接入 HealthKit 且读到数据 → 自动同步；
+    /// 已接入 HealthKit 且读到数据 → 自动同步（读落库值，持久化一致）；
     /// 未接入 → 回退到手动录入的活动热量（点击圆环 +100 kcal）。
     private var tdeeCurrentValue: Double {
         isAuto(.tdee)
-            ? health.restingEnergyToday + health.activeEnergyToday
+            ? ManualHealthStore.shared.healthKitValue("activeCalories", for: Date())
+                + ManualHealthStore.shared.healthKitValue("restingCalories", for: Date())
             : Double(ManualHealthStore.shared.activeCalories(for: Date()))
     }
 
@@ -1433,15 +1476,20 @@ struct HealthListView: View {
     }
 
     /// 点击圆环自增：步数 +1000 / 睡眠 +1h / 运动 +10min，并触发轻触震动。
-    /// HealthKit 已接入时禁止手动修改，直接返回。
+    /// 自动记录（HealthKit）模式下不写入数据，而是弹出「是否切换为手动记录」确认框。
     private func incrementMetric(_ kind: HealthMetricKind) {
-        guard !isAuto(kind) else { return }
+        if isAuto(kind) {
+            alertMetricKind = kind
+            alertMetricTitle = kind.title
+            showAutoModeAlert = true
+            return
+        }
         switch kind {
         case .steps: ManualHealthStore.shared.addSteps(1000, for: Date())
         case .sleep: ManualHealthStore.shared.addSleepHours(1, for: Date())
         case .exercise: ManualHealthStore.shared.addExerciseMinutes(10, for: Date())
         case .tdee: ManualHealthStore.shared.addActiveCalories(100, for: Date())
-        case .heartRate: break   // 静息心率不是圆环，无手动自增入口
+        case .heartRate: showRestingHRInput = true   // 手动模式点静息心率 → 弹录入 sheet
         }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
@@ -1498,6 +1546,9 @@ struct HealthListView: View {
     @State private var showDeleteConfirm = false
     @State private var showSourceSettings = false   // 数据来源设置面板
     @State private var showRestingHRInput = false    // 静息心率录入 sheet
+    @State private var showAutoModeAlert = false     // 自动记录模式点击圆环的切换确认弹窗
+    @State private var alertMetricKind: HealthMetricKind? = nil
+    @State private var alertMetricTitle: String = ""
 
     private var sleepHours: Double {
         healths.first(where: { $0.metric.contains("睡眠") }).flatMap { Double($0.value) } ?? 0
@@ -1506,8 +1557,9 @@ struct HealthListView: View {
         // 静息心率：自动模式下若 HealthKit 已读到值，优先显示 HealthKit 数据；
         // 手动模式优先读 ManualHealthStore（HealthKit 静息心率不回写 healths 表，否则永远 "—"）。
         if key == "心率" {
-            if isAuto(.heartRate), health.restingHeartRate > 0 {
-                return "\(Int(health.restingHeartRate))bpm"
+            if isAuto(.heartRate) {
+                let hk = ManualHealthStore.shared.healthKitValue("heartRate", for: Date())
+                if hk > 0 { return "\(Int(hk))bpm" }
             }
             let manual = ManualHealthStore.shared.restingHeartRate(for: Date())
             if manual > 0 { return "\(manual)bpm" }
@@ -1524,10 +1576,8 @@ struct HealthListView: View {
             let dayStart = cal.startOfDay(for: d)
             let v: Double
             if isAuto(.steps) {
-                // 已接 HealthKit：今天用 stepsToday，历史 6 天取 stepsForDay 缓存
-                v = cal.isDateInToday(d)
-                    ? Double(health.stepsToday)
-                    : Double(health.stepsForDay[dayStart] ?? 0)
+                // 已接 HealthKit：读 .hk 落库值（按天持久化，今天+历史 6 天同源）
+                v = ManualHealthStore.shared.healthKitValue("steps", for: dayStart)
             } else {
                 // 未接 HealthKit：按天回落到手动步数（ManualHealthStore 已按天存）
                 v = Double(ManualHealthStore.shared.steps(for: dayStart))
@@ -1546,10 +1596,8 @@ struct HealthListView: View {
             let dayStart = cal.startOfDay(for: d)
             let v: Double
             if isAuto(.exercise) {
-                // 已接 HealthKit：今天用 exerciseTimeToday，历史 6 天取 exerciseLast7Days 缓存
-                v = cal.isDateInToday(d)
-                    ? health.exerciseTimeToday
-                    : health.exerciseLast7Days[dayStart] ?? 0
+                // 已接 HealthKit：读 .hk 落库值（按天持久化，今天+历史 6 天同源）
+                v = ManualHealthStore.shared.healthKitValue("exercise", for: dayStart)
             } else {
                 // 未接 HealthKit：按天回落到手动运动（ManualHealthStore 已按天存）
                 v = Double(ManualHealthStore.shared.exerciseMinutes(for: dayStart))
@@ -1615,9 +1663,12 @@ struct HealthListView: View {
                     let data = weekExercise(offset: off)
                     Group {
                         if data.allSatisfy({ $0.value == 0 }) {
-                            Text("还没有运动记录，连接健康 App 或点上方圆环 +10 分钟")
+                            Text(isAuto(.exercise)
+                                 ? "未从Apple健康获取到数据，可点右上角「设置」换成手动记录"
+                                 : "未从Apple健康获取到数据，可点上方圆环手动记录")
                                 .font(AIATheme.Font.micro)
                                 .foregroundStyle(AIATheme.sub)
+                                .multilineTextAlignment(.center)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                         } else {
                             GrowthBars(data: data,
@@ -1647,9 +1698,12 @@ struct HealthListView: View {
                     let data = weekSleep(offset: off)
                     Group {
                         if data.allSatisfy({ $0.value == 0 }) {
-                            Text("还没有睡眠记录，点上方「入睡」按钮开始记录")
+                            Text(isAuto(.sleep)
+                                 ? "未从Apple健康获取到数据，可点右上角「设置」换成手动记录"
+                                 : "未从Apple健康获取到数据，可点上方圆环手动记录")
                                 .font(AIATheme.Font.micro)
                                 .foregroundStyle(AIATheme.sub)
+                                .multilineTextAlignment(.center)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                         } else {
                             GrowthBars(data: data,
@@ -1696,14 +1750,15 @@ struct HealthListView: View {
                             Button {
                                 CloudSyncManager.shared.syncAfterLogin(context: context)
                             } label: {
-                                Text("从云端恢复数据")
+                                Text(CloudSyncManager.canPerformCloudSync ? "从云端恢复数据" : (CloudSyncManager.autoSync ? "会员已过期" : "自动同步已关闭"))
                                     .font(AIATheme.Font.body.weight(.medium))
                                     .foregroundStyle(.white)
                                     .frame(maxWidth: .infinity)
                                     .padding(10)
-                                    .background(AIATheme.blue)
+                                    .background(CloudSyncManager.canPerformCloudSync ? AIATheme.blue : AIATheme.muted)
                                     .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
                             }
+                            .disabled(!CloudSyncManager.canPerformCloudSync)
                         }
                         .padding(12)
                         .background(AIATheme.surfaceSecondary)
@@ -1796,26 +1851,18 @@ struct HealthListView: View {
                             }
                             .buttonStyle(.plain)
                             Button {
-                                // 自动记录模式（且 HealthKit 可用）不弹出修改窗；仅手动记录模式点击才弹
-                                if !isAuto(.heartRate) {
-                                    showRestingHRInput = true
-                                }
+                                // 复用与圆环一致的点击逻辑：自动模式弹「切换手动/保持自动」，手动模式弹录入 sheet
+                                incrementMetric(.heartRate)
                             } label: {
                                 StatCard(value: stat("心率"), caption: NSLocalizedString("health.stat.restingHR", comment: ""))
                             }
                             .buttonStyle(.plain)
                             .sheet(isPresented: $showRestingHRInput) {
                                 RestingHeartRateInputSheet(
-                                    initial: isAuto(.heartRate)
-                                        ? Int(health.restingHeartRate)
-                                        : ManualHealthStore.shared.restingHeartRate(for: Date()),
+                                    initial: ManualHealthStore.shared.restingHeartRate(for: Date()),
                                     onSave: { bpm in
-                                        if isAuto(.heartRate) {
-                                            health.saveHeartRate(Double(bpm))
-                                            health.fetchRestingHeartRateToday()
-                                        } else {
-                                            ManualHealthStore.shared.setRestingHeartRate(bpm, for: Date())
-                                        }
+                                        // 仅手动模式可改；自动模式按钮已禁用弹窗（数据来自 HealthKit，不回写）。
+                                        ManualHealthStore.shared.setRestingHeartRate(bpm, for: Date())
                                     }
                                 )
                             }
@@ -1866,9 +1913,12 @@ struct HealthListView: View {
                                 let data = weekSteps(offset: off)
                                 Group {
                                     if data.allSatisfy({ $0.value == 0 }) {
-                                        Text("还没有步数记录，连接健康 App 或点上方圆环 +1000 步")
+                                        Text(isAuto(.steps)
+                                             ? "未从Apple健康获取到数据，可点右上角「设置」换成手动记录"
+                                             : "未从Apple健康获取到数据，可点上方圆环手动记录")
                                             .font(AIATheme.Font.micro)
                                             .foregroundStyle(AIATheme.sub)
+                                            .multilineTextAlignment(.center)
                                             .frame(height: 70)
                                     } else {
                                         GrowthBars(data: data,
@@ -2021,21 +2071,121 @@ struct HealthListView: View {
         .sheet(isPresented: $showSourceSettings) {
             HealthSourceSettingsView()
         }
+        // 自动记录模式下点击圆环：提示并询问是否切换为手动记录模式（仅该指标单独切换）
+        .centeredAlert(
+            isPresented: $showAutoModeAlert,
+            title: "",
+            message: "当前是 Apple 健康「自动记录」模式，点击不会增加数据。\n是否要切换成「手动记录」模式？",
+            dismissTitle: "保持自动",
+            onDismiss: { showAutoModeAlert = false },
+            secondaryTitle: "换成手动",
+            onSecondary: {
+                showAutoModeAlert = false
+                guard let kind = alertMetricKind else { return }
+                // 仅把被点击的这一个指标切到手动，其余圆环不受影响。
+                switch kind {
+                case .steps: stepsSource = .manual
+                case .sleep: sleepSource = .manual
+                case .exercise: exerciseSource = .manual
+                case .tdee: tdeeSource = .manual
+                case .heartRate: heartRateSource = .manual
+                }
+                let toastMsg: String = (kind == .heartRate)
+                    ? "已换成手动记录模式，点击「静息心率」方块即可记录数据。"
+                    : "已换成手动记录模式，点击圆环可记录数据。"
+                ToastCenter.shared.showImportant(
+                    toastMsg,
+                    icon: "hand.tap.fill",
+                    accent: AIATheme.health
+                )
+            }
+        )
         .task {
             UsageAnalytics.logOpen("health")
             health.refreshAll()          // 原只拉步数，现拉全部 6 项
+            // 睡眠模式恢复：只要还有没点「醒来」的会话（未超 14h、本会话未主动收起），
+            // 每次进入健康页都自动盖回遮罩——杀 App 重开也不例外（与首页冷启动恢复同口径）。
+            restoreSleepMaskIfNeeded()
             startHealthRefreshTimer()    // 启动前台周期刷新
             // 延迟一帧再触发近7日步数柱状图从 0 向上生长（立即改会被 .task 吞掉）
             try? await Task.sleep(nanoseconds: 150_000_000)
             barsRevealed = true
+            // 未录入健康目标（身高或体重任一为 0）→ 弹窗提醒
+            if heightCm <= 0 || weightKg <= 0 {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                showHealthGoalsAlert = true
+            }
         }
-        .onChange(of: health.authorized) { authorized in
+        .onChange(of: health.authorized) { _, authorized in
             // 授权可能在进入本页后才完成，补齐定时器启动
             if authorized { startHealthRefreshTimer() }
         }
         .onDisappear {
             barsRevealed = false
             stopHealthRefreshTimer()     // 离开页面必须停，避免泄漏与后台空转
+        }
+        // 冷启动/首拉时 SleepSession 可能还在云端同步途中，@Query 到位后补盖一次
+        // （restore 内部有 dismissed/14h/无会话多重守卫，不会被正常操作误盖）。
+        .onChange(of: sleeps.count) { _, _ in
+            restoreSleepMaskIfNeeded()
+        }
+        // 未录入健康目标提醒弹窗（身高或体重任一为 0 即弹，每次进入都判断）
+        // 用自定义居中弹窗取代系统 .alert（iOS 26 系统 alert 文字强制左对齐，无法居中）
+        .overlay(alignment: .center) {
+            if showHealthGoalsAlert {
+                ZStack {
+                    // 半透明遮罩，点遮罩也可关
+                    Color.black.opacity(0.32)
+                        .ignoresSafeArea()
+                        .onTapGesture { showHealthGoalsAlert = false }
+
+                    VStack(spacing: 14) {
+                        Text("亲，你还没设定健康目标哦")
+                            .font(AIATheme.Font.headline)
+                            .foregroundStyle(AIATheme.reading)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity, alignment: .center)
+
+                        Text("快去录入，开始管理运动、睡眠和健康吧")
+                            .font(AIATheme.Font.subhead)
+                            .foregroundStyle(AIATheme.sub)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity, alignment: .center)
+
+                        HStack(spacing: 12) {
+                            Button {
+                                showHealthGoalsAlert = false
+                            } label: {
+                                Text("稍后")
+                                    .font(AIATheme.Font.subhead)
+                                    .foregroundStyle(AIATheme.sub)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 11)
+                                    .background(AIATheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: AIATheme.rSM))
+                            }
+
+                            Button {
+                                showHealthGoalsAlert = false
+                                NavigationRouter.shared.navigate(.healthGoals)
+                            } label: {
+                                Text("去录入")
+                                    .font(AIATheme.Font.subhead.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 11)
+                                    .background(AIATheme.health, in: RoundedRectangle(cornerRadius: AIATheme.rSM))
+                            }
+                        }
+                        .padding(.top, 4)
+                    }
+                    .padding(20)
+                    .background(AIATheme.surface, in: RoundedRectangle(cornerRadius: AIATheme.rLG))
+                    .shadow(color: AIATheme.cardShadowStrong, radius: AIATheme.cardShadowRadius, y: AIATheme.cardShadowY)
+                    .padding(.horizontal, 36)
+                    .transition(.scale(scale: 0.92).combined(with: .opacity))
+                }
+                .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showHealthGoalsAlert)
+            }
         }
         .overlay(alignment: .bottom) {
             if multiSelectMode {
@@ -2082,20 +2232,28 @@ struct HealthListView: View {
             if showSleepMask {
                 SleepMaskOverlay(
                     session: activeSleepSession,
+                    show: showSleepMask,
                     onWake: {
-                        let start = activeSleepSession?.sleepStart ?? Date()
-                        toggleSleepSession(in: context, sleeps: sleeps)
-                        ToastCenter.shared.showImportant(
-                            sleepSummaryText(start: start),
-                            icon: "🌙",
-                            accent: AIATheme.warning
-                        )
+                        // toggle 返回 nil=确实醒来（之前在睡）；用 fallback 取 sleepStart 保证文案准确，
+                        // 不再依赖 activeSleepSession 闭包快照（iCloud/冷启动延迟时可能取不到）。
+                        let _ = toggleSleepSession(in: context, sleeps: sleeps)
+                        let start = ContentView.activeSleepSessionStartFallback(context: context)
                         DispatchQueue.main.async {
                             withAnimation(.easeOut(duration: 0.3)) { showSleepMask = false }
+                            // 延后到遮罩淡出后弹 toast，避免被遮罩盖住。
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                                ToastCenter.shared.showImportant(
+                                    sleepSummaryText(start: start),
+                                    icon: "🌙",
+                                    accent: AIATheme.warning
+                                )
+                            }
                         }
                     },
                     onDismiss: {
-                        // 「先用一下 App」：不结束睡眠，仅收起遮罩。
+                        // 「先用一下 App」：不结束睡眠，仅收起遮罩；
+                        // 记住本次会话已主动收起（与首页共享）→ 同一睡眠内两页都不再自动盖回。
+                        sharedSleepMaskDismissedSessionID = activeSleepSession?.syncId
                         DispatchQueue.main.async {
                             withAnimation(.easeOut(duration: 0.3)) { showSleepMask = false }
                         }
@@ -2439,28 +2597,59 @@ struct BillListView: View {
         }
     }
 
-    // MARK: - 顶部圆环轮播
+    // MARK: - 顶部圆环轮播（两页，左右滑动切换）
+    // 2026-08-13：改用 ScrollView(.horizontal, paging) 替代 TabView(.page)。
+    // 根因：TabView(.page) 的翻页拖拽手势与内部圆环 Button 的点击手势在老芯片(A12/XS Max)上竞争，
+    // 表现为第 2 页左半边「本周账单」点不动。ScrollView 的分页手势更轻、不会吞内部 Button 点击。
+    @State private var carouselID: Int? = 0
     private var summaryCarousel: some View {
+        // 2026-08-13 二次修正：弃用手算 pageW，改用项目内已验证的标准 paging 写法
+        // （.scrollTargetLayout + .containerRelativeFrame(.horizontal) + .scrollPosition(id:)，
+        // 参考 AdBanner.swift 250-262 行）。
+        // 根因：手算 pageW 依赖外层 .padding(12) 的精确尺寸，一旦容器再有额外 padding（如父级
+        // 卡片或屏幕安全区不同）就错位，导致第 1 页 HStack 比可视区宽或窄，左卡右卡分摊不均、Divider 偏。
+        // containerRelativeFrame 让 SwiftUI 自动让每页 = ScrollView 可视区宽，根本不存在算错问题。
         VStack(spacing: 6) {
-            TabView {
-                // 第 1 页：今日账单 + 本月账单
-                HStack(spacing: 0) {
-                    summaryDonutCard(titleKey: "bill.today", bills: todayExpenseBills, mode: .week)
-                    Divider().frame(height: 120)
-                    summaryDonutCard(titleKey: "bill.thisMonth", bills: monthExpenseBills, mode: .month)
-                }
-                .padding(12)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 0) {
+                    // 第 1 页：今日账单 + 本月账单
+                    HStack(spacing: 0) {
+                        summaryDonutCard(titleKey: "bill.today", bills: todayExpenseBills, mode: .week)
+                            .frame(maxWidth: .infinity)
+                        Divider().frame(width: 1, height: 120)
+                        summaryDonutCard(titleKey: "bill.thisMonth", bills: monthExpenseBills, mode: .month)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .containerRelativeFrame(.horizontal)
+                    .frame(height: 160)
+                    .id(0)
 
-                // 第 2 页：本周账单 + 本年账单
-                HStack(spacing: 0) {
-                    summaryDonutCard(titleKey: "bill.thisWeek", bills: weekExpenseBills, mode: .week)
-                    Divider().frame(height: 120)
-                    summaryDonutCard(titleKey: "bill.thisYear", bills: yearExpenseBills, mode: .year)
+                    // 第 2 页：本周账单 + 本年账单
+                    HStack(spacing: 0) {
+                        summaryDonutCard(titleKey: "bill.thisWeek", bills: weekExpenseBills, mode: .week)
+                            .frame(maxWidth: .infinity)
+                        Divider().frame(width: 1, height: 120)
+                        summaryDonutCard(titleKey: "bill.thisYear", bills: yearExpenseBills, mode: .year)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .containerRelativeFrame(.horizontal)
+                    .frame(height: 160)
+                    .id(1)
                 }
-                .padding(12)
+                .scrollTargetLayout()
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $carouselID)
             .frame(height: 160)
+
+            // 底部小圆点指示当前页
+            HStack(spacing: 6) {
+                ForEach(0..<2) { i in
+                    Circle()
+                        .fill((carouselID ?? 0) == i ? AIATheme.bill : AIATheme.muted.opacity(0.4))
+                        .frame(width: 6, height: 6)
+                }
+            }
 
             Text(NSLocalizedString("bill.carousel.hint", comment: ""))
                 .font(AIATheme.Font.micro)
@@ -2509,6 +2698,7 @@ struct BillListView: View {
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(.plain)
+        .contentShape(Rectangle())
     }
 
     var body: some View {
@@ -3285,7 +3475,7 @@ private enum TodoFilter: String, CaseIterable {
 struct ReminderListView: View {
     @Environment(\.modelContext) private var context
     @Query(filter: #Predicate<Reminder> { !$0.syncDeleted }) private var reminders: [Reminder]
-    /// 识别来源标记（RecogSource 1:1 关联 Reminder.syncId），用于每行显示「本地AI识别/云端AI…」
+    /// 识别来源标记（RecogSource 1:1 关联 Reminder.syncId），用于每行显示「免费版AI识别/Pro版AI…」
     @Query private var recogSources: [RecogSource]
     private var recogSourceBySyncId: [UUID: String] {
         Dictionary(uniqueKeysWithValues: recogSources.map { ($0.syncId, $0.recogSourceRaw) })
@@ -4481,7 +4671,8 @@ private struct DietAnalysisView: View {
 
     /// TDEE：与饮食记录页同源（HealthKit 真实静息+活动能量，无则回落到 BMR × 活动系数）。
     private var tdeeValue: Double {
-        let actual = health.restingEnergyToday + health.activeEnergyToday
+        let actual = ManualHealthStore.shared.healthKitValue("activeCalories", for: Date())
+            + ManualHealthStore.shared.healthKitValue("restingCalories", for: Date())
         if actual > 0 { return actual }
         return (mifflinBMR(weightKg: weightKg, heightCm: heightCm, age: age, isMale: bioSex == 1) ?? 0)
             * activityMultiplier(activityLevel)
@@ -4945,7 +5136,7 @@ private struct HealthSourceSettingsView: View {
     private var authorizationCard: some View {
         let isUnavailable = !health.isAvailable
         let isFailed = health.authorizationFailed
-        let isAuthorized = health.authorized
+        let isAuthorized = health.isActuallyAuthorized
 
         let title: String
         let subtitle: String
@@ -4963,19 +5154,23 @@ private struct HealthSourceSettingsView: View {
             icon = "heart.fill"
             accent = AIATheme.ok
         } else if isFailed {
-            title = "HealthKit 授权失败"
-            subtitle = "可能是账号未开通 HealthKit 能力，点击重试。"
+            title = "Apple 健康未授权"
+            subtitle = "请点击前往「设置」页面搜索「健康」，然后点击「数据访问与设备」找到「好记AI」完成授权。"
             icon = "exclamationmark.triangle.fill"
             accent = AIATheme.warning
         } else {
-            title = "连接 Apple 健康"
-            subtitle = "授权后，选择「自动记录」的指标将自动同步 HealthKit 数据。"
+            title = "点击连接 Apple 健康"
+            subtitle = "点击前往「设置」页面搜索「健康」，然后点击「数据访问与设备」找到「好记AI」完成授权。"
             icon = "heart"
             accent = AIATheme.health
         }
 
         return Button {
             guard !isUnavailable, !isAuthorized else { return }
+            // 统一走 requestAuthorizationForSettings：
+            // - 未拒绝过 → 弹出 HealthKit 系统授权框
+            // - 已撤销过（.sharingDenied）→ 内部检测到，直接引导去系统设置手动开启
+            // - 回调静默失败（ok=false）→ 兜底自动跳系统设置
             HealthManager.shared.requestAuthorizationForSettings()
         } label: {
             HStack(spacing: 14) {
@@ -5074,12 +5269,14 @@ private struct HealthRingButton: View {
     var body: some View {
         Button {
             onTap()
-            floats.append(RingFloatBadge())
+            // 仅在手动（可录入）模式下飘 +N 字；自动模式不写入数据、不飘字。
+            if enabled {
+                floats.append(RingFloatBadge())
+            }
         } label: {
             RingView(value: value, caption: caption, secondary: secondary, progress: progress,
                      color: AIATheme.health, size: 74, lineWidth: 7)
         }
-        .disabled(!enabled)
         .buttonStyle(WaterCardButtonStyle())
         .overlay(
             ZStack {
