@@ -92,7 +92,11 @@ struct AIAApp: App {
 struct SplashView: View {
     var body: some View {
         ZStack {
-            Color.white.ignoresSafeArea()
+            // >>> CHANGE-[2026-08-16 22:40:00]-[启动页深色模式] 开始
+            // 原因: 原写死 Color.white 导致深色模式下启动页仍为刺眼白底，与随后深色主界面切换产生闪烁。
+            // 回退: 改回 Color.white.ignoresSafeArea() 即可。
+            Color(UIColor.systemBackground).ignoresSafeArea()
+            // <<< CHANGE-[2026-08-16 22:40:00]-[启动页深色模式] 结束
 
             VStack(spacing: 10) {
                 Spacer()
@@ -103,7 +107,11 @@ struct SplashView: View {
                     .scaledToFill()
                     .frame(width: 72, height: 72)
                     .clipShape(RoundedRectangle(cornerRadius: 22))
-                    .shadow(color: .black.opacity(0.08), radius: 12, x: 0, y: 4)
+                    // >>> CHANGE-[2026-08-16 22:40:00]-[启动页深色模式] 开始
+                    // 原因: 深色底上 black.opacity(0.08) 阴影几乎不可见，改用 primary 自适应阴影增强浮起感。
+                    // 回退: 改回 .shadow(color: .black.opacity(0.08), radius: 12, x: 0, y: 4)
+                    .shadow(color: Color.primary.opacity(0.12), radius: 12, x: 0, y: 4)
+                    // <<< CHANGE-[2026-08-16 22:40:00]-[启动页深色模式] 结束
 
                 // 标题：好记AI
                 Text("好记AI")
