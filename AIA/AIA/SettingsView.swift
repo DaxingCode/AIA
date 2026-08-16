@@ -85,7 +85,7 @@ struct SettingsView: View {
                 }
             )
             Divider().padding(.vertical, 4)
-            Toggle("傍晚提醒我完成今日步数 / 饮水目标", isOn: healthEnabled)
+            Toggle("提醒我完成今日步数 / 饮水目标", isOn: healthEnabled)
                 .font(AIATheme.Font.subhead)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
