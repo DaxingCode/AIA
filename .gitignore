@@ -6,12 +6,56 @@ DerivedData/
 *.xcuserstate
 *.xcuserdata
 xcuserdata/
+AIA/build/
 
 # Large archives / deploy bundles (keep out of VCS)
 *.zip
 
 # Secrets / local config (may contain API keys)
 *.csv
+*.p8
+*.mobileprovision
+
+# CloudBase local
+cloudbaserc.js
 
 # Node
 node_modules/
+
+# === 不应进业务仓库的素材 / 文档 / 调研产物 ===
+AppIcons/
+AppIcon-*.svg
+*.docx
+*.pdf
+稳定版/
+识记AI_Logo方案/
+支付截图/
+文件/
+账单导入/
+AI助理商业计划书*
+*商标*
+*候选名*
+*自查表*
+*商标注册*
+*原创性*
+
+# 根目录散落预览 / 脚本 / 临时文件
+<!DOCTYPE html>*.html
+*_preview.html
+chat_card_preview.html
+health_trend_preview.html
+home_layout_preview.html
+launch_screen_preview.html
+每日小结*.html
+每日小结弹窗*.html
+上架准备包.html
+好记*.html
+generate_bp.py
+test-bill-receipt*
+*.xcappdata
+
+# 别家 AI 记忆目录（与本项目 .codebuddy 冲突）
+.workbuddy/
+
+# 本项目 AI 记忆（不进业务仓库）
+.codebuddy/
