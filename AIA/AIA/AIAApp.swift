@@ -121,7 +121,11 @@ struct SplashView: View {
                 Spacer()
 
                 // 底部 Slogan（整体上移）
-                Text("自动记账待办，管理饮食和健康")
+                // >>> CHANGE-[2026-08-16 23:10:00]-[启动页Slogan] 开始
+                // 原因: 用户要求底部 Slogan 改为「自动记账记待办，管理饮食和健康」。
+                // 回退: 改回 Text("自动记账待办，管理饮食和健康")
+                Text("自动记账记待办，管理饮食和健康")
+                // <<< CHANGE-[2026-08-16 23:10:00]-[启动页Slogan] 结束
                     .font(AIATheme.Font.footnote)
                     .foregroundStyle(.secondary)
                     .padding(.bottom, 68)
