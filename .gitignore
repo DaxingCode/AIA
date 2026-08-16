@@ -41,6 +41,10 @@ AI助理商业计划书*
 
 # 根目录散落预览 / 脚本 / 临时文件
 <!DOCTYPE html>*.html
+UI优化_*.html
+UI完整页面流.html
+UI融合_*.html
+UI设计*.html
 *_preview.html
 chat_card_preview.html
 health_trend_preview.html
@@ -59,3 +63,7 @@ test-bill-receipt*
 
 # 本项目 AI 记忆（不进业务仓库）
 .codebuddy/
+
+# 提交整理脚本 / UI 效果图素材（非业务产物）
+commit_plan.sh
+效果图/
