@@ -1,9 +1,0 @@
-Target dependency graph (4 targets)
-Target 'AIA' in project 'AIA'
-➜ Explicit dependency on target 'ShareExtension' in project 'AIA'
-➜ Explicit dependency on target 'AIAKit' in project 'AIA'
-➜ Explicit dependency on target 'AIAWidgetExtension' in project 'AIA'
-Target 'AIAWidgetExtension' in project 'AIA'
-➜ Explicit dependency on target 'AIAKit' in project 'AIA'
-Target 'AIAKit' in project 'AIA' (no dependencies)
-Target 'ShareExtension' in project 'AIA' (no dependencies)

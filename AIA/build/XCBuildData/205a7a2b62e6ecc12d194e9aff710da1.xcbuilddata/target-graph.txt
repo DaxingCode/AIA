@@ -1,2 +1,0 @@
-Target dependency graph (1 target)
-Target 'AIAKit' in project 'AIA' (no dependencies)
