@@ -82,13 +82,22 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         application.registerForRemoteNotifications()
         #endif
 
+        // >>> CHANGE-[2026-08-16 21:30:00]-健康目标提醒默认值 开始
+        // 原因: 用户要求「步数/饮水目标提醒」默认打开且默认时间 19:00；
+        //       原代码 register(defaults:) 未注册 healthGoal 三个 key，新装 App 默认关、显示 00:00。
+        // 回退: 删除本段三行 healthGoal* 注册即可恢复「默认关」。
         // 每天使用提醒：注册默认开关/时间 + 带 4 个操作按钮的 category
         UserDefaults.standard.register(defaults: [
             ReminderNotificationManager.dailyEnabledKey: true,
             ReminderNotificationManager.dailyHourKey: 22,
             ReminderNotificationManager.dailyMinuteKey: 0,
+            // 健康目标提醒：默认开启，默认 19:00（用户可手动关闭/改时间，register 不覆盖已设值）
+            ReminderNotificationManager.healthGoalEnabledKey: true,
+            ReminderNotificationManager.healthGoalHourKey: 19,
+            ReminderNotificationManager.healthGoalMinuteKey: 0,
             ICloudBackupManager.enabledKey: false,
         ])
+        // <<< CHANGE-[2026-08-16 21:30:00]-健康目标提醒默认值 结束
 
         // 一次性迁移：强制 iCloud 自动备份默认关闭。
         // 只清一次（用版本标记守卫），确保老用户/测试机已存的 true 被重置为关；
