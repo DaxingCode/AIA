@@ -75,7 +75,7 @@ struct AIAApp: App {
         // 根治「设置页切换浅/深/跟随系统无反应」（旧写法挂在 static 计算属性上 SwiftUI 不重算）。
         // 注意：.preferredColorScheme 是 View 修饰符，必须挂在 RootView() 上而非 WindowGroup 上。
         WindowGroup {
-            RootView()
+            SplashWrapperView()
                 .preferredColorScheme(AppearanceMode(raw: appearanceRaw).colorScheme)
                 .onOpenURL { url in
                     AppDelegate.handleOpenURL(url)
@@ -87,43 +87,77 @@ struct AIAApp: App {
     }
 }
 
-/// 品牌启动页：App 图标 + 「好记AI」+ 「数据自动同步中···」。
-/// 在 SwiftData 容器就绪前显示，给用户明确的品牌反馈而非空白/极简转圈。
-struct LaunchLoadingView: View {
-    @State private var pulseScale: CGFloat = 1.0
-
+/// 品牌启动页（仿微信/支付宝冷启动体验）。
+/// 纯白底 + 居中 App 图标 + 下方「好记 AI」标题 + 底部灰色 Slogan，展示固定时长后淡出。
+struct SplashView: View {
     var body: some View {
-        VStack(spacing: 20) {
-            Spacer()
+        ZStack {
+            Color.white.ignoresSafeArea()
 
-            // App 图标（76×76 + 圆角裁切 + 脉冲动画）
-            Image("AppIcon")
-                .resizable()
-                .frame(width: 76, height: 76)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 4)
-                .scaleEffect(pulseScale)
-                .onAppear {
-                    withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
-                        pulseScale = 1.06
-                    }
-                }
+            VStack(spacing: 16) {
+                Spacer()
 
-            Text("好记AI")
-                .font(.title2.bold())
+                // 居中 App 图标（复用 Assets 里已存在的 AppLogo）。
+                Image("AppLogo")
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 72, height: 72)
+                    .clipShape(RoundedRectangle(cornerRadius: 22))
+                    .shadow(color: .black.opacity(0.08), radius: 12, x: 0, y: 4)
 
-            Text("数据自动同步中···")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                // 标题：好记 AI
+                Text("好记 AI")
+                    .font(.title2.weight(.medium))
+                    .foregroundStyle(.primary)
 
-            Spacer()
+                Spacer()
+
+                // 底部 Slogan（贴近安全区上方）
+                Text("自动记账待办，管理饮食和健康")
+                    .font(AIATheme.Font.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 32)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(UIColor.systemBackground))
     }
 }
 
-/// 启动期 iCloud 自动恢复完成前显示的轻量 loading 占位（保留作兜底）。
+/// 启动页包装器：先展示 SplashView，倒计时结束后淡出并切换到底层 RootView（首页/登录页）。
+struct SplashWrapperView: View {
+    /// 启动页是否已消失（淡出完成后才真正卸载 SplashView，露出下面界面）。
+    @State private var splashGone = false
+    /// 控制淡出动画的透明度。
+    @State private var opacity: Double = 1
+
+    var body: some View {
+        ZStack {
+            // 底层永远是真正的界面（RootView），即使启动页盖在上面也在后台准备就绪。
+            RootView()
+
+            // 启动页覆盖层：opacity=0 后从层级移除。
+            if !splashGone {
+                SplashView()
+                    .opacity(opacity)
+                    .ignoresSafeArea()
+                    .onAppear {
+                        // 1.5 秒后触发淡出（类似微信节奏）。
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            withAnimation(.easeInOut(duration: 0.35)) {
+                                opacity = 0
+                            }
+                            // 动画结束后彻底移除覆盖层，避免拦截首页面交互。
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                                splashGone = true
+                            }
+                        }
+                    }
+            }
+        }
+    }
+}
+
+/// 启动期 iCloud 自动恢复完成前显示的轻量 loading 占位。
+/// 避免容器未就绪时白屏/冻结，给用户「正在恢复数据」的明确反馈。
 struct StartupLoadingView: View {
     var body: some View {
         VStack(spacing: 12) {
@@ -150,8 +184,8 @@ struct RootView: View {
                 MainOrLoginView()
                     .modelContainer(container)
             } else {
-                // 容器未就绪：显示品牌启动页（图标+好记AI+数据自动同步中）。
-                LaunchLoadingView()
+                // 容器未就绪：内存占位容器 + 启动占位视图，待 containerReady 刷新。
+                StartupLoadingView()
                     .modelContainer(AppDelegate.makeStubContainer())
             }
         }
