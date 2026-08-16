@@ -505,8 +505,8 @@ async function handleListDevices(req) {
 
 // 全局配置（智能问答开关 + AI 模型）。权威来源在云端，开发者可写、所有用户只读跟随。
 // 入参（POST JSON）：
-//   { action: "getConfig" }              -> 公开，返回全局配置 { agentEnabled, modelProvider, visionModelProvider, privacyPolicyUrl, userAgreementUrl }
-//   { action: "setConfig", passcode, agentEnabled, modelProvider, visionModelProvider, privacyPolicyUrl, userAgreementUrl } -> 开发者写入
+//   { action: "getConfig" }              -> 公开，返回全局配置 { agentEnabled, modelProvider, visionModelProvider, privacyPolicyUrl, userAgreementUrl, featureIntroUrl }
+//   { action: "setConfig", passcode, agentEnabled, modelProvider, visionModelProvider, privacyPolicyUrl, userAgreementUrl, featureIntroUrl } -> 开发者写入
 async function handleConfig(req) {
   const { action } = req
 
@@ -529,11 +529,13 @@ async function handleConfig(req) {
         announcement: (cfg.announcement && typeof cfg.announcement === 'object') ? cfg.announcement : null,
         // —— 协议链接（云端下发，App 端带本地兜底，缺字段时返回空串）——
         privacyPolicyUrl: typeof cfg.privacyPolicyUrl === 'string' ? cfg.privacyPolicyUrl : '',
-        userAgreementUrl: typeof cfg.userAgreementUrl === 'string' ? cfg.userAgreementUrl : ''
+        userAgreementUrl: typeof cfg.userAgreementUrl === 'string' ? cfg.userAgreementUrl : '',
+        // 首页灯泡按钮「App 功能介绍」链接（缺字段时返回空串，App 端回退默认微信文章）
+        featureIntroUrl: typeof cfg.featureIntroUrl === 'string' ? cfg.featureIntroUrl : ''
       }
     } catch (e) {
       // 文档不存在时返回默认配置（不视为错误，保证首次启动 App 不崩）
-      return { ok: true, agentEnabled: false, modelProvider: 'glm', visionModelProvider: 'glm', freeQuotaEnabled: false, freeQuotaPerMonth: 0, freeQuotaWeights: {}, freeQuotaDailyCap: 0, freeQuotaGlobalMonthly: 0, announcement: null, privacyPolicyUrl: '', userAgreementUrl: '' }
+      return { ok: true, agentEnabled: false, modelProvider: 'glm', visionModelProvider: 'glm', freeQuotaEnabled: false, freeQuotaPerMonth: 0, freeQuotaWeights: {}, freeQuotaDailyCap: 0, freeQuotaGlobalMonthly: 0, announcement: null, privacyPolicyUrl: '', userAgreementUrl: '', featureIntroUrl: '' }
     }
   }
 
@@ -555,7 +557,9 @@ async function handleConfig(req) {
         : (req.announcement && typeof req.announcement === 'object' ? req.announcement : null),
       // —— 协议链接（空串表示沿用 App 端兜底默认值）——
       privacyPolicyUrl: typeof req.privacyPolicyUrl === 'string' ? req.privacyPolicyUrl : '',
-      userAgreementUrl: typeof req.userAgreementUrl === 'string' ? req.userAgreementUrl : ''
+      userAgreementUrl: typeof req.userAgreementUrl === 'string' ? req.userAgreementUrl : '',
+      // 首页灯泡「App 功能介绍」链接（空串表示沿用 App 端兜底默认值）
+      featureIntroUrl: typeof req.featureIntroUrl === 'string' ? req.featureIntroUrl : ''
     }
     try {
       const exist = await db.collection(CONFIG_COLLECTION).doc(CONFIG_DOC_ID).get().catch(() => null)

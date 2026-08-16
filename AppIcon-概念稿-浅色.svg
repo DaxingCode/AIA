@@ -1,0 +1,16 @@
+<svg viewBox="0 0 680 680" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ttl1 dsc1">
+  <title id="ttl1">好记AI App 图标（浅色·上下对称·正向可读）</title>
+  <desc id="dsc1">圆角方形图标，中心「好记AI」，外围上下两弧均朝圆外、正向可读：上弧「自动记账记待办」（绿），下弧「管理饮食和健康」（橙），镜像对称。</desc>
+  <defs>
+    <path id="topArc" d="M 120 340 A 220 220 0 0 1 560 340"/>
+    <path id="botArc" d="M 120 340 A 220 220 0 0 0 560 340"/>
+  </defs>
+  <rect x="24" y="24" width="632" height="632" rx="148" fill="#FFFFFF" stroke="#E6E9EC" stroke-width="2"/>
+  <text font-family="PingFang SC, Helvetica Neue, sans-serif" font-size="54" font-weight="700" fill="#10B981">
+    <textPath href="#topArc" side="left" startOffset="50%" text-anchor="middle" textLength="600" lengthAdjust="spacing">自动记账记待办</textPath>
+  </text>
+  <text font-family="PingFang SC, Helvetica Neue, sans-serif" font-size="54" font-weight="700" fill="#F59E0B">
+    <textPath href="#botArc" side="right" startOffset="50%" text-anchor="middle" textLength="520" lengthAdjust="spacing">管理饮食和健康</textPath>
+  </text>
+  <text x="340" y="340" text-anchor="middle" dominant-baseline="central" font-family="PingFang SC, Helvetica Neue, sans-serif" font-size="122" font-weight="800" fill="#1C1C1E" letter-spacing="2">好记AI</text>
+</svg>

@@ -9,6 +9,6 @@ cd "$(dirname "$0")"
 DATE=$(date +%Y%m%d)
 ZIP="aia-sync-${DATE}.zip"
 rm -f "$ZIP"
-zip -r "$ZIP" index.js package.json
+zip -r "$ZIP" index.js package.json entitlement.js
 echo "✅ 已生成 $ZIP"
 echo "请手动上传到 CloudBase 控制台「云函数 aia-sync」重新部署（HTTP 触发路径 /sync，集成响应开关与 /recognize 一致）。"

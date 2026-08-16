@@ -17,7 +17,8 @@ ZIP="$DIR/recognize-${FN}.zip"
 rm -f "$ZIP"
 cd "$DIR"
 # 主文件必含；agent*.js 为「可单独开关」的只读问答 Agent 模块，云端 require 依赖它们，必须一并打包。
+# foodTable.js 为云端权威营养表（gen-food-table.mjs 从 App 端 NutritionLibrary.swift 同步生成，queryFood 查表优先用），也必须随包上传。
 EXTRA=$(ls agent*.js 2>/dev/null || true)
-zip -r "$ZIP" index.js package.json $EXTRA >/dev/null
-echo "已打包：$ZIP（版本 $FN，与 FN_VERSION 对齐；含 index/package$( [ -n "$EXTRA" ] && echo " + $(echo $EXTRA | wc -w | tr -d ' ') 个 agent 模块" )）"
+zip -r "$ZIP" index.js package.json $EXTRA foodTable.js entitlement.js >/dev/null
+echo "已打包：$ZIP（版本 $FN，与 FN_VERSION 对齐；含 index/package$( [ -n "$EXTRA" ] && echo " + $(echo $EXTRA | wc -w | tr -d ' ') 个 agent 模块" ) + foodTable.js）"
 unzip -l "$ZIP"

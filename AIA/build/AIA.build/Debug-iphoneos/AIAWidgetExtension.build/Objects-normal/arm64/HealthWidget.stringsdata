@@ -1,0 +1,24 @@
+{
+  "source": "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIAWidget/HealthWidget.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "健康管理",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 80
+        }
+      },
+      {
+        "comment": "",
+        "key": "步数 / 运动 / 睡眠",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 81
+        }
+      }
+    ]
+  },
+  "version": 1
+}

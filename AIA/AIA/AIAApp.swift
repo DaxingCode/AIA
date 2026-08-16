@@ -94,7 +94,7 @@ struct SplashView: View {
         ZStack {
             Color.white.ignoresSafeArea()
 
-            VStack(spacing: 16) {
+            VStack(spacing: 10) {
                 Spacer()
 
                 // 居中 App 图标（复用 Assets 里已存在的 AppLogo）。
@@ -105,18 +105,18 @@ struct SplashView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 22))
                     .shadow(color: .black.opacity(0.08), radius: 12, x: 0, y: 4)
 
-                // 标题：好记 AI
-                Text("好记 AI")
+                // 标题：好记AI
+                Text("好记AI")
                     .font(.title2.weight(.medium))
                     .foregroundStyle(.primary)
 
                 Spacer()
 
-                // 底部 Slogan（贴近安全区上方）
+                // 底部 Slogan（整体上移）
                 Text("自动记账待办，管理饮食和健康")
                     .font(AIATheme.Font.footnote)
                     .foregroundStyle(.secondary)
-                    .padding(.bottom, 32)
+                    .padding(.bottom, 68)
             }
         }
     }

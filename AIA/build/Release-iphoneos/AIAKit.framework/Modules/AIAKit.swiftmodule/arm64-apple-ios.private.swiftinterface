@@ -1,0 +1,1253 @@
+// swift-interface-format-version: 1.0
+// swift-compiler-version: Apple Swift version 6.3.3 effective-5.10 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)
+// swift-module-flags: -target arm64-apple-ios17.0 -enable-objc-interop -enable-library-evolution -swift-version 5 -O -enable-upcoming-feature DisableOutwardActorInference -enable-upcoming-feature InferSendableFromCaptures -enable-upcoming-feature GlobalActorIsolatedTypesUsability -enable-upcoming-feature MemberImportVisibility -enable-upcoming-feature InferIsolatedConformances -enable-upcoming-feature NonisolatedNonsendingByDefault -enable-experimental-feature DebugDescriptionMacro -enable-bare-slash-regex -module-name AIAKit
+// swift-module-flags-ignorable:  -formal-cxx-interoperability-mode=off -interface-compiler-version 6.3.3
+import Foundation
+import Swift
+import SwiftData
+import SwiftUI
+import UIKit
+import _Concurrency
+import _StringProcessing
+import _SwiftConcurrencyShims
+extension UIKit.UIColor {
+  convenience public init(hex: Swift.UInt64)
+  convenience public init(light: Swift.UInt64, dark: Swift.UInt64)
+}
+extension SwiftUICore.Color {
+  public init(hex: Swift.UInt64)
+  public static func adaptive(light: Swift.UInt64, dark: Swift.UInt64) -> SwiftUICore.Color
+}
+public enum AppearanceMode : Swift.String, Swift.CaseIterable, Swift.Identifiable {
+  case system, light, dark
+  public var id: Swift.String {
+    get
+  }
+  public var title: Swift.String {
+    get
+  }
+  public var systemImage: Swift.String {
+    get
+  }
+  public var colorScheme: SwiftUICore.ColorScheme? {
+    get
+  }
+  public init(raw: Swift.String)
+  public init?(rawValue: Swift.String)
+  public typealias AllCases = [AIAKit.AppearanceMode]
+  public typealias ID = Swift.String
+  public typealias RawValue = Swift.String
+  nonisolated public static var allCases: [AIAKit.AppearanceMode] {
+    get
+  }
+  public var rawValue: Swift.String {
+    get
+  }
+}
+public enum AIATheme {
+  public static let blue: SwiftUICore.Color
+  public static let green: SwiftUICore.Color
+  public static let amber: SwiftUICore.Color
+  public static let purple: SwiftUICore.Color
+  public static let ink: SwiftUICore.Color
+  public static let warn: SwiftUICore.Color
+  public static let ok: SwiftUICore.Color
+  public static let sub: SwiftUICore.Color
+  public static let muted: SwiftUICore.Color
+  public static let reading: SwiftUICore.Color
+  public static let iconInactive: SwiftUICore.Color
+  public static let surface: SwiftUICore.Color
+  public static let surfaceSecondary: SwiftUICore.Color
+  public static let hairline: SwiftUICore.Color
+  public static let fillSoft: SwiftUICore.Color
+  public static let track: SwiftUICore.Color
+  public static let dietBG: SwiftUICore.Color
+  public static let healthBG: SwiftUICore.Color
+  public static let billBG: SwiftUICore.Color
+  public static let todoBG: SwiftUICore.Color
+  public static let amberBG: SwiftUICore.Color
+  public static let food: SwiftUICore.Color
+  public static let health: SwiftUICore.Color
+  public static let bill: SwiftUICore.Color
+  public static let todo: SwiftUICore.Color
+  public static let income: SwiftUICore.Color
+  public static let expense: SwiftUICore.Color
+  public static let warning: SwiftUICore.Color
+  public static let over: SwiftUICore.Color
+  public static let rLG: CoreFoundation.CGFloat
+  public static let rMD: CoreFoundation.CGFloat
+  public static let rSM: CoreFoundation.CGFloat
+  public static let rXS: CoreFoundation.CGFloat
+  public enum Font {
+    public static let micro: SwiftUICore.Font
+    public static let caption: SwiftUICore.Font
+    public static let footnote: SwiftUICore.Font
+    public static let chatBody: SwiftUICore.Font
+    public static let subhead: SwiftUICore.Font
+    public static let callout: SwiftUICore.Font
+    public static let body: SwiftUICore.Font
+    public static let headline: SwiftUICore.Font
+    public static let title3: SwiftUICore.Font
+    public static let title2: SwiftUICore.Font
+    public static let title1: SwiftUICore.Font
+    public static let largeTitle: SwiftUICore.Font
+    public static let display: SwiftUICore.Font
+    public static let hero: SwiftUICore.Font
+    public static let ultra: SwiftUICore.Font
+  }
+  public static let cardShadow: SwiftUICore.Color
+  public static let cardShadowRadius: CoreFoundation.CGFloat
+  public static let cardShadowY: CoreFoundation.CGFloat
+  public static let cardShadowStrong: SwiftUICore.Color
+  public static var motionReduce: Swift.Bool {
+    get
+  }
+  public enum Motion {
+    public static let press: SwiftUICore.Animation
+    public static let draw: SwiftUICore.Animation
+    public static let progress: SwiftUICore.Animation
+    public static let progressFade: SwiftUICore.Animation
+  }
+}
+public enum AppFormat {
+  public static let iso: Foundation.ISO8601DateFormatter
+  public static let isoDate: Foundation.ISO8601DateFormatter
+  public static let isoLocal: Foundation.ISO8601DateFormatter
+  public static let yearMonth: Foundation.DateFormatter
+  public static let monthDay: Foundation.DateFormatter
+  public static let monthDayWeek: Foundation.DateFormatter
+  public static let hourMinute: Foundation.DateFormatter
+  public static let dateTime: Foundation.DateFormatter
+  public static let fullDateTime: Foundation.DateFormatter
+  public static let timeOnly: Foundation.DateFormatter
+  public static let yearMonthDay: Foundation.DateFormatter
+  public static func money(_ value: Swift.Double) -> Swift.String
+  public static func moneyPlain(_ value: Swift.Double) -> Swift.String
+  public static func signedMoney(_ value: Swift.Double) -> Swift.String
+}
+public enum AppText {
+  public static func compact(_ n: Swift.Int) -> Swift.String
+  public static func percent(_ value: Swift.Double) -> Swift.String
+}
+public enum AppPersistence {
+  public static let currentSchemaVersion: Swift.Int
+  public static let appGroupID: Swift.String
+  public static var storeURL: Foundation.URL {
+    get
+  }
+  public static var backupsDirectory: Foundation.URL {
+    get
+  }
+  public static var schema: SwiftData.Schema {
+    get
+  }
+  public static func makeContainer() -> SwiftData.ModelContainer
+  public static func makeReadOnlyContainer() -> SwiftData.ModelContainer
+  public static func makeSiriWriteContainer() -> SwiftData.ModelContainer?
+}
+final public class RecognitionRecord {
+  final public var recognizedAt: Foundation.Date {
+    get
+    set
+  }
+  final public var rawText: Swift.String {
+    get
+    set
+  }
+  final public var types: Swift.String {
+    get
+    set
+  }
+  final public var imageName: Swift.String? {
+    get
+    set
+  }
+  final public var syncId: Foundation.UUID {
+    get
+    set
+  }
+  final public var syncUpdatedAt: Foundation.Date {
+    get
+    set
+  }
+  final public var syncDeleted: Swift.Bool {
+    get
+    set
+  }
+  public init(recognizedAt: Foundation.Date = .now, rawText: Swift.String, types: [Swift.String] = [], imageName: Swift.String? = nil, syncId: Foundation.UUID = UUID(), syncUpdatedAt: Foundation.Date = .now, syncDeleted: Swift.Bool = false)
+  final public var typesArray: [Swift.String] {
+    get
+  }
+  final public var persistentBackingData: any SwiftData.BackingData<AIAKit.RecognitionRecord> {
+    get
+    set
+  }
+  final public class var schemaMetadata: [SwiftData.Schema.PropertyMetadata] {
+    get
+  }
+  public init(backingData: any SwiftData.BackingData<AIAKit.RecognitionRecord>)
+  @objc deinit
+}
+final public class ChatMessage {
+  public enum Role : Swift.String, Swift.Codable {
+    case ai, user
+    public init?(rawValue: Swift.String)
+    public typealias RawValue = Swift.String
+    public var rawValue: Swift.String {
+      get
+    }
+  }
+  final public var roleRaw: Swift.String {
+    get
+    set
+  }
+  final public var text: Swift.String {
+    get
+    set
+  }
+  final public var createdAt: Foundation.Date {
+    get
+    set
+  }
+  final public var syncId: Foundation.UUID {
+    get
+    set
+  }
+  final public var syncUpdatedAt: Foundation.Date {
+    get
+    set
+  }
+  final public var syncDeleted: Swift.Bool {
+    get
+    set
+  }
+  public init(role: AIAKit.ChatMessage.Role, text: Swift.String, createdAt: Foundation.Date = .now, syncId: Foundation.UUID = UUID(), syncUpdatedAt: Foundation.Date = .now, syncDeleted: Swift.Bool = false)
+  final public var role: AIAKit.ChatMessage.Role {
+    get
+  }
+  final public var persistentBackingData: any SwiftData.BackingData<AIAKit.ChatMessage> {
+    get
+    set
+  }
+  final public class var schemaMetadata: [SwiftData.Schema.PropertyMetadata] {
+    get
+  }
+  public init(backingData: any SwiftData.BackingData<AIAKit.ChatMessage>)
+  @objc deinit
+}
+final public class Bill {
+  final public var merchant: Swift.String {
+    get
+    set
+  }
+  final public var amount: Swift.Double {
+    get
+    set
+  }
+  final public var currency: Swift.String {
+    get
+    set
+  }
+  final public var category: Swift.String {
+    get
+    set
+  }
+  final public var time: Foundation.Date {
+    get
+    set
+  }
+  final public var note: Swift.String {
+    get
+    set
+  }
+  final public var confirmed: Swift.Bool {
+    get
+    set
+  }
+  final public var isIncome: Swift.Bool {
+    get
+    set
+  }
+  final public var imageName: Swift.String? {
+    get
+    set
+  }
+  final public var importBatchId: Foundation.UUID? {
+    get
+    set
+  }
+  final public var syncId: Foundation.UUID {
+    get
+    set
+  }
+  final public var syncUpdatedAt: Foundation.Date {
+    get
+    set
+  }
+  final public var syncDeleted: Swift.Bool {
+    get
+    set
+  }
+  public init(merchant: Swift.String, amount: Swift.Double, currency: Swift.String = "CNY", category: Swift.String, time: Foundation.Date, note: Swift.String = "", confirmed: Swift.Bool = false, isIncome: Swift.Bool = false, imageName: Swift.String? = nil, importBatchId: Foundation.UUID? = nil, syncId: Foundation.UUID = UUID(), syncUpdatedAt: Foundation.Date = .now, syncDeleted: Swift.Bool = false)
+  final public var persistentBackingData: any SwiftData.BackingData<AIAKit.Bill> {
+    get
+    set
+  }
+  final public class var schemaMetadata: [SwiftData.Schema.PropertyMetadata] {
+    get
+  }
+  public init(backingData: any SwiftData.BackingData<AIAKit.Bill>)
+  @objc deinit
+}
+final public class ImportBatch {
+  final public var source: Swift.String {
+    get
+    set
+  }
+  final public var fileName: Swift.String? {
+    get
+    set
+  }
+  final public var importedAt: Foundation.Date {
+    get
+    set
+  }
+  final public var totalCount: Swift.Int {
+    get
+    set
+  }
+  final public var skippedCount: Swift.Int {
+    get
+    set
+  }
+  final public var syncId: Foundation.UUID {
+    get
+    set
+  }
+  final public var syncUpdatedAt: Foundation.Date {
+    get
+    set
+  }
+  final public var syncDeleted: Swift.Bool {
+    get
+    set
+  }
+  public init(source: Swift.String, fileName: Swift.String? = nil, importedAt: Foundation.Date = .now, totalCount: Swift.Int = 0, skippedCount: Swift.Int = 0, syncId: Foundation.UUID = UUID(), syncUpdatedAt: Foundation.Date = .now, syncDeleted: Swift.Bool = false)
+  final public var persistentBackingData: any SwiftData.BackingData<AIAKit.ImportBatch> {
+    get
+    set
+  }
+  final public class var schemaMetadata: [SwiftData.Schema.PropertyMetadata] {
+    get
+  }
+  public init(backingData: any SwiftData.BackingData<AIAKit.ImportBatch>)
+  @objc deinit
+}
+final public class Reminder {
+  final public var title: Swift.String {
+    get
+    set
+  }
+  final public var due: Foundation.Date? {
+    get
+    set
+  }
+  final public var remindAt: Foundation.Date? {
+    get
+    set
+  }
+  final public var repeatRule: Swift.String {
+    get
+    set
+  }
+  final public var priority: Swift.String {
+    get
+    set
+  }
+  final public var done: Swift.Bool {
+    get
+    set
+  }
+  final public var imageName: Swift.String? {
+    get
+    set
+  }
+  final public var remindTimes: [Foundation.Date] {
+    get
+    set
+  }
+  final public var syncId: Foundation.UUID {
+    get
+    set
+  }
+  final public var syncUpdatedAt: Foundation.Date {
+    get
+    set
+  }
+  final public var syncDeleted: Swift.Bool {
+    get
+    set
+  }
+  public init(title: Swift.String, due: Foundation.Date? = nil, remindAt: Foundation.Date? = nil, repeatRule: Swift.String = "none", priority: Swift.String = "medium", done: Swift.Bool = false, imageName: Swift.String? = nil, syncId: Foundation.UUID = UUID(), syncUpdatedAt: Foundation.Date = .now, syncDeleted: Swift.Bool = false)
+  final public var persistentBackingData: any SwiftData.BackingData<AIAKit.Reminder> {
+    get
+    set
+  }
+  final public class var schemaMetadata: [SwiftData.Schema.PropertyMetadata] {
+    get
+  }
+  public init(backingData: any SwiftData.BackingData<AIAKit.Reminder>)
+  @objc deinit
+}
+final public class FoodEntry {
+  final public var name: Swift.String {
+    get
+    set
+  }
+  final public var calories: Swift.Double {
+    get
+    set
+  }
+  final public var protein: Swift.Double {
+    get
+    set
+  }
+  final public var carbs: Swift.Double {
+    get
+    set
+  }
+  final public var fat: Swift.Double {
+    get
+    set
+  }
+  final public var fiber: Swift.Double {
+    get
+    set
+  }
+  final public var sugar: Swift.Double {
+    get
+    set
+  }
+  final public var sodium: Swift.Double {
+    get
+    set
+  }
+  final public var waterIntake: Swift.Double {
+    get
+    set
+  }
+  final public var portion: Swift.String {
+    get
+    set
+  }
+  final public var meal: Swift.String {
+    get
+    set
+  }
+  final public var date: Foundation.Date {
+    get
+    set
+  }
+  final public var weightGram: Swift.Double? {
+    get
+    set
+  }
+  final public var baseCalories: Swift.Double? {
+    get
+    set
+  }
+  final public var baseProtein: Swift.Double? {
+    get
+    set
+  }
+  final public var baseCarbs: Swift.Double? {
+    get
+    set
+  }
+  final public var baseFat: Swift.Double? {
+    get
+    set
+  }
+  final public var baseFiber: Swift.Double? {
+    get
+    set
+  }
+  final public var baseSugar: Swift.Double? {
+    get
+    set
+  }
+  final public var baseSodium: Swift.Double? {
+    get
+    set
+  }
+  final public var imageName: Swift.String? {
+    get
+    set
+  }
+  final public var syncId: Foundation.UUID {
+    get
+    set
+  }
+  final public var syncUpdatedAt: Foundation.Date {
+    get
+    set
+  }
+  final public var syncDeleted: Swift.Bool {
+    get
+    set
+  }
+  public init(name: Swift.String, calories: Swift.Double, protein: Swift.Double = 0, carbs: Swift.Double = 0, fat: Swift.Double = 0, fiber: Swift.Double = 0, sugar: Swift.Double = 0, sodium: Swift.Double = 0, waterIntake: Swift.Double = 0, portion: Swift.String = "", meal: Swift.String = "午餐", date: Foundation.Date = .now, weightGram: Swift.Double? = nil, baseCalories: Swift.Double? = nil, baseProtein: Swift.Double? = nil, baseCarbs: Swift.Double? = nil, baseFat: Swift.Double? = nil, baseFiber: Swift.Double? = nil, baseSugar: Swift.Double? = nil, baseSodium: Swift.Double? = nil, imageName: Swift.String? = nil, syncId: Foundation.UUID = UUID(), syncUpdatedAt: Foundation.Date = .now, syncDeleted: Swift.Bool = false)
+  final public var persistentBackingData: any SwiftData.BackingData<AIAKit.FoodEntry> {
+    get
+    set
+  }
+  final public class var schemaMetadata: [SwiftData.Schema.PropertyMetadata] {
+    get
+  }
+  public init(backingData: any SwiftData.BackingData<AIAKit.FoodEntry>)
+  @objc deinit
+}
+final public class HealthMetric {
+  final public var metric: Swift.String {
+    get
+    set
+  }
+  final public var value: Swift.String {
+    get
+    set
+  }
+  final public var unit: Swift.String {
+    get
+    set
+  }
+  final public var date: Foundation.Date {
+    get
+    set
+  }
+  final public var imageName: Swift.String? {
+    get
+    set
+  }
+  final public var syncId: Foundation.UUID {
+    get
+    set
+  }
+  final public var syncUpdatedAt: Foundation.Date {
+    get
+    set
+  }
+  final public var syncDeleted: Swift.Bool {
+    get
+    set
+  }
+  public init(metric: Swift.String, value: Swift.String, unit: Swift.String, date: Foundation.Date = .now, imageName: Swift.String? = nil, syncId: Foundation.UUID = UUID(), syncUpdatedAt: Foundation.Date = .now, syncDeleted: Swift.Bool = false)
+  public init()
+  final public var persistentBackingData: any SwiftData.BackingData<AIAKit.HealthMetric> {
+    get
+    set
+  }
+  final public class var schemaMetadata: [SwiftData.Schema.PropertyMetadata] {
+    get
+  }
+  public init(backingData: any SwiftData.BackingData<AIAKit.HealthMetric>)
+  @objc deinit
+}
+final public class MerchantMeta {
+  final public var merchant: Swift.String {
+    get
+    set
+  }
+  final public var category: Swift.String {
+    get
+    set
+  }
+  final public var isIncome: Swift.Bool {
+    get
+    set
+  }
+  final public var hitCount: Swift.Int {
+    get
+    set
+  }
+  final public var lastSeen: Foundation.Date {
+    get
+    set
+  }
+  final public var syncId: Foundation.UUID {
+    get
+    set
+  }
+  final public var syncUpdatedAt: Foundation.Date {
+    get
+    set
+  }
+  final public var syncDeleted: Swift.Bool {
+    get
+    set
+  }
+  public init(merchant: Swift.String, category: Swift.String, isIncome: Swift.Bool = false, hitCount: Swift.Int = 1, lastSeen: Foundation.Date = .now, syncId: Foundation.UUID = UUID(), syncUpdatedAt: Foundation.Date = .now, syncDeleted: Swift.Bool = false)
+  final public var persistentBackingData: any SwiftData.BackingData<AIAKit.MerchantMeta> {
+    get
+    set
+  }
+  final public class var schemaMetadata: [SwiftData.Schema.PropertyMetadata] {
+    get
+  }
+  public init(backingData: any SwiftData.BackingData<AIAKit.MerchantMeta>)
+  @objc deinit
+}
+final public class FoodMeta {
+  final public var name: Swift.String {
+    get
+    set
+  }
+  final public var displayName: Swift.String {
+    get
+    set
+  }
+  final public var kcal: Swift.Double {
+    get
+    set
+  }
+  final public var protein: Swift.Double {
+    get
+    set
+  }
+  final public var carbs: Swift.Double {
+    get
+    set
+  }
+  final public var fat: Swift.Double {
+    get
+    set
+  }
+  final public var fiber: Swift.Double {
+    get
+    set
+  }
+  final public var sugar: Swift.Double {
+    get
+    set
+  }
+  final public var sodium: Swift.Double {
+    get
+    set
+  }
+  final public var source: Swift.String {
+    get
+    set
+  }
+  final public var hitCount: Swift.Int {
+    get
+    set
+  }
+  final public var lastSeen: Foundation.Date {
+    get
+    set
+  }
+  public init(name: Swift.String, displayName: Swift.String? = nil, kcal: Swift.Double, protein: Swift.Double, carbs: Swift.Double, fat: Swift.Double, fiber: Swift.Double = 0, sugar: Swift.Double = 0, sodium: Swift.Double = 0, source: Swift.String = "cloud", hitCount: Swift.Int = 1, lastSeen: Foundation.Date = .now)
+  public static func normalize(_ s: Swift.String) -> Swift.String
+  final public var persistentBackingData: any SwiftData.BackingData<AIAKit.FoodMeta> {
+    get
+    set
+  }
+  final public class var schemaMetadata: [SwiftData.Schema.PropertyMetadata] {
+    get
+  }
+  public init(backingData: any SwiftData.BackingData<AIAKit.FoodMeta>)
+  @objc deinit
+}
+final public class WaterLog {
+  final public var date: Foundation.Date {
+    get
+    set
+  }
+  final public var amount: Swift.Double {
+    get
+    set
+  }
+  final public var syncId: Foundation.UUID {
+    get
+    set
+  }
+  final public var syncUpdatedAt: Foundation.Date {
+    get
+    set
+  }
+  final public var syncDeleted: Swift.Bool {
+    get
+    set
+  }
+  public init(date: Foundation.Date = .now, amount: Swift.Double = 100, syncId: Foundation.UUID = UUID(), syncUpdatedAt: Foundation.Date = .now, syncDeleted: Swift.Bool = false)
+  final public var persistentBackingData: any SwiftData.BackingData<AIAKit.WaterLog> {
+    get
+    set
+  }
+  final public class var schemaMetadata: [SwiftData.Schema.PropertyMetadata] {
+    get
+  }
+  public init(backingData: any SwiftData.BackingData<AIAKit.WaterLog>)
+  @objc deinit
+}
+final public class FoodNote {
+  final public var syncId: Foundation.UUID {
+    get
+    set
+  }
+  final public var note: Swift.String {
+    get
+    set
+  }
+  final public var imageNames: [Swift.String] {
+    get
+    set
+  }
+  final public var updatedAt: Foundation.Date {
+    get
+    set
+  }
+  public init(syncId: Foundation.UUID, note: Swift.String = "", imageNames: [Swift.String] = [], updatedAt: Foundation.Date = Date())
+  final public var persistentBackingData: any SwiftData.BackingData<AIAKit.FoodNote> {
+    get
+    set
+  }
+  final public class var schemaMetadata: [SwiftData.Schema.PropertyMetadata] {
+    get
+  }
+  public init(backingData: any SwiftData.BackingData<AIAKit.FoodNote>)
+  @objc deinit
+}
+final public class ReminderNote {
+  final public var syncId: Foundation.UUID {
+    get
+    set
+  }
+  final public var note: Swift.String {
+    get
+    set
+  }
+  final public var updatedAt: Foundation.Date {
+    get
+    set
+  }
+  public init(syncId: Foundation.UUID, note: Swift.String = "", updatedAt: Foundation.Date = Date())
+  final public var persistentBackingData: any SwiftData.BackingData<AIAKit.ReminderNote> {
+    get
+    set
+  }
+  final public class var schemaMetadata: [SwiftData.Schema.PropertyMetadata] {
+    get
+  }
+  public init(backingData: any SwiftData.BackingData<AIAKit.ReminderNote>)
+  @objc deinit
+}
+final public class HealthNote {
+  final public var syncId: Foundation.UUID {
+    get
+    set
+  }
+  final public var note: Swift.String {
+    get
+    set
+  }
+  final public var updatedAt: Foundation.Date {
+    get
+    set
+  }
+  public init(syncId: Foundation.UUID, note: Swift.String = "", updatedAt: Foundation.Date = Date())
+  final public var persistentBackingData: any SwiftData.BackingData<AIAKit.HealthNote> {
+    get
+    set
+  }
+  final public class var schemaMetadata: [SwiftData.Schema.PropertyMetadata] {
+    get
+  }
+  public init(backingData: any SwiftData.BackingData<AIAKit.HealthNote>)
+  @objc deinit
+}
+final public class FoodSource {
+  final public var foodSyncId: Foundation.UUID {
+    get
+    set
+  }
+  final public var origin: Swift.String {
+    get
+    set
+  }
+  public init(foodSyncId: Foundation.UUID, origin: Swift.String)
+  public static func displayLabel(for origin: Swift.String) -> Swift.String?
+  public static func icon(for origin: Swift.String) -> Swift.String
+  final public var persistentBackingData: any SwiftData.BackingData<AIAKit.FoodSource> {
+    get
+    set
+  }
+  final public class var schemaMetadata: [SwiftData.Schema.PropertyMetadata] {
+    get
+  }
+  public init(backingData: any SwiftData.BackingData<AIAKit.FoodSource>)
+  @objc deinit
+}
+final public class RecogSource {
+  final public var syncId: Foundation.UUID {
+    get
+    set
+  }
+  final public var kind: Swift.String {
+    get
+    set
+  }
+  final public var recogSourceRaw: Swift.String {
+    get
+    set
+  }
+  public init(syncId: Foundation.UUID, kind: Swift.String, recogSourceRaw: Swift.String)
+  public static func raw(from source: AIAKit.RecognitionSource) -> Swift.String
+  public static func displayLabel(for raw: Swift.String) -> Swift.String?
+  final public var persistentBackingData: any SwiftData.BackingData<AIAKit.RecogSource> {
+    get
+    set
+  }
+  final public class var schemaMetadata: [SwiftData.Schema.PropertyMetadata] {
+    get
+  }
+  public init(backingData: any SwiftData.BackingData<AIAKit.RecogSource>)
+  @objc deinit
+}
+final public class SleepSession {
+  final public var sleepStart: Foundation.Date {
+    get
+    set
+  }
+  final public var wakeAt: Foundation.Date? {
+    get
+    set
+  }
+  final public var durationSeconds: Swift.Double? {
+    get
+    set
+  }
+  final public var syncId: Foundation.UUID {
+    get
+    set
+  }
+  final public var syncUpdatedAt: Foundation.Date {
+    get
+    set
+  }
+  final public var syncDeleted: Swift.Bool {
+    get
+    set
+  }
+  public init(sleepStart: Foundation.Date = .now, wakeAt: Foundation.Date? = nil, durationSeconds: Swift.Double? = nil, syncId: Foundation.UUID = UUID(), syncUpdatedAt: Foundation.Date = .now, syncDeleted: Swift.Bool = false)
+  final public var persistentBackingData: any SwiftData.BackingData<AIAKit.SleepSession> {
+    get
+    set
+  }
+  final public class var schemaMetadata: [SwiftData.Schema.PropertyMetadata] {
+    get
+  }
+  public init(backingData: any SwiftData.BackingData<AIAKit.SleepSession>)
+  @objc deinit
+}
+extension AIAKit.RecognitionRecord : nonisolated SwiftData.PersistentModel {
+  public typealias ID = SwiftData.PersistentIdentifier
+  @available(swift 5.9)
+  @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
+  public typealias Root = AIAKit.RecognitionRecord
+  final public var hashValue: Swift.Int {
+    get
+  }
+}
+extension AIAKit.RecognitionRecord : nonisolated Observation.Observable {
+}
+@available(swift, deprecated: 5.9, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use RecognitionRecord's persistentModelID instead")
+@available(*, unavailable, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use RecognitionRecord's persistentModelID instead")
+extension AIAKit.RecognitionRecord : Swift.Sendable {
+}
+extension AIAKit.ChatMessage : nonisolated SwiftData.PersistentModel {
+  public typealias ID = SwiftData.PersistentIdentifier
+  @available(swift 5.9)
+  @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
+  public typealias Root = AIAKit.ChatMessage
+  final public var hashValue: Swift.Int {
+    get
+  }
+}
+extension AIAKit.ChatMessage : nonisolated Observation.Observable {
+}
+@available(swift, deprecated: 5.9, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use ChatMessage's persistentModelID instead")
+@available(*, unavailable, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use ChatMessage's persistentModelID instead")
+extension AIAKit.ChatMessage : Swift.Sendable {
+}
+extension AIAKit.Bill : nonisolated SwiftData.PersistentModel {
+  public typealias ID = SwiftData.PersistentIdentifier
+  @available(swift 5.9)
+  @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
+  public typealias Root = AIAKit.Bill
+  final public var hashValue: Swift.Int {
+    get
+  }
+}
+extension AIAKit.Bill : nonisolated Observation.Observable {
+}
+@available(swift, deprecated: 5.9, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use Bill's persistentModelID instead")
+@available(*, unavailable, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use Bill's persistentModelID instead")
+extension AIAKit.Bill : Swift.Sendable {
+}
+extension AIAKit.ImportBatch : nonisolated SwiftData.PersistentModel {
+  public typealias ID = SwiftData.PersistentIdentifier
+  @available(swift 5.9)
+  @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
+  public typealias Root = AIAKit.ImportBatch
+  final public var hashValue: Swift.Int {
+    get
+  }
+}
+extension AIAKit.ImportBatch : nonisolated Observation.Observable {
+}
+@available(swift, deprecated: 5.9, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use ImportBatch's persistentModelID instead")
+@available(*, unavailable, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use ImportBatch's persistentModelID instead")
+extension AIAKit.ImportBatch : Swift.Sendable {
+}
+extension AIAKit.Reminder : nonisolated SwiftData.PersistentModel {
+  public typealias ID = SwiftData.PersistentIdentifier
+  @available(swift 5.9)
+  @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
+  public typealias Root = AIAKit.Reminder
+  final public var hashValue: Swift.Int {
+    get
+  }
+}
+extension AIAKit.Reminder : nonisolated Observation.Observable {
+}
+@available(swift, deprecated: 5.9, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use Reminder's persistentModelID instead")
+@available(*, unavailable, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use Reminder's persistentModelID instead")
+extension AIAKit.Reminder : Swift.Sendable {
+}
+extension AIAKit.FoodEntry : nonisolated SwiftData.PersistentModel {
+  public typealias ID = SwiftData.PersistentIdentifier
+  @available(swift 5.9)
+  @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
+  public typealias Root = AIAKit.FoodEntry
+  final public var hashValue: Swift.Int {
+    get
+  }
+}
+extension AIAKit.FoodEntry : nonisolated Observation.Observable {
+}
+@available(swift, deprecated: 5.9, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use FoodEntry's persistentModelID instead")
+@available(*, unavailable, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use FoodEntry's persistentModelID instead")
+extension AIAKit.FoodEntry : Swift.Sendable {
+}
+extension AIAKit.HealthMetric : nonisolated SwiftData.PersistentModel {
+  public typealias ID = SwiftData.PersistentIdentifier
+  @available(swift 5.9)
+  @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
+  public typealias Root = AIAKit.HealthMetric
+  final public var hashValue: Swift.Int {
+    get
+  }
+}
+extension AIAKit.HealthMetric : nonisolated Observation.Observable {
+}
+@available(swift, deprecated: 5.9, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use HealthMetric's persistentModelID instead")
+@available(*, unavailable, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use HealthMetric's persistentModelID instead")
+extension AIAKit.HealthMetric : Swift.Sendable {
+}
+extension AIAKit.MerchantMeta : nonisolated SwiftData.PersistentModel {
+  public typealias ID = SwiftData.PersistentIdentifier
+  @available(swift 5.9)
+  @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
+  public typealias Root = AIAKit.MerchantMeta
+  final public var hashValue: Swift.Int {
+    get
+  }
+}
+extension AIAKit.MerchantMeta : nonisolated Observation.Observable {
+}
+@available(swift, deprecated: 5.9, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use MerchantMeta's persistentModelID instead")
+@available(*, unavailable, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use MerchantMeta's persistentModelID instead")
+extension AIAKit.MerchantMeta : Swift.Sendable {
+}
+extension AIAKit.FoodMeta : nonisolated SwiftData.PersistentModel {
+  public typealias ID = SwiftData.PersistentIdentifier
+  @available(swift 5.9)
+  @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
+  public typealias Root = AIAKit.FoodMeta
+  final public var hashValue: Swift.Int {
+    get
+  }
+}
+extension AIAKit.FoodMeta : nonisolated Observation.Observable {
+}
+@available(swift, deprecated: 5.9, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use FoodMeta's persistentModelID instead")
+@available(*, unavailable, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use FoodMeta's persistentModelID instead")
+extension AIAKit.FoodMeta : Swift.Sendable {
+}
+extension AIAKit.WaterLog : nonisolated SwiftData.PersistentModel {
+  public typealias ID = SwiftData.PersistentIdentifier
+  @available(swift 5.9)
+  @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
+  public typealias Root = AIAKit.WaterLog
+  final public var hashValue: Swift.Int {
+    get
+  }
+}
+extension AIAKit.WaterLog : nonisolated Observation.Observable {
+}
+@available(swift, deprecated: 5.9, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use WaterLog's persistentModelID instead")
+@available(*, unavailable, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use WaterLog's persistentModelID instead")
+extension AIAKit.WaterLog : Swift.Sendable {
+}
+extension AIAKit.FoodNote : nonisolated SwiftData.PersistentModel {
+  public typealias ID = SwiftData.PersistentIdentifier
+  @available(swift 5.9)
+  @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
+  public typealias Root = AIAKit.FoodNote
+  final public var hashValue: Swift.Int {
+    get
+  }
+}
+extension AIAKit.FoodNote : nonisolated Observation.Observable {
+}
+@available(swift, deprecated: 5.9, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use FoodNote's persistentModelID instead")
+@available(*, unavailable, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use FoodNote's persistentModelID instead")
+extension AIAKit.FoodNote : Swift.Sendable {
+}
+extension AIAKit.ReminderNote : nonisolated SwiftData.PersistentModel {
+  public typealias ID = SwiftData.PersistentIdentifier
+  @available(swift 5.9)
+  @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
+  public typealias Root = AIAKit.ReminderNote
+  final public var hashValue: Swift.Int {
+    get
+  }
+}
+extension AIAKit.ReminderNote : nonisolated Observation.Observable {
+}
+@available(swift, deprecated: 5.9, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use ReminderNote's persistentModelID instead")
+@available(*, unavailable, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use ReminderNote's persistentModelID instead")
+extension AIAKit.ReminderNote : Swift.Sendable {
+}
+extension AIAKit.HealthNote : nonisolated SwiftData.PersistentModel {
+  public typealias ID = SwiftData.PersistentIdentifier
+  @available(swift 5.9)
+  @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
+  public typealias Root = AIAKit.HealthNote
+  final public var hashValue: Swift.Int {
+    get
+  }
+}
+extension AIAKit.HealthNote : nonisolated Observation.Observable {
+}
+@available(swift, deprecated: 5.9, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use HealthNote's persistentModelID instead")
+@available(*, unavailable, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use HealthNote's persistentModelID instead")
+extension AIAKit.HealthNote : Swift.Sendable {
+}
+extension AIAKit.FoodSource : nonisolated SwiftData.PersistentModel {
+  public typealias ID = SwiftData.PersistentIdentifier
+  @available(swift 5.9)
+  @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
+  public typealias Root = AIAKit.FoodSource
+  final public var hashValue: Swift.Int {
+    get
+  }
+}
+extension AIAKit.FoodSource : nonisolated Observation.Observable {
+}
+@available(swift, deprecated: 5.9, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use FoodSource's persistentModelID instead")
+@available(*, unavailable, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use FoodSource's persistentModelID instead")
+extension AIAKit.FoodSource : Swift.Sendable {
+}
+extension AIAKit.RecogSource : nonisolated SwiftData.PersistentModel {
+  public typealias ID = SwiftData.PersistentIdentifier
+  @available(swift 5.9)
+  @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
+  public typealias Root = AIAKit.RecogSource
+  final public var hashValue: Swift.Int {
+    get
+  }
+}
+extension AIAKit.RecogSource : nonisolated Observation.Observable {
+}
+@available(swift, deprecated: 5.9, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use RecogSource's persistentModelID instead")
+@available(*, unavailable, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use RecogSource's persistentModelID instead")
+extension AIAKit.RecogSource : Swift.Sendable {
+}
+extension AIAKit.SleepSession : nonisolated SwiftData.PersistentModel {
+  public typealias ID = SwiftData.PersistentIdentifier
+  @available(swift 5.9)
+  @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
+  public typealias Root = AIAKit.SleepSession
+  final public var hashValue: Swift.Int {
+    get
+  }
+}
+extension AIAKit.SleepSession : nonisolated Observation.Observable {
+}
+@available(swift, deprecated: 5.9, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use SleepSession's persistentModelID instead")
+@available(*, unavailable, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use SleepSession's persistentModelID instead")
+extension AIAKit.SleepSession : Swift.Sendable {
+}
+public enum RecognitionSource : Swift.String, Swift.Sendable, Swift.Codable {
+  case local
+  case cloudText
+  case cloud
+  public init?(rawValue: Swift.String)
+  public typealias RawValue = Swift.String
+  public var rawValue: Swift.String {
+    get
+  }
+}
+public enum RecurrenceCycle : Swift.String, Swift.Codable, Swift.CaseIterable, Swift.Identifiable {
+  case daily
+  case weekly
+  case monthly
+  case quarterly
+  case yearly
+  case custom
+  public var id: Swift.String {
+    get
+  }
+  public var title: Swift.String {
+    get
+  }
+  public init?(rawValue: Swift.String)
+  public typealias AllCases = [AIAKit.RecurrenceCycle]
+  public typealias ID = Swift.String
+  public typealias RawValue = Swift.String
+  nonisolated public static var allCases: [AIAKit.RecurrenceCycle] {
+    get
+  }
+  public var rawValue: Swift.String {
+    get
+  }
+}
+public enum RecurrenceUnit : Swift.String, Swift.Codable, Swift.CaseIterable, Swift.Identifiable {
+  case day
+  case week
+  case month
+  case year
+  public var id: Swift.String {
+    get
+  }
+  public var title: Swift.String {
+    get
+  }
+  public init?(rawValue: Swift.String)
+  public typealias AllCases = [AIAKit.RecurrenceUnit]
+  public typealias ID = Swift.String
+  public typealias RawValue = Swift.String
+  nonisolated public static var allCases: [AIAKit.RecurrenceUnit] {
+    get
+  }
+  public var rawValue: Swift.String {
+    get
+  }
+}
+final public class RecurringRule {
+  final public var merchant: Swift.String {
+    get
+    set
+  }
+  final public var amount: Swift.Double {
+    get
+    set
+  }
+  final public var category: Swift.String {
+    get
+    set
+  }
+  final public var note: Swift.String {
+    get
+    set
+  }
+  final public var isIncome: Swift.Bool {
+    get
+    set
+  }
+  final public var dayOfMonth: Swift.Int {
+    get
+    set
+  }
+  final public var startDate: Foundation.Date {
+    get
+    set
+  }
+  final public var lastGeneratedAt: Foundation.Date? {
+    get
+    set
+  }
+  final public var syncId: Foundation.UUID {
+    get
+    set
+  }
+  final public var syncUpdatedAt: Foundation.Date {
+    get
+    set
+  }
+  final public var syncDeleted: Swift.Bool {
+    get
+    set
+  }
+  final public var cycleRaw: Swift.String? {
+    get
+    set
+  }
+  final public var customValue: Swift.Int? {
+    get
+    set
+  }
+  final public var customUnitRaw: Swift.String? {
+    get
+    set
+  }
+  final public var cycle: AIAKit.RecurrenceCycle {
+    get
+    set
+  }
+  final public var customUnit: AIAKit.RecurrenceUnit {
+    get
+    set
+  }
+  public init(merchant: Swift.String = "", amount: Swift.Double = 0, category: Swift.String = "", note: Swift.String = "", isIncome: Swift.Bool = false, dayOfMonth: Swift.Int = 1, startDate: Foundation.Date = .now, lastGeneratedAt: Foundation.Date? = nil, cycleRaw: Swift.String = RecurrenceCycle.monthly.rawValue, customValue: Swift.Int = 1, customUnitRaw: Swift.String = RecurrenceUnit.month.rawValue, syncId: Foundation.UUID = UUID(), syncUpdatedAt: Foundation.Date = .now, syncDeleted: Swift.Bool = false)
+  final public var persistentBackingData: any SwiftData.BackingData<AIAKit.RecurringRule> {
+    get
+    set
+  }
+  final public class var schemaMetadata: [SwiftData.Schema.PropertyMetadata] {
+    get
+  }
+  public init(backingData: any SwiftData.BackingData<AIAKit.RecurringRule>)
+  @objc deinit
+}
+extension AIAKit.RecurringRule : nonisolated SwiftData.PersistentModel {
+  public typealias ID = SwiftData.PersistentIdentifier
+  @available(swift 5.9)
+  @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
+  public typealias Root = AIAKit.RecurringRule
+  final public var hashValue: Swift.Int {
+    get
+  }
+}
+extension AIAKit.RecurringRule : nonisolated Observation.Observable {
+}
+@available(swift, deprecated: 5.9, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use RecurringRule's persistentModelID instead")
+@available(*, unavailable, message: "PersistentModels are not Sendable, consider utilizing a ModelActor or use RecurringRule's persistentModelID instead")
+extension AIAKit.RecurringRule : Swift.Sendable {
+}
+extension AIAKit.AppearanceMode : Swift.Equatable {}
+extension AIAKit.AppearanceMode : Swift.Hashable {}
+extension AIAKit.AppearanceMode : Swift.RawRepresentable {}
+extension AIAKit.ChatMessage.Role : Swift.Equatable {}
+extension AIAKit.ChatMessage.Role : Swift.Hashable {}
+extension AIAKit.ChatMessage.Role : Swift.RawRepresentable {}
+extension AIAKit.RecognitionSource : Swift.Equatable {}
+extension AIAKit.RecognitionSource : Swift.Hashable {}
+extension AIAKit.RecognitionSource : Swift.RawRepresentable {}
+extension AIAKit.RecurrenceCycle : Swift.Equatable {}
+extension AIAKit.RecurrenceCycle : Swift.Hashable {}
+extension AIAKit.RecurrenceCycle : Swift.RawRepresentable {}
+extension AIAKit.RecurrenceUnit : Swift.Equatable {}
+extension AIAKit.RecurrenceUnit : Swift.Hashable {}
+extension AIAKit.RecurrenceUnit : Swift.RawRepresentable {}

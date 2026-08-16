@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 540" width="480" height="540">
+  <defs>
+    <linearGradient id="bg4" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#EEF2F7"/>
+      <stop offset="1" stop-color="#F7FBFF"/>
+    </linearGradient>
+    <radialGradient id="glass4" cx="0.4" cy="0.35" r="0.8">
+      <stop offset="0" stop-color="#7DB4FF"/>
+      <stop offset="1" stop-color="#2D7FF9"/>
+    </radialGradient>
+  </defs>
+  <rect x="40" y="30" width="400" height="400" rx="64" fill="url(#bg4)"/>
+  <circle cx="240" cy="230" r="118" fill="#2B2B2B"/>
+  <circle cx="240" cy="230" r="100" fill="#1F1F1F"/>
+  <circle cx="240" cy="230" r="86" fill="url(#glass4)"/>
+  <path d="M196 188 A60 60 0 0 1 286 188" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" opacity="0.85"/>
+  <circle cx="240" cy="230" r="26" fill="#1F3A66"/>
+  <circle cx="316" cy="154" r="20" fill="#FF3B30"/>
+  <circle cx="316" cy="154" r="28" fill="none" stroke="#FF3B30" stroke-width="4" opacity="0.4"/>
+  <text x="240" y="500" text-anchor="middle" font-family="'PingFang SC','Microsoft YaHei','Hiragino Sans GB',sans-serif" font-size="74" font-weight="700" fill="#1A1A2E">识<tspan fill="#2D7FF9">记</tspan><tspan fill="#2D7FF9">AI</tspan></text>
+</svg>

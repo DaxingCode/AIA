@@ -9,6 +9,14 @@
       "memorySize": 256,
       "timeout": 60,
       "envVariables": {}
+    },
+    {
+      "name": "recognize",
+      "runtime": "Nodejs20.19",
+      "handler": "index.main",
+      "memorySize": 256,
+      "timeout": 60,
+      "envVariables": {}
     }
   ]
 }

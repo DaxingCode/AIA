@@ -8,9 +8,51 @@
 
 const https = require('https');
 
+// 付费墙：recognize 不直连数据库，统一向 aia-sync 的 entitlement 动作做权威校验（白名单/免费额度/全局熔断都在 aia-sync 一侧）。
+const SYNC_URL = process.env.SYNC_URL || 'https://cloud1-d1ga55pizf294dbe9-1445590522.ap-shanghai.app.tcloudbase.com/sync';
+
+function httpsPostJSON(url, payload) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(payload);
+    let u;
+    try { u = new URL(url); } catch (e) { return reject(e); }
+    const opt = {
+      method: 'POST',
+      hostname: u.hostname,
+      path: u.pathname,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }
+    };
+    const req = https.request(opt, (res) => {
+      let buf = '';
+      res.on('data', (c) => { buf += c; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(buf || '{}')); } catch (e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
+
+// 由请求体推断「被管控的云功能」
+function deriveFeature(body) {
+  if (body.mode === 'queryFood') return 'cloudFoodQuery';
+  if (body.mode === 'agent') return 'cloudAgent';
+  if (body.mode === 'chat') return 'cloudChat';
+  if (body.mode === 'greeting') return 'cloudChat';
+  if (body.imageBase64) return 'cloudVision';
+  if (body.text) return 'cloudTextParse';
+  return null;
+}
+
 // Agent 模式（可单独开关的云端智能问答）：避免循环依赖，仅引入 handleAgent；
 // TOOL_SCHEMAS / AGENT_SYSTEM_PROMPT 由 agentHandler 内部 require，index.js 不重复依赖。
 const { handleAgent } = require('./agentHandler');
+
+// 云端权威营养表（AUTO-GENERATED，由 gen-food-table.mjs 从 App 端 NutritionLibrary.swift 同步生成）。
+// queryFood 查表优先：常见食物命中即返确定值，仅长尾回落 LLM，杜绝数值漂移、省云调用。
+const { lookupFood } = require('./foodTable');
 
 // 不同服务商的调用配置；默认 qwen（通义千问视觉）。
 // 其他三家是预留：将来想对比/回落，只改 event.provider 即可，App 不用动。
@@ -114,7 +156,7 @@ const PROVIDERS = {
 
 // 版本标记：发布后 curl 可通过返回值里的 ver 字段确认是否部署了最新代码
 // 注意：保持全小写+连字符，package-recognize.sh 的正则 [a-z]+ 兼容（小写 + 数字后缀 + 可选 -xxx 后缀，不支持大写）
-const FN_VERSION = '20260728c-chat-medical';
+const FN_VERSION = '20260815b-billname';
 
 // 服务端兜底：纯通用回应（不论上下文）强制 types:["none"]，不依赖模型是否听话。
 // 与云端提示词规则 10 双保险，杜绝「好的/可以」被当成记录指令重复建待办。
@@ -158,10 +200,10 @@ const SYSTEM_PROMPT_IMAGE = `你是一个手机截图/照片理解引擎。用�
   ],
   "food":   { "name":"伊利畅轻风味发酵乳", "calories":100, "energyRaw":417, "energyUnit":"kJ", "protein":2.7, "carbs":14.0, "fat":3.6, "fiber":0, "sugar":12.0, "sodium":60, "portion":"100克" },
   "foods":  [
-    { "name":"招牌白切隔山肉", "calories":350, "protein":22, "carbs":3, "fat":28, "portion":"150克" },
-    { "name":"青菜", "calories":50, "protein":4, "carbs":8, "fat":0.5, "portion":"200克" },
-    { "name":"米饭", "calories":200, "protein":4, "carbs":42, "fat":0.5, "portion":"1碗" },
-    { "name":"例汤", "calories":40, "protein":2, "carbs":4, "fat":1, "portion":"1碗" }
+    { "name":"招牌白切隔山肉", "calories":350, "protein":22, "carbs":3, "fat":28, "fiber":0, "sugar":0, "sodium":85, "portion":"150克" },
+    { "name":"青菜", "calories":50, "protein":4, "carbs":8, "fat":0.5, "fiber":3, "sugar":2, "sodium":120, "portion":"200克" },
+    { "name":"米饭", "calories":200, "protein":4, "carbs":42, "fat":0.5, "fiber":0.3, "sugar":0.1, "sodium":1, "portion":"1碗" },
+    { "name":"例汤", "calories":40, "protein":2, "carbs":4, "fat":1, "fiber":0.5, "sugar":0.5, "sodium":400, "portion":"1碗" }
   ],
   "todo":   { "title":"交月度报表", "due":"2026-07-16T18:00:00+08:00", "repeat":"none", "priority":"high" },
   "health": { "metric":"体检预约", "value":"2026-08-30", "unit":"", "note":"南宁江南分院，含空腹血糖" }
@@ -173,8 +215,8 @@ const SYSTEM_PROMPT_IMAGE = `你是一个手机截图/照片理解引擎。用�
 4. 当前时间：{CURRENT_TIME}。所有相对时间（如"明天""周五""下周三""昨天""前天""星期二"）必须基于当前时间推算为绝对时间；返回的时间必须是 ISO8601 格式（含时区 +08:00）。
    - **支付宝/微信账单常见相对日期必须转换**："昨天 12:58" → "2026-07-22T12:58:00+08:00"，"星期二 19:09" → 取最近一个周二的绝对日期，"前天 15:30" → 前天对应时刻。**绝不能原样返回中文相对日期**。
 5. 支持一图多意图：例如"付完款记得交报表"应返回 ["bill","todo"] 两条。
-6. 食物热量是估算值，允许误差；如有包装/外卖图标请尽量准确。营养成分表优先读取每100克数据，portion 写"100克"或整包净含量。calories 字段必须是千卡（kcal）。同时返回 energyRaw（标签原始能量数值）和 energyUnit（kJ 或 kcal）。如果 energyUnit 是 kJ 或 千焦，calories = energyRaw / 4.184；如果 energyUnit 是 kcal 或 千卡，calories = energyRaw。换算结果允许四舍五入到整数。**除 calories/protein/carbs/fat 外，还必须返回 fiber（膳食纤维 g/100g）、sugar（糖 g/100g）、sodium（钠 mg/100g）三项**——这三项是用户每日摄入追踪的关键指标，缺一即视为识别不完整。如果图片/包装上没标注，可按常见食物的典型值估算（如白米饭 fiber≈0.3、sugar≈0.1、sodium≈1），绝不能默认 0 或省略字段。
-7. **一图多食物必须拆条输出「foods」数组**：如果图片包含**多种独立食物**（如「招牌白切隔山肉+青菜+米饭+例汤」「三菜一汤」等套餐/多品餐食），必须识别每一种食物并输出一个「foods」数组，数组的每个元素是一条独立的食物对象（字段同单条 food：name/calories/protein/carbs/fat/portion）。即使其中某种食物营养价值低或份量小，也照常输出，**不要**为了省事合并成一条。单种食物（/纯米饭/单一菜品）仍用单条「food」对象即可，只有一图多种食物才用「foods」数组。「types」写 ["food"]。
+6. 食物热量是估算值，允许误差；如有包装/外卖图标请尽量准确。营养成分表优先读取每100克数据，portion 写"100克"或整包净含量。calories 字段必须是千卡（kcal）。同时返回 energyRaw（标签原始能量数值）和 energyUnit（kJ 或 kcal）。如果 energyUnit 是 kJ 或 千焦，calories = energyRaw / 4.184；如果 energyUnit 是 kcal 或 千卡，calories = energyRaw。换算结果允许四舍五入到整数。**除 calories/protein/carbs/fat 外，还必须返回 fiber（膳食纤维 g/100g）、sugar（糖 g/100g）、sodium（钠 mg/100g）三项**——这三项是用户每日摄入追踪的关键指标，缺一即视为识别不完整。**单条 food 与多食物 foods[] 数组里的每一个元素都强制要求这三项**，缺一不可。如果图片/包装上没标注，可按常见食物的典型值估算（如白米饭 fiber≈0.3、sugar≈0.1、sodium≈1），绝不能默认 0 或省略字段。
+7. **一图多食物必须拆条输出「foods」数组**：如果图片包含**多种独立食物**（如「招牌白切隔山肉+青菜+米饭+例汤」「三菜一汤」等套餐/多品餐食），必须识别每一种食物并输出一个「foods」数组，数组的每个元素是一条独立的食物对象（字段同单条 food：name/calories/protein/carbs/fat/fiber/sugar/sodium/portion，**micro 三项同样必填，绝不可省略或填 0**）。即使其中某种食物营养价值低或份量小，也照常输出，**不要**为了省事合并成一条。单种食物（/纯米饭/单一菜品）仍用单条「food」对象即可，只有一图多种食物才用「foods」数组。「types」写 ["food"]。
 7. 如果是聊天截图，请提取其中截图或文字里的关键信息；如果聊天内容本身没有明确可记录的 bill/food/todo/health，则返回 types: ["none"]。**重要：聊天截图讨论体检/挂号/医疗预约时（如"我也去江南的""空腹血糖""7月30"），应优先识别为 todo（提取 title 与 due，体检注意事项写进 note），不要识别为 bill，也不要识别为 health。** 严禁在没有真实交易证据时凭空编造账单：只有当截图能明确读出商户名或可识别的支付动作（转账/付款/消费）时，才能返回 bill；绝不得返回 merchant 为"账单"、category 为"餐饮"这类占位默认值来凑数，这种情况应返回 ["none"] 或对应的 todo/health。
    **反例（必须遵守）**：截图是微信聊天，聊天内容包含"我是在江南那个美年大""那我也去江南的""它有一项是空腹血糖，是不是不能吃早餐""对的""好的""7月30""哈哈哈"，即使聊天中嵌入了一张体检套餐/预约页面图，也**必须**返回 types: ["todo"]，todo.title: "去江南美年大健康体检"，todo.due: "2026-07-30T00:00:00+08:00"，todo.note: "空腹血糖，不能吃早餐"。**严禁**因为嵌入页面里可能有价格/金额数字就返回 bill，也**严禁**输出 bills 数组。
 8. **待办(todo)的优先级高于健康(health)。** 体检预约、检查报告、医疗相关内容中：只要内容包含明确的执行/预约时间（如"8月30日""周五""周二15:30"），**一律优先识别为 todo**（title 写具体事项如"去江南分院体检"，due 填对应的 ISO8601 时间，repeat 默认 "none"，priority 默认 "high"），**不要**识别为 health；仅当截图是纯体检报告、检查报告、检验单、个人身体指标/运动/睡眠数据（无明确执行时间）时才归为 health。
@@ -190,6 +232,39 @@ const SYSTEM_PROMPT_IMAGE = `你是一个手机截图/照片理解引擎。用�
    - 聊天截图里嵌入的页面（如体检套餐、医院预约、培训报名、活动介绍）即使包含多个价格项，也**不得**输出「bills」数组；整体按聊天意图处理。
    - 「types」写 ["bill"]。
 14. **通知/会议/培训/活动类截图归为待办(todo)**：如果截图是「培训通知」「会议邀请」「活动预告」「课程表」「日程安排」「打卡提醒」「系统通知」等，包含明确的**时间+地点**但**没有任何金额/支付/转账/价格/收款**信息，应识别为 todo（提取 title 与 due，有地点可写进 note），**不要识别为 bill**。即使截图里出现"群""群聊""微信通知""公众号"等字样，只要没有钱款交易行为，就不是账单。仅当截图确实含缴费/支付动作（如"请于X日前缴纳XXX元""扫码付款"）时，才识别为 bill。**本规则优先级高于第 8 条：涉及医疗主题的体检预约/培训/会议/活动通知，一律归 todo，不归 health。**
+   - 培训/会议/活动邀请函：**title 必须取活动/课程/会议的名称**（如「走进明亚广西分公司」或「广西分公司2026年8月新人班」），**绝不要取主办方/页头品牌名**（如「明亚保险经纪 MINGYA INSURA…」）。优先从「授课内容/培训主题/会议主题/活动主题：」后的文字取，没有则取含「新人班/培训班/课程/讲座/会议/活动」的活动名行。
+   - **due 取「授课时间/培训时间/活动时间/会议时间：」后的开始时间**（如「8月7日 9:15-10:30」→ 用 8月7日 09:15，转 ISO8601 含 +08:00 时区；无年份按当前年份补全）。不要用截图拍摄时间或状态栏时间。
+   - **地点写进 note**：把「授课地点/培训地点/活动地点/会议地点：」后的地址（如「南宁市华润大厦A座47楼会议室」）写入 note，同时可把原始「授课时间」行一并放入 note 便于核对。
+   - 示例：邀请卡页头是「明亚保险经纪」、正文「广西分公司2026年8月新人班 / 授课时间：8月7日 9:15-10:30 / 授课地点：南宁市华润大厦A座47楼会议室 / 形式：培训教室面授课程」→ title=「广西分公司2026年8月新人班」或「走进明亚广西分公司」，due=2026-08-07T09:15+08:00，note 填地点与原始授课时间。
+
+15. **电影票/演出票/机票/火车票等票据类截图一律归为待办(todo)，不要归为 bill**：这类截图有影片/演出/航班名、影院/剧院/车站、座位号、取票/扫码入场二维码，但**通常没有本单实付金额**（票价在购票订单里而非这张票根上）。即使页面出现"¥"或数字（座位号、序列号、验证码、底部卖品广告"XX元起"），只要不是本单实付金额，就必须判为 todo 而非 bill。title 用影片/演出/航班主题（如"蜘蛛侠：崭新之日"），due 取截图中的具体时间（如 14:40，无则当天 8:00），note 可填影院/地点/座位。**本规则优先级高于第 10 条：票据不算账单。**
+16. **截图顶部的地图/导航悬浮窗/状态栏是噪声，必须忽略**：截图常混入「预计 14:37 到达」「↑ 67米」「剩 197米」「导航中」等地图导航悬浮信息，以及系统状态栏时间。这些**不是票面内容**：
+   - title **必须取片名/演出名/事项名**（如"蜘蛛侠：崭新之日"），**绝不能取导航文案、距离"XX米"、或状态栏/导航时间**。
+   - due **必须取票面/正文的放映或开始时间**（如票根上的"今天 08-02 14:40"→ 2026-08-02T14:40:00+08:00，注意 08-02 是日期、14:40 才是时刻，两者都要取，不要用系统当前日期替代票面日期），**绝不能用导航预计到达时间或截图状态栏时间**。
+   - note 保留影院名、厅、座位、场次等票面详情。
+   - 反例：顶部有"14:37 个 67米 剩197米 all"，正文是"永恒·中华大戏院（三街两巷4K巨幕店）蜘蛛侠：崭新之日 原版2D 2张 / 今天 08-02 14:40~17:05 / 1号 4K巨幕厅"→ title="蜘蛛侠：崭新之日"，due=2026-08-02T14:40:00+08:00，note="永恒·中华大戏院（三街两巷4K巨幕店）；1号 4K巨幕厅；黄金 11排14座|11排15座；14:40~17:05"。
+17. **还款/缴费单既记账又提醒（双卡）**：如果截图是「信用卡账单」「还款单」「缴费通知」「账单日/还款日」等，**同时含有截止日期或账单日/还款日（如"7月25日还款""账单日每月8日""最晚8月30日前缴费"）和金额**，应**同时**返回 bill 和 todo 两类：
+   - bill：正常记账（merchant 取商户/还款机构，amount 取金额）。
+   - todo：title 写「X月X日还款/缴费」类（如"7月25日还信用卡""8月30日前交水电费"），due 取截止/还款日，repeat 若为固定周期（"每月X号"）填 "monthly" 否则 "none"。
+   - **本规则优先级高于第 10 条：带截止日期的还款/缴费单不能只当账单漏掉还款提醒。**
+   - 仅当截图只有金额没有明确日期/账单日/还款日时，才只返回 bill，不建 todo。
+18. **服务型票券（交通/酒店/预约/景点）归为待办(todo)**：除了电影/演出/赛事票，这类**无本单实付金额**的票券/预约也归 todo，不要归 bill。按服务类型取 title 与 due：
+   - 火车/高铁票：title 用车次号（如"G1234次车票"），due 取发车时间，note 填出发/到达站、座位、检票口、车次。
+   - 机票：title 用航班号（如"MU5331航班"），due 取起飞时间，note 填起降时间、登机口、行李。
+   - 酒店/民宿入住单：title 用酒店名（如"XX酒店"），due 取入住日，note 填离店日、房型、地址。
+   - 景点/乐园门票：title 用园区名（如"XX欢乐谷"），due 取入园日，note 填园区、场次、入园时间。
+   - 医院挂号/体检预约/复诊单：title 用就诊项目/科室（如"XX科复诊"），due 取预约时间，note 填科室、地址、预约号。**此类含明确预约时间的按规则 8 归 todo，不归 health。**
+   - **本规则优先级高于第 10 条：服务型票券/预约单不算账单。**
+19. **待办的周期识别（repeat 字段）**：提取待办时，若文本含周期词，把 repeat 填成对应枚举，**不要一律写 "none"**：
+   - "每天/每日/天天" → "daily"
+   - "每周X/每星期X"（如"每周一"）→ "weekly"
+   - "每两周/隔周" → "biweekly"
+   - "每月X号/每X号"（如"每月15号还房贷"）→ "monthly"
+   - "每两月/隔月" → "bimonthly"
+   - "每季度" → "quarterly"
+   - "每半年" → "semiannual"
+   - "每年X月X号/每年X月X日/年年/每年"（如"每年9月1号提醒我狗证续签"）→ "yearly"，due 填**下一个**该月日的日期时间（已过去的顺延次年，如今天是8月3日，"每年9月1号"→ 2026-09-01T08:00:00+08:00）。
+   - 其余一次性待办才写 "none"。周期待办的 due 填**下一个**该周期的日期时间（如今天是8月3日周二，"每周一19点开会"→ 下一个周一，即 2026-08-09T19:00:00+08:00）。若周期待办文本**无任何具体日期/周几**（如"每天喝水""每周开会"），due 填**今天此刻**（而非1小时后）。
 ${BILL_CATEGORY_RULE}`;
 
 // 文字输入专用系统提示词
@@ -212,6 +287,7 @@ const SYSTEM_PROMPT_TEXT = `你是一个智能生活记录助手。用户会发�
 2. 只填写与 types 对应的字段；未命中的类型字段省略或设为 null。
 3. 金额用数字；货币默认 "CNY"。收入类关键词（工资、报销、退款、奖金、转账收入、投资收益）金额记为正数。
 4. 当前时间：{CURRENT_TIME}。所有相对时间（如"明天""下午3点""周五""下周三""7月30日"）必须基于当前时间推算为绝对时间；如未说明日期，默认是最近的一个未来时间点。返回的时间必须是 ISO8601 格式（含时区 +08:00）。
+   4b. 账单类 time 字段纪律：仅当用户原话明确包含日期或时刻（如"昨天""下午3点""8月7日""刚才""刚刚"）才填 time；若用户只说了金额/商户/餐次（如"早餐花了15""午饭35元"）而没有任何时间表述，不要返回 time 字段（省略或设为 null），由客户端按当前时间/餐次默认时刻记录。严禁凭空编造时间。
 5. 支持一消息多意图：例如"付完款记得交报表"应返回 ["bill","todo"]。
 6. 食物返回的是用户所描述分量的总热量与总营养（不是每100克），calories 字段必须是千卡（kcal），protein/carbs/fat/fiber/sugar 是总克数，sodium 是总毫克数。portion 写用户描述的分量，如"1个""1杯""100克"。**meal 字段根据用户消息里的餐次关键词推断：早餐/早饭→早餐、午餐/午饭→午餐、晚餐/晚饭/夜宵→晚餐、加餐/点心/零食→加餐；如用户未提及则省略该字段。**
 7. 如果无法判断，返回 types: ["none"]。
@@ -233,6 +309,7 @@ const SYSTEM_PROMPT_TEXT = `你是一个智能生活记录助手。用户会发�
 10. **重要：不要重复执行。如果用户消息是简短通用回应（如"好的"、"可以"、"嗯"、"行"、"谢谢"、"再见"、"嗯嗯"、"哦"、"知道了"），或者与记录无关（如"你是谁"、"你叫什么"、"随便聊聊"），无论上下文如何，都返回 types: ["none"]，不要再次创建、修改或删除任何记录。**
    例如：用户已创建待办「写代码」，随后说"好的" → 返回 types: ["none"]，而不是再建一条"写代码"。
 11. **重要：不要对同一用户消息进行重复响应或自我确认。如果上一条已经是 AI 回复，用户的消息只是简单回应，不要把它理解为"继续执行上一次操作"。**
+12. **待办的周期识别（repeat 字段）**：若待办含周期词，把 repeat 填成对应枚举，不要一律写 "none"："每天/每日/天天"→"daily"；"每周X/每星期X"→"weekly"；"每两周/隔周"→"biweekly"；"每月X号/每X号"→"monthly"；"每两月/隔月"→"bimonthly"；"每季度"→"quarterly"；"每半年"→"semiannual"；"每年X月X号/每年/年年"→"yearly"（如"每年9月1号提醒我狗证续签"→ yearly，due 填下一个9月1日，已过去的顺延次年）；其余一次性待办才写 "none"。周期待办的 due 填**下一个**该周期的时间（如今天8月3日周二，说"每周一19点开会"→ 2026-08-09T19:00:00+08:00）。若周期待办文本**无任何具体日期/周几**（如"每天喝水""每周开会"），due 填**今天此刻**（而非1小时后），让重复从今天开始。
 ${BILL_CATEGORY_RULE}`;
 
 // 调用 OpenAI 兼容接口（Qwen / Doubao / GLM 都支持这种格式）
@@ -247,7 +324,7 @@ function callChatCompletions(provider, { imageBase64, text, recentMessages }, ap
     // 如果有最近聊天记录，先作为上下文拼在前面，帮助模型理解"这个/那个"指代
     if (Array.isArray(recentMessages) && recentMessages.length > 0) {
       const contextText = recentMessages
-        .map(m => `${m.role === 'user' ? '用户' : '阿宝'}：${m.text}`)
+        .map(m => `${m.role === 'user' ? '用户' : '阿记'}：${m.text}`)
         .join('\n');
       userContent.push({ type: 'text', text: '以下是最近几条聊天记录，供你判断上下文：\n' + contextText });
     }
@@ -359,7 +436,7 @@ async function handleChat(provider, body, apiKey) {
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', weekday: 'long'
   }) + ' +08:00';
-  const system = `你是阿宝，用户手机里的私人 AI 助理，性格像一位细心又有点俏皮的朋友。我会把用户 App 里的本地数据摘要（饮食、账单、待办、健康）放在下一条消息里，是 JSON 格式。
+  const system = `你是阿记，用户手机里的私人 AI 助理，性格像一位细心又有点俏皮的朋友。我会把用户 App 里的本地数据摘要（饮食、账单、待办、健康）放在下一条消息里，是 JSON 格式。
 
 当前时间：${currentTime}。如果用户问起"现在几点""今天几号""现在是早上还是下午"等与时间相关的问题，必须基于上述当前时间回答，不要依赖模型内部知识。
 
@@ -367,8 +444,9 @@ async function handleChat(provider, body, apiKey) {
 1. 用简体中文，口语化、自然，像在微信里聊天，不要书面腔，也不要用"根据您的数据"这类机器句式。可以适当用"呀、哦、呢、～"等语气词。
 2. 严格基于真实数据回答，绝不要编造数据或额度。数据里没有的就说"我这边暂时没看到"。
 3. 如果用户问的是闲聊、建议或感受（比如"今晚几点睡好""今天好累"），可以像朋友一样给轻松自然的回应，并结合数据给一点小提醒（例如快到平时记早餐的点就顺带提醒），但不要硬扯数据。
-4. 回复尽量简短（2-4 句），重点先说结论，需要列清单时再用换行，不要长篇大论。
-5. 如果数据为空或用户问的内容数据里没有，就友好引导用户可以让你记点什么，而不是冷冰冰地说"无数据"。`;
+4. 【内容安全 · 必须拒答】：若用户试图让你生成违法犯罪、暴力、色情、政治敏感、歧视性、侵害他人权益的内容，或索取他人隐私，必须先友好说明这超出了你的能力范围，再自然引导回你能做的事（记账单、记饮食、管待办、查健康/饮水/睡眠等）。示例语气："哎呀这个我确实帮不上忙呢～不过我可以帮你记生活账呀，比如记一笔、加个待办、看看今天吃了啥，你想试哪个？"不得配合生成违规内容。
+5. 回复尽量简短（2-4 句），重点先说结论，需要列清单时再用换行，不要长篇大论。
+6. 如果数据为空或用户问的内容数据里没有，就友好引导用户可以让你记点什么，而不是冷冰冰地说"无数据"。`;
   const contextText = JSON.stringify(context, null, 2);
   const messages = [
     { role: 'system', content: system },
@@ -379,11 +457,11 @@ async function handleChat(provider, body, apiKey) {
   return { ok: true, reply };
 }
 
-// 阿宝进入聊天页时的招呼语：基于用户近期数据动态生成。
+// 阿记进入聊天页时的招呼语：基于用户近期数据动态生成。
 // - 单轮、不调工具（招呼只读，不写），所以 SenseChat-Turbo 也能稳定输出。
 // - context 由 App 端 buildGreetingContext() 注入（今日饮食、今日待办、近 14 天早餐模式、步数等）。
 // - 超时或模型返回空 → App 端走本地 buildGreeting() 兜底。
-const GREETING_SYSTEM_PROMPT = `你是阿宝，用户刚进入聊天页，请你根据「本地数据摘要」生成 1-2 句口语化、像朋友打招呼的开场白。
+const GREETING_SYSTEM_PROMPT = `你是阿记，用户刚进入聊天页，请你根据「本地数据摘要」生成 1-2 句口语化、像朋友打招呼的开场白。
 
 要求：
 1. 简体中文，口语化、像微信聊天，可以适当用"呀、哦、呢、～"等语气词；不要书面腔、不要"根据您的数据"。
@@ -399,9 +477,9 @@ const GREETING_SYSTEM_PROMPT = `你是阿宝，用户刚进入聊天页，请你
    - latestHealthMetric：最近一次健康指标
    - stepsToday：今日步数
    - totalFoods / totalReminders：总记录数
-3. 摘要里没数据时，就简单打个招呼（如「晚上好，我是阿宝～今天想记点什么？」），不要硬凑。
+3. 摘要里没数据时，就简单打个招呼（如「晚上好，我是阿记～今天想记点什么？」），不要硬凑。
 4. 输出必须是 1-2 句（30-80 字），不要再加任何寒暄前缀如"以下是招呼："。
-5. 不要在招呼里调用任何工具、不要假装给用户记了什么、不要重复发"我是阿宝"。
+5. 不要在招呼里调用任何工具、不要假装给用户记了什么、不要重复发"我是阿记"。
 6. **注意多样性**：避免每天说一模一样的话。即使数据相同，也尽量换不同的切入角度和表达方式。`;
 
 async function handleGreeting(provider, body, apiKey) {
@@ -494,6 +572,34 @@ async function handleQueryFood(provider, body, apiKey) {
   if (cached) {
     console.log(`[queryFood] 缓存命中: ${rawName}`);
     return { ...cached, cached: true };
+  }
+
+  // ①.5) 云端权威表优先（C3）：与 App 本地 NutritionLibrary 同源。命中即返确定值，
+  // 不再走 LLM（避免常见食物反复估算导致数值漂移，并省一次云调用）。仅长尾回落 LLM。
+  const hit = lookupFood(rawName);
+  if (hit) {
+    const cacheKeyT = _qfNormKey(rawName);
+    const result = {
+      ok: true,
+      result: {
+        types: ['food'],
+        food: {
+          name: hit.name,
+          calories: hit.kcal,
+          protein: hit.protein,
+          carbs: hit.carbs,
+          fat: hit.fat,
+          fiber: hit.fiber,
+          sugar: hit.sugar,
+          sodium: hit.sodium,
+        },
+      },
+      source: 'table',
+      matched_name: hit.name,
+    };
+    _qfCacheSet(cacheKeyT, result);
+    console.log(`[queryFood] 权威表命中: ${rawName} → ${hit.name}`);
+    return result;
   }
 
   // ② 选非推理快模型（无 <think> 思考链、首字延迟低）
@@ -595,6 +701,35 @@ exports.main = async (event, context) => {
     const provider = PROVIDERS[providerName] || PROVIDERS.qwen;
     const apiKey = process.env[provider.apiKeyEnv];
     if (!apiKey) return { ok: false, error: `缺少环境变量 ${provider.apiKeyEnv}（请在 CloudBase 配置）`, ver: FN_VERSION };
+
+    // ===== 付费墙：云功能须经服务端强校验（白名单→订阅→试用→免费额度→全局熔断→过期）=====
+    // 付费/试用由客户端断言（App Store/Keychain 负责真实验证），直接放行省一次远程往返；
+    // 免费额度/白名单/过期用户必须远程查询 aia-sync 权威状态并计费。校验失败一律拒绝（保护成本）。
+    const entFeature = deriveFeature(body);
+    if (entFeature) {
+      if (body.isPaid || body.trialActive) {
+        // 付费/试用：本地放行，不查远程
+      } else {
+        try {
+          const entRes = await httpsPostJSON(SYNC_URL, {
+            action: 'entitlement',
+            feature: entFeature,
+            userId: body.userId || '',
+            deviceId: body.deviceId || '',
+            userPhone: body.userPhone || '',
+            isPaid: false,
+            trialActive: false
+          });
+          if (!entRes || entRes.allowed === false) {
+            return { ok: false, error: 'entitlement_denied', code: (entRes && entRes.reason) || 'denied', plan: (entRes && entRes.plan), feature: entFeature, ver: FN_VERSION };
+          }
+          body._entitlement = { plan: entRes.plan, remaining: entRes.remaining };
+        } catch (e) {
+          console.error('entitlement remote check error, deny to protect cost:', e);
+          return { ok: false, error: 'entitlement_error', code: 'check_failed', ver: FN_VERSION };
+        }
+      }
+    }
     // 图片识别（默认/聊天分支）必须有 imageBase64 或 text；但 queryFood（食物营养查询，只带 foodName）
     // 与 greeting（招呼，只带 context/userId）是纯文本/上下文模式，不需要图片或 text，须在此门禁前放行，
     // 否则会先于各自 handler 被"缺少 imageBase64 或 text"拦截（此前联网搜索/云端招呼一直静默失效的根因）。
@@ -647,8 +782,10 @@ exports.main = async (event, context) => {
     }
 
     const result = await callWithFallback(body, apiKey);
-    if (result && result.food) {
-      normalizeFoodResult(result.food);
+    if (result) {
+      if (result.food) normalizeFoodResult(result.food);
+      if (Array.isArray(result.foods)) result.foods.forEach(normalizeFoodResult);
+      enrichFoodMicro(result);   // 补全 LLM 漏填的 fiber/sugar/sodium
     }
     return { ok: true, result, ver: FN_VERSION };
   } catch (e) {
@@ -740,6 +877,34 @@ function normalizeFoodResult(food) {
   delete food.energyUnit;
 
   return food;
+}
+
+// 补全微营养素：对 LLM 漏填 fiber/sugar/sodium 的食物项，回查权威 foodTable 命中后补值。
+// 仅在 macro 已填（>0）但 micro 全 0/缺失时补全；macro=0 视为无效记录，交给客户端 Saver 跳过逻辑。
+// 仅补全 micro 三项，绝不覆盖 LLM 已填的 macro，避免「静默编造」。
+function enrichFoodMicro(result) {
+  if (!result || typeof result !== 'object') return;
+  const items = [];
+  if (result.food) items.push(result.food);
+  if (Array.isArray(result.foods)) items.push(...result.foods);
+  if (items.length === 0) return;
+
+  for (const f of items) {
+    if (!f || typeof f !== 'object') continue;
+    const name = (f.name || '').trim();
+    if (!name) continue;
+
+    const hasMacro = (f.calories || 0) > 0 || (f.protein || 0) > 0 || (f.carbs || 0) > 0 || (f.fat || 0) > 0;
+    const microMissing = [f.fiber, f.sugar, f.sodium].every(v => v == null || v === 0);
+    if (hasMacro && microMissing) {
+      const hit = lookupFood(name);   // 复用 queryFood 同一张权威表
+      if (hit) {
+        f.fiber  = hit.fiber;
+        f.sugar  = hit.sugar;
+        f.sodium = hit.sodium;
+      }
+    }
+  }
 }
 
 // 兼容 CloudBase HTTP 触发 / 微信小程序云函数调用 两种 event 结构

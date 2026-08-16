@@ -793,11 +793,11 @@ async function delete_by_merchant(args = {}) {
   return { code: 0, deleted: total, details, message: `已删除「${merchant}」相关的 ${total} 条记录` };
 }
 
-// —— 阿宝的成长 / 学习：用户教给阿宝的习惯与规则（abao_learning）——
-// 当用户教阿宝"以后 XXX 就 YYY" / "记住我的习惯" / "教你怎么处理" 时，保存为一条可复用规则。
-// 存储于 aia_records（type=abao_learning），随用户云同步；handler 在每轮对话自动注入提示词，阿宝下次照做。
+// —— 阿记的成长 / 学习：用户教给阿记的习惯与规则（abao_learning）——
+// 当用户教阿记"以后 XXX 就 YYY" / "记住我的习惯" / "教你怎么处理" 时，保存为一条可复用规则。
+// 存储于 aia_records（type=abao_learning），随用户云同步；handler 在每轮对话自动注入提示词，阿记下次照做。
 
-// 保存/更新一条"用户教给阿宝的规则"。按 topic 去重（同主题更新已有，不堆积）。
+// 保存/更新一条"用户教给阿记的规则"。按 topic 去重（同主题更新已有，不堆积）。
 async function teach_abao(args = {}) {
   const topic = (args.topic || '').toString().trim();
   const rule = (args.rule || '').toString().trim();
@@ -843,7 +843,7 @@ async function list_teachings(args = {}) {
   return { code: 0, count: list.length, data: list, message: `共 ${list.length} 条你教过我的规则` };
 }
 
-// 按查询词检索相关规则（供阿宝动手前确认是否有对应的"用户习惯"可遵循）。
+// 按查询词检索相关规则（供阿记动手前确认是否有对应的"用户习惯"可遵循）。
 async function recall_teachings(args = {}) {
   const q = (args.query || '').toString().trim().toLowerCase();
   if (!q) return { code: -1, message: '查询词为空' };
@@ -961,7 +961,7 @@ async function list_waters(args = {}) {
 }
 
 // —— 周期排程（recurring_rule，对应 App 端 RecurringRule）——
-// 阿宝 可建/查/删周期账单规则；设备拉取后由 RecurringBillManager 自动生成账单。
+// 阿记 可建/查/删周期账单规则；设备拉取后由 RecurringBillManager 自动生成账单。
 async function create_recurring(args = {}) {
   const merchant = (args.merchant || '').toString().trim();
   const amount = Number(args.amount);

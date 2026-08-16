@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/Release-iphoneos/AIALiveActivityWidget.appex/AIALiveActivityWidget"
+relocations:     []
+...

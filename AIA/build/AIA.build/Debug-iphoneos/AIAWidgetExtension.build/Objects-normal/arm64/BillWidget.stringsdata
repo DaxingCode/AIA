@@ -1,0 +1,24 @@
+{
+  "source": "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIAWidget/BillWidget.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "账单管理",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 139
+        }
+      },
+      {
+        "comment": "",
+        "key": "今日支出 / 本月收支结余",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 140
+        }
+      }
+    ]
+  },
+  "version": 1
+}

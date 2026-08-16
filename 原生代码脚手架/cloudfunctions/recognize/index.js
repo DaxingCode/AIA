@@ -212,7 +212,7 @@ function callChatCompletions(provider, { imageBase64, text, recentMessages }, ap
     // 如果有最近聊天记录，先作为上下文拼在前面，帮助模型理解"这个/那个"指代
     if (Array.isArray(recentMessages) && recentMessages.length > 0) {
       const contextText = recentMessages
-        .map(m => `${m.role === 'user' ? '用户' : '阿宝'}：${m.text}`)
+        .map(m => `${m.role === 'user' ? '用户' : '阿记'}：${m.text}`)
         .join('\n');
       userContent.push({ type: 'text', text: '以下是最近几条聊天记录，供你判断上下文：\n' + contextText });
     }
@@ -322,7 +322,7 @@ async function handleChat(provider, body, apiKey) {
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', weekday: 'long'
   }) + ' +08:00';
-  const system = `你是阿宝，用户手机里的私人 AI 助理，性格像一位细心又有点俏皮的朋友。我会把用户 App 里的本地数据摘要（饮食、账单、待办、健康）放在下一条消息里，是 JSON 格式。
+  const system = `你是阿记，用户手机里的私人 AI 助理，性格像一位细心又有点俏皮的朋友。我会把用户 App 里的本地数据摘要（饮食、账单、待办、健康）放在下一条消息里，是 JSON 格式。
 
 当前时间：${currentTime}。如果用户问起"现在几点""今天几号""现在是早上还是下午"等与时间相关的问题，必须基于上述当前时间回答，不要依赖模型内部知识。
 

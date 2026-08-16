@@ -1,0 +1,591 @@
+{
+  "" : {
+    "const-values" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AIA-primary.swiftconstvalues",
+    "dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AIA-primary.d",
+    "diagnostics" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AIA-primary.dia",
+    "emit-module-dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AIA-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AIA-primary-emit-module.dia",
+    "pch" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AIA-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AIA-primary.swiftdeps"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/AIAApp.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/AIAApp.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AIAApp.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AIAApp.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/AIAIllustrations.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/AIAIllustrations.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AIAIllustrations.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AIAIllustrations.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/APNsPushEditorView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/APNsPushEditorView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/APNsPushEditorView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/APNsPushEditorView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/AccountLinkView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/AccountLinkView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AccountLinkView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AccountLinkView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/AdBanner.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/AdBanner.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AdBanner.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AdBanner.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/AddFoodManualView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/AddFoodManualView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AddFoodManualView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AddFoodManualView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/AllRecordsView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/AllRecordsView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AllRecordsView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AllRecordsView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/AnnouncementEditorView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/AnnouncementEditorView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AnnouncementEditorView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AnnouncementEditorView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/AppBackground.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/AppBackground.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AppBackground.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AppBackground.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/AppDelegate.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/AppDelegate.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AppDelegate.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AppDelegate.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/AppURLs.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/AppURLs.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AppURLs.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AppURLs.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/AppleAuthHelper.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/AppleAuthHelper.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AppleAuthHelper.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AppleAuthHelper.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/AuthManager.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/AuthManager.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AuthManager.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AuthManager.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/AutoRecognitionSetupView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/AutoRecognitionSetupView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AutoRecognitionSetupView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AutoRecognitionSetupView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/AutoSyncSettingsView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/AutoSyncSettingsView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AutoSyncSettingsView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AutoSyncSettingsView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/BackgroundSettingsView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/BackgroundSettingsView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BackgroundSettingsView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BackgroundSettingsView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/BillCategoryHelpers.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillCategoryHelpers.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillCategoryHelpers.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillCategoryHelpers.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/BillCategoryView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillCategoryView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillCategoryView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillCategoryView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/BillDashboardView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillDashboardView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillDashboardView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillDashboardView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/BillDeduplicator.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillDeduplicator.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillDeduplicator.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillDeduplicator.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/BillDetailView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillDetailView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillDetailView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillDetailView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/BillFileReader.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillFileReader.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillFileReader.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillFileReader.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/BillImportAdapter.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillImportAdapter.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillImportAdapter.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillImportAdapter.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/BillImportView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillImportView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillImportView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillImportView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/BillRecognitionTestView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillRecognitionTestView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillRecognitionTestView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillRecognitionTestView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/BillToolsView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillToolsView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillToolsView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BillToolsView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/BodyDataView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/BodyDataView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BodyDataView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BodyDataView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/BroadcastHistoryView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/BroadcastHistoryView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BroadcastHistoryView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/BroadcastHistoryView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/CameraView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/CameraView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/CameraView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/CameraView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/ChatView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/ChatView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ChatView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ChatView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/CloudSyncManager.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/CloudSyncManager.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/CloudSyncManager.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/CloudSyncManager.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/ContentView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/ContentView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ContentView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ContentView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/DataDeduplicator.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/DataDeduplicator.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/DataDeduplicator.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/DataDeduplicator.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/DataStatsExportView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/DataStatsExportView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/DataStatsExportView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/DataStatsExportView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/DefaultReminderSettingsView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/DefaultReminderSettingsView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/DefaultReminderSettingsView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/DefaultReminderSettingsView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/DeveloperCenterView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/DeveloperCenterView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/DeveloperCenterView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/DeveloperCenterView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/DeveloperTools.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/DeveloperTools.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/DeveloperTools.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/DeveloperTools.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/DuplicateStore.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/DuplicateStore.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/DuplicateStore.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/DuplicateStore.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/EditSheets.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/EditSheets.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/EditSheets.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/EditSheets.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/Entitlement.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/Entitlement.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/Entitlement.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/Entitlement.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/FeedbackComponents.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/FeedbackComponents.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/FeedbackComponents.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/FeedbackComponents.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/FoodDetailView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/FoodDetailView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/FoodDetailView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/FoodDetailView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/FoodMetaStore.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/FoodMetaStore.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/FoodMetaStore.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/FoodMetaStore.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/FreeQuotaConfigView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/FreeQuotaConfigView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/FreeQuotaConfigView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/FreeQuotaConfigView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/GlobalConfigStore.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/GlobalConfigStore.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/GlobalConfigStore.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/GlobalConfigStore.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/HealthDetailView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/HealthDetailView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/HealthDetailView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/HealthDetailView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/HealthGoalsView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/HealthGoalsView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/HealthGoalsView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/HealthGoalsView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/HealthManager.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/HealthManager.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/HealthManager.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/HealthManager.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/HomeLayout.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/HomeLayout.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/HomeLayout.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/HomeLayout.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/HomeLayoutSettingsView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/HomeLayoutSettingsView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/HomeLayoutSettingsView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/HomeLayoutSettingsView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/ICloudBackupManager.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/ICloudBackupManager.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ICloudBackupManager.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ICloudBackupManager.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/ImageAutoRecogSettingsView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/ImageAutoRecogSettingsView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ImageAutoRecogSettingsView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ImageAutoRecogSettingsView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/ImageHasher.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/ImageHasher.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ImageHasher.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ImageHasher.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/ImagePicker.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/ImagePicker.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ImagePicker.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ImagePicker.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/ImportHistoryView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/ImportHistoryView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ImportHistoryView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ImportHistoryView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/InAppSafariView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/InAppSafariView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/InAppSafariView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/InAppSafariView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/IntentTextUtils.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/IntentTextUtils.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/IntentTextUtils.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/IntentTextUtils.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/KeychainHelper.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/KeychainHelper.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/KeychainHelper.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/KeychainHelper.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/LiveActivityManager.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/LiveActivityManager.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/LiveActivityManager.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/LiveActivityManager.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/LocalImageStore.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/LocalImageStore.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/LocalImageStore.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/LocalImageStore.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/LocalLLMClassifier.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/LocalLLMClassifier.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/LocalLLMClassifier.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/LocalLLMClassifier.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/LocalQuickParse.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/LocalQuickParse.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/LocalQuickParse.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/LocalQuickParse.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/LoginView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/LoginView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/LoginView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/LoginView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/LongPressDragView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/LongPressDragView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/LongPressDragView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/LongPressDragView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/ManualHealthStore.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/ManualHealthStore.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ManualHealthStore.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ManualHealthStore.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/MembershipCompareView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/MembershipCompareView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/MembershipCompareView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/MembershipCompareView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/MerchantMetaStore.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/MerchantMetaStore.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/MerchantMetaStore.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/MerchantMetaStore.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/MerchantRuleViews.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/MerchantRuleViews.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/MerchantRuleViews.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/MerchantRuleViews.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/MonthlyBillListView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/MonthlyBillListView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/MonthlyBillListView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/MonthlyBillListView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/MonthlyReportView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/MonthlyReportView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/MonthlyReportView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/MonthlyReportView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/MyAccountView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/MyAccountView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/MyAccountView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/MyAccountView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/NutritionLibrary.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/NutritionLibrary.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/NutritionLibrary.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/NutritionLibrary.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/OnboardingView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/OnboardingView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/OnboardingView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/OnboardingView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/OnePassAuthHelper.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/OnePassAuthHelper.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/OnePassAuthHelper.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/OnePassAuthHelper.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/PaywallView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/PaywallView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/PaywallView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/PaywallView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/PhoneAuthForm.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/PhoneAuthForm.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/PhoneAuthForm.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/PhoneAuthForm.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/PhoneLoginView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/PhoneLoginView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/PhoneLoginView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/PhoneLoginView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/QuickActionRouter.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/QuickActionRouter.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/QuickActionRouter.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/QuickActionRouter.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/RecognitionRecordDetailView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecognitionRecordDetailView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecognitionRecordDetailView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecognitionRecordDetailView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/RecognitionRecordsView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecognitionRecordsView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecognitionRecordsView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecognitionRecordsView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/RecognitionSaver.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecognitionSaver.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecognitionSaver.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecognitionSaver.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/RecognitionTypes.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecognitionTypes.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecognitionTypes.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecognitionTypes.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/RecognizeService.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecognizeService.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecognizeService.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecognizeService.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/RecordsViews.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecordsViews.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecordsViews.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecordsViews.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/RecurringBillManager.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecurringBillManager.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecurringBillManager.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecurringBillManager.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/RecurringRuleViews.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecurringRuleViews.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecurringRuleViews.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/RecurringRuleViews.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/ReminderNotificationManager.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/ReminderNotificationManager.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ReminderNotificationManager.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ReminderNotificationManager.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/RestingHeartRateInputSheet.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/RestingHeartRateInputSheet.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/RestingHeartRateInputSheet.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/RestingHeartRateInputSheet.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/ResultConfirmView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/ResultConfirmView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ResultConfirmView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ResultConfirmView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/ResultRowCard.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/ResultRowCard.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ResultRowCard.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ResultRowCard.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/SafeDelete.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/SafeDelete.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/SafeDelete.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/SafeDelete.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/ScreenshotIntent.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/ScreenshotIntent.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ScreenshotIntent.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ScreenshotIntent.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/ScreenshotStore.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/ScreenshotStore.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ScreenshotStore.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ScreenshotStore.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/SelectableRowModifier.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/SelectableRowModifier.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/SelectableRowModifier.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/SelectableRowModifier.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/SelectionComponents.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/SelectionComponents.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/SelectionComponents.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/SelectionComponents.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/SettingsView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/SettingsView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/SettingsView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/SettingsView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/ShareSheet.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/ShareSheet.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ShareSheet.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/ShareSheet.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/SleepMaskOverlay.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/SleepMaskOverlay.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/SleepMaskOverlay.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/SleepMaskOverlay.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/SleepSession.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/SleepSession.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/SleepSession.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/SleepSession.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/SubscriptionManager.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/SubscriptionManager.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/SubscriptionManager.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/SubscriptionManager.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/SwipeToDeleteCard.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/SwipeToDeleteCard.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/SwipeToDeleteCard.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/SwipeToDeleteCard.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/TellAIAIntent.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/TellAIAIntent.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/TellAIAIntent.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/TellAIAIntent.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/TesterManagerView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/TesterManagerView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/TesterManagerView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/TesterManagerView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/TodoToolsView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/TodoToolsView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/TodoToolsView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/TodoToolsView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/TriggerTutorialView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/TriggerTutorialView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/TriggerTutorialView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/TriggerTutorialView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/TriggerType.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/TriggerType.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/TriggerType.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/TriggerType.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/UIComponents.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/UIComponents.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/UIComponents.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/UIComponents.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/UsageAnalytics.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/UsageAnalytics.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/UsageAnalytics.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/UsageAnalytics.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/UserTier.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/UserTier.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/UserTier.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/UserTier.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/VoiceRecordView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/VoiceRecordView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/VoiceRecordView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/VoiceRecordView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/WaterIntakeParser.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/WaterIntakeParser.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/WaterIntakeParser.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/WaterIntakeParser.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/WeChatAuthHelper.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/WeChatAuthHelper.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/WeChatAuthHelper.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/WeChatAuthHelper.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/WeightTrendView.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/WeightTrendView.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/WeightTrendView.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/WeightTrendView.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/WidgetSnapshot.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/WidgetSnapshot.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/WidgetSnapshot.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/WidgetSnapshot.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIALiveActivityWidget/AIALiveAttributes.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/AIALiveAttributes.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AIALiveAttributes.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/AIALiveAttributes.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release/AIA.build/Objects-normal/x86_64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/GeneratedAssetSymbols.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release/AIA.build/Objects-normal/x86_64/GeneratedAssetSymbols.o"
+  }
+}

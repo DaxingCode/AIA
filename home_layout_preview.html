@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI助理 · 首页布局效果图</title>
+<style>
+  :root{
+    --food:#d98e1f; --food-bg:#fbf0db;
+    --health:#9b59b6; --health-bg:#f3e9f9;
+    --bill:#1d9e75; --bill-bg:#e3f6ef;
+    --todo:#378add; --todo-bg:#e7f1fc;
+    --sub:#5f5e5a; --muted:#8a9099; --ink:#1f2937;
+    --surface:#f7f9fb; --page:#f2f2f7;
+    --r:18px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:-apple-system,"PingFang SC","Helvetica Neue",sans-serif;
+       background:#c9c9d0;display:flex;justify-content:center;gap:28px;
+       padding:28px;flex-wrap:wrap;color:var(--ink);}
+  .wrap{display:flex;flex-direction:column;align-items:center;gap:10px;}
+  .cap{font-size:13px;font-weight:600;color:#3a3a3c;letter-spacing:.3px;}
+  .phone{width:390px;background:var(--page);border-radius:42px;padding:14px;
+         box-shadow:0 24px 70px rgba(0,0,0,.30);min-height:840px;position:relative;}
+  .phone::after{content:"";position:absolute;top:10px;left:50%;transform:translateX(-50%);
+         width:120px;height:26px;background:#1c1c1e;border-radius:0 0 16px 16px;z-index:5;}
+  .statusbar{display:flex;justify-content:space-between;align-items:center;
+             font-size:13px;font-weight:600;padding:8px 14px 4px;color:#1c1c1e;}
+  .header{display:flex;align-items:center;gap:8px;padding:10px 6px 12px;}
+  .avatar{width:40px;height:40px;border-radius:50%;
+          background:linear-gradient(135deg,#9b59b6,#378add);flex:none;}
+  .greet{font-size:18px;font-weight:600;flex:1;}
+  .pill{font-size:11px;font-weight:600;color:#e0564b;background:rgba(224,86,75,.12);
+        padding:4px 10px;border-radius:20px;white-space:nowrap;}
+  .gear{font-size:18px;color:var(--sub);width:30px;text-align:center;}
+
+  /* 编辑态顶栏（仅编辑模式显示） */
+  .editbar{display:none;align-items:center;justify-content:space-between;
+           padding:6px 4px 10px;font-size:13px;color:var(--sub);}
+  .editbar b{color:var(--ink);}
+  .done-btn{background:#378add;color:#fff;font-weight:600;font-size:13px;
+            padding:6px 14px;border-radius:18px;border:none;}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 2px;transition:all .3s;}
+  .grid1{display:none;grid-template-columns:1fr;gap:12px;padding:0 2px;}
+
+  .tile{border-radius:var(--r);padding:14px;position:relative;overflow:hidden;}
+  .t-food{background:var(--food-bg);} .t-health{background:var(--health-bg);}
+  .t-bill{background:var(--bill-bg);} .t-todo{background:var(--todo-bg);}
+  .trow{display:flex;align-items:center;gap:6px;margin-bottom:8px;}
+  .ic{width:22px;height:22px;border-radius:7px;display:flex;align-items:center;
+      justify-content:center;font-size:12px;color:#fff;font-weight:700;flex:none;}
+  .ic-food{background:var(--food);} .ic-health{background:var(--health);}
+  .ic-bill{background:var(--bill);} .ic-todo{background:var(--todo);}
+  .ttl{font-size:13px;font-weight:600;color:var(--sub);}
+  .badge{font-size:11px;padding:1px 7px;border-radius:20px;background:rgba(0,0,0,.06);
+         color:var(--sub);margin-left:auto;}
+  .big{font-size:22px;font-weight:600;color:var(--ink);}
+  .big small{font-size:11px;color:var(--muted);font-weight:400;margin-left:3px;}
+  .bar{height:5px;border-radius:3px;background:rgba(0,0,0,.07);margin:8px 0;overflow:hidden;}
+  .bar > i{display:block;height:100%;border-radius:3px;}
+  .line{display:flex;justify-content:space-between;font-size:11px;color:var(--sub);margin-top:4px;}
+  .line b{font-weight:600;}
+  /* 宽屏大卡额外行 */
+  .extra{display:none;}
+
+  .hint{font-size:11px;color:var(--muted);text-align:center;padding:6px 4px 2px;}
+  .preview{margin-top:18px;padding:0 2px;}
+  .ptitle{font-size:13px;font-weight:600;color:var(--sub);margin-bottom:10px;
+          display:flex;justify-content:space-between;}
+  .ptitle span{color:var(--muted);font-weight:400;font-size:11px;}
+  .bubble{background:var(--surface);border-radius:14px;padding:11px;position:relative;
+          margin-bottom:8px;font-size:12px;color:var(--sub);overflow:hidden;padding-left:16px;}
+  .bubble::before{content:"";position:absolute;left:6px;top:12px;bottom:12px;width:3px;border-radius:2px;}
+  .b-food::before{background:var(--food);} .b-health::before{background:var(--health);}
+  .b-bill::before{background:var(--bill);} .b-todo::before{background:var(--todo);}
+
+  /* 编辑态：抖动 + 角标 */
+  .editing .tile{animation:shake .35s ease-in-out infinite;}
+  .editing .tile:nth-child(2n){animation-delay:.05s;}
+  .editing .tile:nth-child(3n){animation-delay:.1s;}
+  @keyframes shake{
+    0%{transform:rotate(-1.2deg);} 50%{transform:rotate(1.2deg);} 100%{transform:rotate(-1.2deg);}
+  }
+  .del{position:absolute;top:-6px;left:-6px;width:22px;height:22px;border-radius:50%;
+       background:#ff3b30;color:#fff;font-size:15px;font-weight:700;display:none;
+       align-items:center;justify-content:center;border:2px solid #fff;z-index:6;}
+  .editing .del{display:flex;}
+  .grip{position:absolute;top:8px;right:8px;color:rgba(0,0,0,.25);font-size:14px;display:none;}
+  .editing .grip{display:block;}
+</style>
+</head>
+<body>
+
+  <!-- ============ 紧凑 2×2 ============ -->
+  <div class="wrap">
+    <div class="cap">紧凑档 · 2×2</div>
+    <div class="phone" id="p-compact">
+      <div class="statusbar"><span>9:41</span><span>📶 🔋</span></div>
+      <div class="header">
+        <div class="avatar"></div>
+        <div class="greet">下午好，阿记 👋</div>
+        <div class="pill">2 项待处理</div>
+        <div class="gear">⚙︎</div>
+      </div>
+      <div class="grid2">
+        <div class="tile t-food">
+          <div class="trow"><div class="ic ic-food">🍽</div><div class="ttl">饮食记录</div>
+            <div class="badge">今日 3 条</div></div>
+          <div class="big">820<small>kcal</small></div>
+          <div class="bar"><i style="width:47%;background:var(--food)"></i></div>
+          <div class="line"><span>目标</span><b>1730 kcal</b></div>
+          <div class="line"><span>待摄入</span><b>910 kcal</b></div>
+        </div>
+        <div class="tile t-health">
+          <div class="trow"><div class="ic ic-health">❤</div><div class="ttl">健康管理</div>
+            <div class="badge">今日</div></div>
+          <div class="big">6528<small>步</small></div>
+          <div class="bar"><i style="width:65%;background:var(--health)"></i></div>
+          <div class="line"><span>运动</span><b>35 min</b></div>
+          <div class="line"><span>心率</span><b>68 bpm</b></div>
+        </div>
+        <div class="tile t-bill">
+          <div class="trow"><div class="ic ic-bill">💳</div><div class="ttl">账单管理</div></div>
+          <div class="big">¥45<small>今日支出</small></div>
+          <div class="line" style="margin-top:8px"><span>本月收入</span><b style="color:var(--bill)">¥12800</b></div>
+          <div class="line"><span>本月支出</span><b style="color:#e0564b">¥3260</b></div>
+        </div>
+        <div class="tile t-todo">
+          <div class="trow"><div class="ic ic-todo">✓</div><div class="ttl">待办提醒</div>
+            <div class="badge">今日 2 项</div></div>
+          <div class="big">2<small>今日待办</small></div>
+          <div class="line" style="margin-top:8px"><span>· 交房租</span><b>明天 09:00</b></div>
+          <div class="line"><span>· 买菜</span><b>今天 18:00</b></div>
+        </div>
+      </div>
+      <div class="preview">
+        <div class="ptitle">今日事项预览 <span>阿记提醒</span></div>
+        <div class="bubble b-food">今日已记录 3 餐，还剩 910 kcal 额度 👍</div>
+        <div class="bubble b-health">步数 6528，还差 3472 步达标</div>
+        <div class="bubble b-bill">本月结余 ¥9540，预算使用 65%</div>
+        <div class="bubble b-todo">明天 09:00 交房租，已设提醒</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 宽屏 1×2 ============ -->
+  <div class="wrap">
+    <div class="cap">宽屏档 · 1×2（置顶 2 模块）</div>
+    <div class="phone" id="p-wide">
+      <div class="statusbar"><span>9:41</span><span>📶 🔋</span></div>
+      <div class="header">
+        <div class="avatar"></div>
+        <div class="greet">下午好，阿记 👋</div>
+        <div class="pill">2 项待处理</div>
+        <div class="gear">⚙︎</div>
+      </div>
+      <div class="grid1">
+        <div class="tile t-food">
+          <div class="trow"><div class="ic ic-food">🍽</div><div class="ttl">饮食记录</div>
+            <div class="badge">今日 3 条</div></div>
+          <div class="big">820<small>kcal 今日摄入</small></div>
+          <div class="bar"><i style="width:47%;background:var(--food)"></i></div>
+          <div class="line"><span>目标</span><b>1730 kcal</b></div>
+          <div class="line"><span>待摄入</span><b>910 kcal</b></div>
+          <div class="line"><span>净热量</span><b style="color:var(--food)">+58 kcal</b></div>
+          <div class="line"><span>蛋白质 / 碳水</span><b>42g / 95g</b></div>
+        </div>
+        <div class="tile t-health">
+          <div class="trow"><div class="ic ic-health">❤</div><div class="ttl">健康管理</div>
+            <div class="badge">达标</div></div>
+          <div class="big">6528<small>步</small></div>
+          <div class="bar"><i style="width:65%;background:var(--health)"></i></div>
+          <div class="line"><span>运动时长</span><b>35 min</b></div>
+          <div class="line"><span>能量消耗</span><b>1800 kcal</b></div>
+          <div class="line"><span>静息心率</span><b>68 bpm</b></div>
+          <div class="line"><span>步行距离</span><b>4.8 km</b></div>
+        </div>
+        <div class="hint">账单、待办在「紧凑 2×2」档下才会显示 · 长按宫格可重排/隐藏</div>
+      </div>
+      <div class="preview">
+        <div class="ptitle">今日事项预览 <span>阿记提醒</span></div>
+        <div class="bubble b-food">今日已记录 3 餐，还剩 910 kcal 额度 👍</div>
+        <div class="bubble b-health">步数 6528，还差 3472 步达标</div>
+        <div class="bubble b-bill">本月结余 ¥9540，预算使用 65%</div>
+        <div class="bubble b-todo">明天 09:00 交房租，已设提醒</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 编辑模式（抖动+角标） ============ -->
+  <div class="wrap">
+    <div class="cap">编辑态 · 长按/点「编辑」进入</div>
+    <div class="phone editing" id="p-edit">
+      <div class="statusbar"><span>9:41</span><span>📶 🔋</span></div>
+      <div class="editbar"><span>拖动排序 · 点 <b>−</b> 隐藏</span>
+        <button class="done-btn" onclick="document.getElementById('p-edit').classList.remove('editing')">完成</button></div>
+      <div class="header" style="padding-top:2px">
+        <div class="avatar"></div>
+        <div class="greet">下午好，阿记 👋</div>
+        <div class="pill">2 项待处理</div>
+        <div class="gear">⚙︎</div>
+      </div>
+      <div class="grid2">
+        <div class="tile t-food">
+          <div class="del">−</div><div class="grip">⠿</div>
+          <div class="trow"><div class="ic ic-food">🍽</div><div class="ttl">饮食记录</div></div>
+          <div class="big">820<small>kcal</small></div>
+          <div class="line"><span>待摄入</span><b>910 kcal</b></div>
+        </div>
+        <div class="tile t-health">
+          <div class="del">−</div><div class="grip">⠿</div>
+          <div class="trow"><div class="ic ic-health">❤</div><div class="ttl">健康管理</div></div>
+          <div class="big">6528<small>步</small></div>
+          <div class="line"><span>运动</span><b>35 min</b></div>
+        </div>
+        <div class="tile t-bill">
+          <div class="del">−</div><div class="grip">⠿</div>
+          <div class="trow"><div class="ic ic-bill">💳</div><div class="ttl">账单管理</div></div>
+          <div class="big">¥45<small>今日支出</small></div>
+          <div class="line"><span>本月支出</span><b>¥3260</b></div>
+        </div>
+        <div class="tile t-todo">
+          <div class="del">−</div><div class="grip">⠿</div>
+          <div class="trow"><div class="ic ic-todo">✓</div><div class="ttl">待办提醒</div></div>
+          <div class="big">2<small>今日待办</small></div>
+          <div class="line"><span>· 交房租</span><b>明天 09:00</b></div>
+        </div>
+      </div>
+      <div class="hint">拖动宫格调整顺序 · 点左上报 − 隐藏该模块 · 设置页也可管</div>
+    </div>
+  </div>
+
+</body>
+</html>

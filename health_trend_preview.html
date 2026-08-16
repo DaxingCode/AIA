@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>健康管理 · 近7日趋势效果图</title>
+<style>
+  :root{
+    --health:#7c5cff; --healthBG:#efeaff; --ink:#1c1c1e; --sub:#8e8e93;
+    --bg:#f2f2f7; --card:#ffffff; --line:#e5e5ea;
+  }
+  *{box-sizing:border-box;-webkit-font-smoothing:antialiased}
+  body{margin:0;background:#d9d9de;display:flex;justify-content:center;padding:24px;font-family:-apple-system,"PingFang SC",system-ui,sans-serif}
+  .phone{width:390px;background:var(--bg);border-radius:42px;padding:14px 14px 28px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+  .nav{display:flex;justify-content:space-between;align-items:center;padding:10px 6px 14px}
+  .nav h1{font-size:22px;margin:0;color:var(--ink);font-weight:700}
+  .nav .gear{font-size:20px;color:var(--health)}
+  .card{background:var(--card);border-radius:20px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+  .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .ring{display:flex;flex-direction:column;align-items:center;gap:4px}
+  .ring .cap{font-size:11px;color:var(--sub)}
+  .ring .val{font-size:13px;font-weight:700;color:var(--ink)}
+  .mini{background:var(--bg);border-radius:12px;padding:8px 4px;text-align:center}
+  .mini .v{font-size:13px;font-weight:700;color:var(--ink)}
+  .mini .c{font-size:10px;color:var(--sub);margin-top:2px}
+  .two{display:grid;grid-template-columns:2fr 1fr;gap:10px}
+  .goal{background:var(--card);border-radius:20px;padding:14px}
+  .goal .t{font-size:14px;font-weight:600;color:var(--ink)}
+  .goal .s{font-size:11px;color:var(--sub);margin-top:4px}
+  .sleepbtn{background:var(--health);border-radius:20px;padding:14px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:14px}
+  .sec{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+  .sec .title{font-size:15px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:6px}
+  .sec .title .ic{color:var(--health);font-size:16px}
+  .sec .range{font-size:11px;color:var(--sub)}
+  .bars{display:flex;align-items:flex-end;justify-content:space-between;height:96px;gap:8px}
+  .bar{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
+  .bar .col{width:100%;max-width:26px;background:var(--health);border-radius:6px 6px 3px 3px;opacity:.92}
+  .bar .lab{font-size:10px;color:var(--sub)}
+  .bar .top{font-size:9px;color:var(--health);font-weight:700}
+  .dots{display:flex;justify-content:center;gap:5px;margin-top:10px}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--line)}
+  .dot.on{background:var(--health);width:16px;border-radius:3px}
+  .sleep-detail{display:flex;justify-content:space-between;align-items:flex-end}
+  .sleep-detail .big{font-size:24px;font-weight:700;color:var(--health)}
+  .sleep-detail .sub{font-size:11px;color:var(--sub)}
+  .rows{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
+  .row{display:flex;align-items:center;gap:10px;padding:6px 0;font-size:13px}
+  .row .ic{width:26px;height:26px;border-radius:8px;background:var(--bg);display:flex;align-items:center;justify-content:center}
+  .row .v{margin-left:auto;font-weight:700;color:var(--ink)}
+  .badge{display:inline-block;font-size:10px;color:var(--health);background:var(--healthBG);border-radius:6px;padding:1px 6px;margin-left:6px}
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="nav"><h1>健康管理</h1><div class="gear">⚙︎</div></div>
+
+  <!-- Card A 今日概览 -->
+  <div class="card">
+    <div class="grid4">
+      <div class="ring"><div class="cap">步数</div><div class="val">8,420</div><div class="cap">/10,000</div></div>
+      <div class="ring"><div class="cap">睡眠</div><div class="val">7.4h</div><div class="cap">/8h</div></div>
+      <div class="ring"><div class="cap">运动</div><div class="val">42min</div><div class="cap">/30min</div></div>
+      <div class="ring"><div class="cap">总消耗</div><div class="val">1,860</div><div class="cap">/2,000</div></div>
+    </div>
+    <div class="grid4" style="margin-top:12px">
+      <div class="mini"><div class="v">68.5</div><div class="c">体重kg</div></div>
+      <div class="mini"><div class="v">172</div><div class="c">身高cm</div></div>
+      <div class="mini"><div class="v">23.1</div><div class="c">BMI</div></div>
+      <div class="mini"><div class="v">68</div><div class="c">静息心率</div></div>
+    </div>
+  </div>
+
+  <!-- 健康目标 + 睡眠按钮 -->
+  <div class="two">
+    <div class="goal"><div class="t">🎯 健康目标</div><div class="s">体重 68.5kg · BMI 23.1 · 运动 30min</div></div>
+    <div class="sleepbtn">😴 入睡</div>
+  </div>
+
+  <!-- Card B 近7日步数 -->
+  <div class="card" style="margin-top:12px">
+    <div class="sec"><div class="title"><span class="ic">👟</span>近 7 日步数</div><div class="range">7/26 – 8/1</div></div>
+    <div class="bars">
+      <div class="bar"><div class="top">6.2k</div><div class="col" style="height:60%"></div><div class="lab">六</div></div>
+      <div class="bar"><div class="top">8.4k</div><div class="col" style="height:82%"></div><div class="lab">日</div></div>
+      <div class="bar"><div class="top">9.1k</div><div class="col" style="height:90%"></div><div class="lab">一</div></div>
+      <div class="bar"><div class="top">7.3k</div><div class="col" style="height:71%"></div><div class="lab">二</div></div>
+      <div class="bar"><div class="top">10k</div><div class="col" style="height:100%"></div><div class="lab">三</div></div>
+      <div class="bar"><div class="top">8.8k</div><div class="col" style="height:86%"></div><div class="lab">四</div></div>
+      <div class="bar"><div class="top">7.6k</div><div class="col" style="height:74%"></div><div class="lab">五</div></div>
+    </div>
+    <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot on"></div></div>
+  </div>
+
+  <!-- Card B2 近7日运动时长 -->
+  <div class="card">
+    <div class="sec"><div class="title"><span class="ic">🏃</span>近 7 日运动时长<span class="badge">figure.run</span></div><div class="range">7/26 – 8/1</div></div>
+    <div class="bars">
+      <div class="bar"><div class="top">35</div><div class="col" style="height:63%"></div><div class="lab">六</div></div>
+      <div class="bar"><div class="top">42</div><div class="col" style="height:76%"></div><div class="lab">日</div></div>
+      <div class="bar"><div class="top">50</div><div class="col" style="height:91%"></div><div class="lab">一</div></div>
+      <div class="bar"><div class="top">28</div><div class="col" style="height:50%"></div><div class="lab">二</div></div>
+      <div class="bar"><div class="top">55</div><div class="col" style="height:100%"></div><div class="lab">三</div></div>
+      <div class="bar"><div class="top">47</div><div class="col" style="height:85%"></div><div class="lab">四</div></div>
+      <div class="bar"><div class="top">40</div><div class="col" style="height:72%"></div><div class="lab">五</div></div>
+    </div>
+    <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot on"></div></div>
+  </div>
+
+  <!-- Card B3 近7日睡眠时长 -->
+  <div class="card">
+    <div class="sec"><div class="title"><span class="ic">🌙</span>近 7 日睡眠时长<span class="badge">moon.zzz.fill</span></div><div class="range">7/26 – 8/1</div></div>
+    <div class="bars">
+      <div class="bar"><div class="top">7.2</div><div class="col" style="height:80%"></div><div class="lab">六</div></div>
+      <div class="bar"><div class="top">6.8</div><div class="col" style="height:75%"></div><div class="lab">日</div></div>
+      <div class="bar"><div class="top">8.1</div><div class="col" style="height:90%"></div><div class="lab">一</div></div>
+      <div class="bar"><div class="top">7.5</div><div class="col" style="height:83%"></div><div class="lab">二</div></div>
+      <div class="bar"><div class="top">6.5</div><div class="col" style="height:72%"></div><div class="lab">三</div></div>
+      <div class="bar"><div class="top">8.3</div><div class="col" style="height:92%"></div><div class="lab">四</div></div>
+      <div class="bar"><div class="top">7.9</div><div class="col" style="height:88%"></div><div class="lab">五</div></div>
+    </div>
+    <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot on"></div></div>
+  </div>
+
+  <!-- Card C 最近睡眠 -->
+  <div class="card">
+    <div class="sec"><div class="title">最近睡眠</div></div>
+    <div class="sleep-detail">
+      <div><div class="sub">睡眠时长</div><div class="big">7h 32m</div></div>
+      <div style="text-align:right">
+        <div class="sub">入睡 23:18</div>
+        <div class="sub">醒来 06:50</div>
+      </div>
+    </div>
+    <div class="rows">
+      <div class="row"><div class="ic">🌙</div>深睡<div class="v">—</div></div>
+      <div class="row"><div class="ic">💤</div>浅睡<div class="v">—</div></div>
+      <div class="row"><div class="ic">⚡</div>REM<div class="v">—</div></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

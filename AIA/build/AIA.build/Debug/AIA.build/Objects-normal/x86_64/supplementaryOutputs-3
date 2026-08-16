@@ -1,0 +1,86 @@
+{
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/BillRecognitionTestView.swift" : {
+    "const-values" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BillRecognitionTestView.swiftconstvalues",
+    "dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BillRecognitionTestView.d",
+    "diagnostics" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BillRecognitionTestView.dia",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BillRecognitionTestView.o",
+    "swift-dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BillRecognitionTestView.swiftdeps"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/BillToolsView.swift" : {
+    "const-values" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BillToolsView.swiftconstvalues",
+    "dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BillToolsView.d",
+    "diagnostics" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BillToolsView.dia",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BillToolsView.o",
+    "swift-dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BillToolsView.swiftdeps"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/BodyDataView.swift" : {
+    "const-values" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BodyDataView.swiftconstvalues",
+    "dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BodyDataView.d",
+    "diagnostics" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BodyDataView.dia",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BodyDataView.o",
+    "swift-dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BodyDataView.swiftdeps"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/BroadcastHistoryView.swift" : {
+    "const-values" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BroadcastHistoryView.swiftconstvalues",
+    "dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BroadcastHistoryView.d",
+    "diagnostics" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BroadcastHistoryView.dia",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BroadcastHistoryView.o",
+    "swift-dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/BroadcastHistoryView.swiftdeps"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/CameraView.swift" : {
+    "const-values" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/CameraView.swiftconstvalues",
+    "dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/CameraView.d",
+    "diagnostics" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/CameraView.dia",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/CameraView.o",
+    "swift-dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/CameraView.swiftdeps"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/ChatView.swift" : {
+    "const-values" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/ChatView.swiftconstvalues",
+    "dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/ChatView.d",
+    "diagnostics" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/ChatView.dia",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/ChatView.o",
+    "swift-dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/ChatView.swiftdeps"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/CloudSyncManager.swift" : {
+    "const-values" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/CloudSyncManager.swiftconstvalues",
+    "dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/CloudSyncManager.d",
+    "diagnostics" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/CloudSyncManager.dia",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/CloudSyncManager.o",
+    "swift-dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/CloudSyncManager.swiftdeps"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/ContentView.swift" : {
+    "const-values" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/ContentView.swiftconstvalues",
+    "dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/ContentView.d",
+    "diagnostics" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/ContentView.dia",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/ContentView.o",
+    "swift-dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/ContentView.swiftdeps"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/DataDeduplicator.swift" : {
+    "const-values" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DataDeduplicator.swiftconstvalues",
+    "dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DataDeduplicator.d",
+    "diagnostics" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DataDeduplicator.dia",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DataDeduplicator.o",
+    "swift-dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DataDeduplicator.swiftdeps"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/DataStatsExportView.swift" : {
+    "const-values" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DataStatsExportView.swiftconstvalues",
+    "dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DataStatsExportView.d",
+    "diagnostics" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DataStatsExportView.dia",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DataStatsExportView.o",
+    "swift-dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DataStatsExportView.swiftdeps"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/DefaultReminderSettingsView.swift" : {
+    "const-values" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DefaultReminderSettingsView.swiftconstvalues",
+    "dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DefaultReminderSettingsView.d",
+    "diagnostics" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DefaultReminderSettingsView.dia",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DefaultReminderSettingsView.o",
+    "swift-dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DefaultReminderSettingsView.swiftdeps"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIA/DeveloperCenterView.swift" : {
+    "const-values" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DeveloperCenterView.swiftconstvalues",
+    "dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DeveloperCenterView.d",
+    "diagnostics" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DeveloperCenterView.dia",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DeveloperCenterView.o",
+    "swift-dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Debug/AIA.build/Objects-normal/x86_64/DeveloperCenterView.swiftdeps"
+  }
+}

@@ -192,7 +192,7 @@ const TOOL_SCHEMAS = [
           id: { type: 'string', description: '要更新的已有记录 id（来自上下文 recentReminders[i].id），仅修改/纠错/完成意图时传；省略则新建。' },
           due: { type: 'integer', description: '截止时间，Unix 秒级时间戳（Asia/Shanghai）。可选。' },
           remindAt: { type: 'integer', description: '提醒时间，Unix 秒级时间戳（Asia/Shanghai）。可选。' },
-          repeatRule: { type: 'string', enum: ['none', 'day', 'week', 'month'], description: '重复规则，默认 none。' },
+          repeatRule: { type: 'string', enum: ['none', 'daily', 'weekly', 'biweekly', 'monthly', 'bimonthly', 'quarterly', 'semiannual', 'yearly'], description: '重复规则，默认 none。none=不重复；daily=每天；weekly=每周；biweekly=每2周；monthly=每月；bimonthly=每2个月；quarterly=每3个月；semiannual=每6个月；yearly=每年。' },
           priority: { type: 'string', enum: ['low', 'medium', 'high'], description: '优先级，默认 medium。' },
           done: { type: 'boolean', description: '是否已完成，用户说"完成了/做完了"时设为 true。' }
         },
@@ -450,12 +450,12 @@ const TOOL_SCHEMAS = [
       }
     }
   },
-  // —— 阿宝的成长 / 学习 ——
+  // —— 阿记的成长 / 学习 ——
   {
     type: 'function',
     function: {
       name: 'teach_abao',
-      description: '把用户教给阿宝的一条习惯/规则记住（持久化，下次自动照做）。当用户说"以后XXX就YYY/记住我的习惯/教你怎么处理/我的规则是"等，明确在教阿宝怎么办某事时调用。topic 是简短主题（如"打车分类""午睡提醒"），rule 是清晰可执行的做法，example 可放用户原话示例。',
+      description: '把用户教给阿记的一条习惯/规则记住（持久化，下次自动照做）。当用户说"以后XXX就YYY/记住我的习惯/教你怎么处理/我的规则是"等，明确在教阿记怎么办某事时调用。topic 是简短主题（如"打车分类""午睡提醒"），rule 是清晰可执行的做法，example 可放用户原话示例。',
       parameters: {
         type: 'object',
         properties: {
@@ -471,7 +471,7 @@ const TOOL_SCHEMAS = [
     type: 'function',
     function: {
       name: 'list_teachings',
-      description: '列出用户教过阿宝的全部规则（可关键词过滤）。当用户问"你都学会了什么/教过你什么/你记住了哪些习惯"时调用。',
+      description: '列出用户教过阿记的全部规则（可关键词过滤）。当用户问"你都学会了什么/教过你什么/你记住了哪些习惯"时调用。',
       parameters: {
         type: 'object',
         properties: {
@@ -486,7 +486,7 @@ const TOOL_SCHEMAS = [
     type: 'function',
     function: {
       name: 'recall_teachings',
-      description: '检索与当前请求相关的"用户教过的规则"。当阿宝准备动手前想确认"用户有没有教过我这种情况怎么处理"时调用，按 query 关键词匹配 topic/rule/example，返回相关规则供遵循。',
+      description: '检索与当前请求相关的"用户教过的规则"。当阿记准备动手前想确认"用户有没有教过我这种情况怎么处理"时调用，按 query 关键词匹配 topic/rule/example，返回相关规则供遵循。',
       parameters: {
         type: 'object',
         properties: {

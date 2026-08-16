@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>bundleIdentifier</key>
+	<string>com.daxing.aia.AIA</string>
+	<key>localizations</key>
+	<array>
+		<dict>
+			<key>displayName</key>
+			<string>好记</string>
+			<key>locale</key>
+			<string>zh-Hans</string>
+			<key>subscriptionGroups</key>
+			<array>
+				<dict>
+					<key>groupID</key>
+					<string>group_aia_pro</string>
+					<key>groupName</key>
+					<string>AIA Pro</string>
+					<key>subscriptions</key>
+					<array>
+						<dict>
+							<key>displayPrice</key>
+							<string>8.8</string>
+							<key>id</key>
+							<string>com.daxing.aia.pro.monthly</string>
+							<key>name</key>
+							<string>包月</string>
+							<key>period</key>
+							<string>month</string>
+						</dict>
+						<dict>
+							<key>displayPrice</key>
+							<string>88</string>
+							<key>id</key>
+							<string>com.daxing.aia.pro.yearly</string>
+							<key>name</key>
+							<string>包年</string>
+							<key>period</key>
+							<string>year</string>
+						</dict>
+					</array>
+				</dict>
+			</array>
+		</dict>
+		<dict>
+			<key>displayName</key>
+			<string>AIA</string>
+			<key>locale</key>
+			<string>en</string>
+			<key>subscriptionGroups</key>
+			<array>
+				<dict>
+					<key>groupID</key>
+					<string>group_aia_pro</string>
+					<key>groupName</key>
+					<string>AIA Pro</string>
+					<key>subscriptions</key>
+					<array>
+						<dict>
+							<key>displayPrice</key>
+							<string>8.8</string>
+							<key>id</key>
+							<string>com.daxing.aia.pro.monthly</string>
+							<key>name</key>
+							<string>Monthly</string>
+							<key>period</key>
+							<string>month</string>
+						</dict>
+						<dict>
+							<key>displayPrice</key>
+							<string>88</string>
+							<key>id</key>
+							<string>com.daxing.aia.pro.yearly</string>
+							<key>name</key>
+							<string>Yearly</string>
+							<key>period</key>
+							<string>year</string>
+						</dict>
+					</array>
+				</dict>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

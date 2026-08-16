@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>好记AI 隐私政策</title>
+<style>
+  :root { --ink:#1d1d1f; --sub:#6b6b70; --line:#e5e5ea; --brand:#34C759; --bg:#fbfbfd; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    line-height:1.8; font-size:15px; }
+  .wrap { max-width:760px; margin:0 auto; padding:48px 24px 80px; }
+  h1 { font-size:26px; margin:0 0 4px; }
+  .meta { color:var(--sub); font-size:13px; margin:0 0 28px; }
+  h2 { font-size:18px; margin:34px 0 10px; padding-left:10px; border-left:3px solid var(--brand); }
+  p, li { color:#2c2c2e; }
+  .box { background:#fff; border:1px solid var(--line); border-radius:12px; padding:18px 22px; margin:14px 0; }
+  .tag { display:inline-block; font-size:12px; color:var(--brand); background:#e1f5ee;
+    border-radius:6px; padding:2px 8px; margin-right:6px; }
+  table { width:100%; border-collapse:collapse; margin:10px 0; font-size:14px; }
+  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--sub); font-weight:500; font-size:13px; }
+  .foot { margin-top:40px; padding-top:18px; border-top:1px solid var(--line);
+    color:var(--sub); font-size:13px; }
+  a { color:var(--brand); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>好记AI 隐私政策</h1>
+  <p class="meta">生效日期：2026&nbsp;年&nbsp;____&nbsp;月&nbsp;____&nbsp;日　|　开发者：大幸（个人开发者）</p>
+
+  <div class="box">
+    <span class="tag">本地优先</span><span class="tag">不上传即不留存</span><span class="tag">不用于广告画像</span>
+    <p style="margin:10px 0 0">好记AI（以下简称"本应用"）是一款帮助用户通过截图/拍照自动识别并记录饮食、健康、账单、待办的本地优先工具。我们坚持"数据最小化"原则，仅在您明确触发时才会上传必要数据。</p>
+  </div>
+
+  <h2>一、我们收集的信息</h2>
+  <table>
+    <tr><th>数据类型</th><th>收集场景</th><th>用途</th></tr>
+    <tr>
+      <td>照片 / 图像</td>
+      <td>您主动拍照或从相册选择截图、食物、账单进行识别</td>
+      <td>本地 OCR 优先；需视觉理解的部分会发送到云端识别服务（商汤 sensenova）处理，处理完成后不留存原始图片</td>
+    </tr>
+    <tr>
+      <td>健康与健身数据</td>
+      <td>您主动记录/导入的饮食热量、体重等</td>
+      <td>存储于您设备本地（SwiftData）；开启云同步时，经加密传输通道（HTTPS/TLS）同步至您的云空间（CloudBase）存储</td>
+    </tr>
+    <tr>
+      <td>设备与日志信息</td>
+      <td>App 运行与崩溃时</td>
+      <td>设备型号、系统版本、崩溃日志，用于定位与修复问题</td>
+    </tr>
+  </table>
+  <p>我们<b>不收集</b>：精确地理位置（除非后续功能需要并另行告知并取得同意）、通讯录、指纹/面容等生物识别特征。</p>
+
+  <h2>二、数据如何使用</h2>
+  <ul>
+    <li>提供核心识别与记录功能；</li>
+    <li>在您开启云同步时，跨设备同步您自己的数据；</li>
+    <li>通过崩溃日志改进稳定性。</li>
+  </ul>
+
+  <h2>三、数据存储与共享</h2>
+  <ul>
+    <li><b>本地优先</b>：默认所有记录保存在您设备本地，不经过网络。</li>
+    <li><b>云端识别</b>：仅当图片需要视觉模型理解时，图片会临时发送至商汤识别服务，识别完成后不留存。</li>
+    <li><b>云同步</b>：仅在您主动开启时，数据通过 HTTPS/TLS 加密传输通道同步至您的 CloudBase 云空间存储。我们采用随机用户标识对您的数据进行隔离，但该隔离不等于端到端加密；如需更强的隐私保护，请勿开启云同步，数据将仅保留在您本机。</li>
+    <li><b>不与第三方共享用于广告或用户画像</b>：我们不向广告商出售或交换您的个人数据。</li>
+  </ul>
+
+  <h2>四、您的权利</h2>
+  <ul>
+    <li>随时在 App 内删除任意记录；</li>
+    <li>关闭云同步即可停止云端留存；</li>
+    <li>如需彻底注销云空间数据，可联系开发者处理。</li>
+  </ul>
+
+  <h2>五、儿童隐私</h2>
+  <p>本应用不专门面向 13 岁以下儿童，亦不故意收集其数据。若您发现有误收集情形，请联系我们删除。</p>
+
+  <h2>六、政策变更</h2>
+  <p>如本政策发生重大变更，我们将在 App 内或本页面更新并说明生效日期。</p>
+
+  <h2>七、联系我们</h2>
+  <p>如对本政策有疑问或需行使您的权利，请联系：<b>[请填写您的联系邮箱，例如 privacy@yourdomain.com]</b></p>
+
+  <div class="foot">
+    本隐私政策模板由开发助手生成，仅供上架参考。请在上线前根据实际情况核对并补充联系方式等信息，确保与 App Store Connect 中填写的隐私标签一致。
+  </div>
+</div>
+</body>
+</html>

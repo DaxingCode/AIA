@@ -1,0 +1,48 @@
+{
+  "source": "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIAWidget/UpcomingWidget.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "暂无临近待办",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 50
+        }
+      },
+      {
+        "comment": "",
+        "key": "临近待办",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 38
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 43
+        }
+      },
+      {
+        "comment": "",
+        "key": "临近待办",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 108
+        }
+      },
+      {
+        "comment": "",
+        "key": "即将到期的待办 Top3",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 109
+        }
+      }
+    ]
+  },
+  "version": 1
+}

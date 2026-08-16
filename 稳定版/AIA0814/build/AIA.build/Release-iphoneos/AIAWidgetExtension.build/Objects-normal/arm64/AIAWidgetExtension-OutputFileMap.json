@@ -1,0 +1,66 @@
+{
+  "" : {
+    "const-values" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/AIAWidgetExtension-primary.swiftconstvalues",
+    "dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/AIAWidgetExtension-primary.d",
+    "diagnostics" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/AIAWidgetExtension-primary.dia",
+    "emit-module-dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/AIAWidgetExtension-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/AIAWidgetExtension-primary-emit-module.dia",
+    "pch" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/AIAWidgetExtension-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/AIAWidgetExtension-primary.swiftdeps"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIAWidget/AIAWidgetBundle.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/AIAWidgetBundle.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/AIAWidgetBundle.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/AIAWidgetBundle.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIAWidget/BillWidget.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/BillWidget.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/BillWidget.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/BillWidget.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIAWidget/DietWidget.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/DietWidget.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/DietWidget.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/DietWidget.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIAWidget/HealthWidget.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/HealthWidget.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/HealthWidget.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/HealthWidget.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIAWidget/OverviewWidget.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/OverviewWidget.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/OverviewWidget.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/OverviewWidget.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIAWidget/SharedTile.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/SharedTile.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/SharedTile.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/SharedTile.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIAWidget/SummaryWidget.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/SummaryWidget.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/SummaryWidget.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/SummaryWidget.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIAWidget/TodoWidget.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/TodoWidget.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/TodoWidget.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/TodoWidget.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIAWidget/UpcomingWidget.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/UpcomingWidget.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/UpcomingWidget.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/UpcomingWidget.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/AIAWidget/WidgetData.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/WidgetData.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/WidgetData.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/WidgetData.o"
+  },
+  "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "index-unit-output-path" : "/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/GeneratedAssetSymbols.bc",
+    "object" : "/Volumes/MacBook/Workbuddy/AI助理/AIA/build/AIA.build/Release-iphoneos/AIAWidgetExtension.build/Objects-normal/arm64/GeneratedAssetSymbols.o"
+  }
+}

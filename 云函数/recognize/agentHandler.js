@@ -101,7 +101,7 @@ async function handleAgent(provider, body, apiKey, handleChat) {
 
   const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
 
-  // 拉取"用户教过阿宝的规则"，注入提示词（让阿宝每轮都"记得"并按其行事）。
+  // 拉取"用户教过阿记的规则"，注入提示词（让阿记每轮都"记得"并按其行事）。
   let learnedText = '（暂无，用户还没教过我什么）';
   try {
     const rules = await TOOLS.getLearnedRulesForPrompt(userId, 30);
