@@ -66,8 +66,12 @@ struct MerchantRuleListView: View {
                                 onLongPress: { enterMultiSelect(rule.persistentModelID) },
                                 onToggle: { toggleSelection(rule.persistentModelID) },
                                 onDelete: {
-                                    SafeDelete.merchantMeta(rule, in: context)
+                                    // >>> CHANGE-[2026-08-17 11:25:00]-[临时对象失效崩溃] 开始
+                                    // 原因：rule 来自 @Query ForEach 行，多选手动删除后底层数组变动可能释放引用。
+                                    // 回退：改回 SafeDelete.merchantMeta(rule, in: context)
+                                    SafeDelete.merchantMetaByID(rule.persistentModelID, in: context)
                                     CloudSyncManager.shared.syncAfterLocalChange(context: context)
+                                    // <<< CHANGE-[2026-08-17 11:25:00]-[临时对象失效崩溃] 结束
                                 }
                             ) {
                                 ruleRowContent(rule)

@@ -1002,10 +1002,19 @@ struct ResultConfirmView: View {
                     }
                 }
             }
-            // 用户删掉的错认账单：从库里一并删除
+            // >>> CHANGE-[2026-08-17 11:23:00]-[临时对象失效崩溃] 开始
+            // 原因：上面的保存分支对「本次新建但用户未保留」的账单只做了 context.insert(b)，
+            //       没有显式 save。这些对象是临时 PersistentIdentifier，直接 SafeDelete.bill
+            //       会在下一帧访问已失效/未持久化的临时对象 → fatalError。
+            // 修法：本段为同步执行（非延时闭包），直接 try? context.save() 固化正常路径，
+            //       再统一走 SafeDelete.billByID(id) —— 内部用 context.model(for:) 取活对象，
+            //       即使是临时 ID 在同步上下文中也能取到并软删，不存在旧版"传活对象延时失效"问题。
+            // 回退：恢复为下方被替换的旧四行（SafeDelete.bill(session.bills[i], ...)）即可。
+            try? context.save()
             for i in (0..<session.bills.count).reversed() where !keptOrig.contains(i) {
-                SafeDelete.bill(session.bills[i], in: context)
+                SafeDelete.billByID(session.bills[i].persistentModelID, in: context)
             }
+            // <<< CHANGE-[2026-08-17 11:23:00]-[临时对象失效崩溃] 结束
             session.bills = session.bills.enumerated().filter { keptOrig.contains($0.offset) }.map { $0.element }
         }
         if types.contains("todo") {

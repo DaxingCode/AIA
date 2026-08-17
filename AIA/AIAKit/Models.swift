@@ -424,7 +424,7 @@ import SwiftData
 @Model public final class HealthNote {
     /// 关联 HealthMetric.syncId（1:1）
     public var syncId: UUID
-    /// 备注文字
+    /// 备注文字K
     public var note: String
     /// 最近一次编辑时间
     public var updatedAt: Date

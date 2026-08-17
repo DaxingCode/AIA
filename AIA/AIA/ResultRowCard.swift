@@ -405,7 +405,10 @@ struct ChatRecognitionBubble: View {
             // 最后一张卡片被删光 → 整条识别气泡一起软删消失，
             // 并连带删除同组的 AI 文字开场白（否则会退化成「（无识别结果）」空壳，
             // 即用户看到的「小圆点」——其实是没了卡片的开场白孤气泡）。
-            SafeDelete.chatMessage(message, in: context)
+            // >>> CHANGE-[2026-08-17 11:35:00]-[临时对象失效崩溃] 开始
+            // 原因：message 来自消息数组，删除后 removePairedOpener 触发重渲染可能释放引用。回退：改回 SafeDelete.chatMessage(message, in: context)
+            SafeDelete.chatMessageByID(message.persistentModelID, in: context)
+            // <<< CHANGE-[2026-08-17 11:35:00]-[临时对象失效崩溃] 结束
             removePairedOpener()
         } else {
             persist()
@@ -430,7 +433,10 @@ struct ChatRecognitionBubble: View {
             guard passedSelf else { continue }
             guard m.role == .ai else { continue }
             if RecognitionSaver.isRecognitionOpener(m.text) {
-                SafeDelete.chatMessage(m, in: context)
+                // >>> CHANGE-[2026-08-17 11:35:30]-[临时对象失效崩溃] 开始
+                // 原因：m 来自消息数组，删除后 return 前已可能触发外层重渲染释放引用。回退：改回 SafeDelete.chatMessage(m, in: context)
+                SafeDelete.chatMessageByID(m.persistentModelID, in: context)
+                // <<< CHANGE-[2026-08-17 11:35:30]-[临时对象失效崩溃] 结束
                 return
             }
             // 遇到非开场白的消息说明已超出本组，停止（避免误删更早的其它消息）
@@ -612,7 +618,12 @@ struct BillRowCard: View {
                     EmptyView()
                 } content: {
                     BillSavedCard(bill: bill,
-                                  onDelete: { SafeDelete.bill(bill, in: context); onRemove() },
+                                  onDelete: {
+                                      // >>> CHANGE-[2026-08-17 11:31:00]-[临时对象失效崩溃] 开始
+                                      // 原因：bill 为已保存态真实实例，但 onRemove() 触发外层重渲染可能释放引用。回退：改回 SafeDelete.bill(bill, in: context)
+                                      SafeDelete.billByID(bill.persistentModelID, in: context); onRemove()
+                                      // <<< CHANGE-[2026-08-17 11:31:00]-[临时对象失效崩溃] 结束
+                                  },
                                   onCopy: { copySummary(bill.summaryText) },
                                   onEdit: { editTargetID = bill.persistentModelID })
                 }
@@ -784,7 +795,12 @@ struct TodoRowCard: View {
                     EmptyView()
                 } content: {
                     TodoSavedCard(reminder: r,
-                                  onDelete: { SafeDelete.reminder(r, in: context); onRemove() },
+                                  onDelete: {
+                                      // >>> CHANGE-[2026-08-17 11:31:30]-[临时对象失效崩溃] 开始
+                                      // 原因：r 为已保存态真实实例，onRemove() 触发外层重渲染可能释放引用。回退：改回 SafeDelete.reminder(r, in: context)
+                                      SafeDelete.reminderByID(r.persistentModelID, in: context); onRemove()
+                                      // <<< CHANGE-[2026-08-17 11:31:30]-[临时对象失效崩溃] 结束
+                                  },
                                   onCopy: { UIPasteboard.general.string = r.title },
                                   onEdit: { editTargetID = r.persistentModelID })
                 }
@@ -933,13 +949,17 @@ struct FoodRowCard: View {
                 savedCard(f)
             }
         }
-        // EditFoodView 自包 NavigationStack，sheet 内点「保存/取消/删除」自己 dismiss；
-        // .sheet(item:) 在用户关闭时自动把 editTargetID 置 nil。
+        // 编辑食物统一走 EditFoodSheet wrapper（自包 NavigationStack 提供 toolbar context），
+        // sheet 内点「保存/取消/删除」自己 dismiss；.sheet(item:) 在用户关闭时自动把 editTargetID 置 nil。
+        // >>> CHANGE-[2026-08-17 17:25:00]-[编辑食物统一EditFoodSheet] 开始
+        // 原因: 原先 EditFoodView 直出无导航栏（该入口漏包 NavigationStack），看不到取消/保存按钮。
+        // 回退: 改回 EditFoodView(entry: f)。
         .sheet(item: $editTargetID) { id in
             if let f = context.model(for: id) as? FoodEntry {
-                EditFoodView(entry: f)
+                EditFoodSheet(entry: f)
             }
         }
+        // <<< CHANGE-[2026-08-17 17:25:00]-[编辑食物统一EditFoodSheet] 结束
     }
 
     private var pendingCard: some View {
@@ -990,7 +1010,12 @@ struct FoodRowCard: View {
             EmptyView()
         } content: {
             FoodSavedCard(food: f,
-                          onDelete: { SafeDelete.food(f, in: context); onRemove() },
+                          onDelete: {
+                              // >>> CHANGE-[2026-08-17 11:32:00]-[临时对象失效崩溃] 开始
+                              // 原因：f 为已保存态真实实例，onRemove() 触发外层重渲染可能释放引用。回退：改回 SafeDelete.food(f, in: context)
+                              SafeDelete.foodByID(f.persistentModelID, in: context); onRemove()
+                              // <<< CHANGE-[2026-08-17 11:32:00]-[临时对象失效崩溃] 结束
+                          },
                           onCopy: { UIPasteboard.general.string = f.name },
                           onEdit: { editTargetID = f.persistentModelID })
         }
@@ -1160,7 +1185,12 @@ struct HealthRowCard: View {
                     EmptyView()
                 } content: {
                     HealthSavedCard(health: h,
-                                    onDelete: { SafeDelete.health(h, in: context); onRemove() },
+                                    onDelete: {
+                                        // >>> CHANGE-[2026-08-17 11:32:30]-[临时对象失效崩溃] 开始
+                                        // 原因：h 为已保存态真实实例，onRemove() 触发外层重渲染可能释放引用。回退：改回 SafeDelete.health(h, in: context)
+                                        SafeDelete.healthByID(h.persistentModelID, in: context); onRemove()
+                                        // <<< CHANGE-[2026-08-17 11:32:30]-[临时对象失效崩溃] 结束
+                                    },
                                     onCopy: { UIPasteboard.general.string = "\(h.metric) \(h.value)\(h.unit)" },
                                     onEdit: { editTargetID = h.persistentModelID })
                 }

@@ -732,7 +732,10 @@ struct ChatView: View {
                     // 【C】SafeDelete.chatMessage 内部用 DispatchQueue.main.async 标记 syncDeleted，
                     // 必须把 fetchMessages() 也排到同一 main 队列之后，否则当前栈里同步 fetch
                     // 会读回尚未标记的删除消息，导致「删了没反应 / 时间戳残留」。
-                    SafeDelete.chatMessage(m, in: context)
+                    // >>> CHANGE-[2026-08-17 11:33:00]-[临时对象失效崩溃] 开始
+                    // 原因：m 来自消息数组，删除后紧接 fetchMessages() 重 fetch 可能释放引用。回退：改回 SafeDelete.chatMessage(m, in: context)
+                    SafeDelete.chatMessageByID(m.persistentModelID, in: context)
+                    // <<< CHANGE-[2026-08-17 11:33:00]-[临时对象失效崩溃] 结束
                     DispatchQueue.main.async { fetchMessages() }
                 },
                 onEnterMultiSelect: { enterMessageMultiSelect(m.persistentModelID) }
@@ -848,8 +851,11 @@ struct ChatView: View {
                     Label("复制", systemImage: "doc.on.doc")
                 }
                 Button(role: .destructive) {
-                    SafeDelete.chatMessage(message, in: context)
+                    // >>> CHANGE-[2026-08-17 11:33:30]-[临时对象失效崩溃] 开始
+                    // 原因：message 来自消息数组，删除后紧接 fetchMessages 重 fetch 可能释放引用。回退：改回 SafeDelete.chatMessage(message, in: context)
+                    SafeDelete.chatMessageByID(message.persistentModelID, in: context)
                     fetchMessages()
+                    // <<< CHANGE-[2026-08-17 11:33:30]-[临时对象失效崩溃] 结束
                 } label: {
                     Label("删除", systemImage: "trash")
                 }
@@ -1056,8 +1062,11 @@ struct ChatView: View {
                         Label("复制", systemImage: "doc.on.doc")
                     }
                     Button(role: .destructive) {
-                        SafeDelete.chatMessage(m, in: context)
+                        // >>> CHANGE-[2026-08-17 11:34:00]-[临时对象失效崩溃] 开始
+                        // 原因：m 来自消息数组，删除后紧接 fetchMessages 重 fetch 可能释放引用。回退：改回 SafeDelete.chatMessage(m, in: context)
+                        SafeDelete.chatMessageByID(m.persistentModelID, in: context)
                         fetchMessages()
+                        // <<< CHANGE-[2026-08-17 11:34:00]-[临时对象失效崩溃] 结束
                     } label: {
                         Label("删除", systemImage: "trash")
                     }
@@ -3581,7 +3590,11 @@ struct ChatView: View {
                 case "delete":
                     guard ChatView.hasExplicitDeleteIntent(originalText) else { fallthrough }
                     if let target = findFoodTarget(targetTitle: food.targetTitle, fallbackToLatest: false) {
-                        SafeDelete.food(target, in: context)
+                        // >>> CHANGE-[2026-08-17 11:21:00]-[临时对象失效崩溃] 开始
+                        // 原因：findFoodTarget 返回的活对象在 SafeDelete 的延时闭包中可能已失效（被 @Query 重渲染释放引用）。
+                        // 回退：改回 SafeDelete.food(target, in: context)
+                        SafeDelete.foodByID(target.persistentModelID, in: context)
+                        // <<< CHANGE-[2026-08-17 11:21:00]-[临时对象失效崩溃] 结束
                         summary.append("🗑 已删除「\(foodName)」")
                     } else {
                         summary.append("我没找到你想删除的饮食记录，能再描述一下吗？")
@@ -3641,7 +3654,11 @@ struct ChatView: View {
                 case "delete":
                     guard ChatView.hasExplicitDeleteIntent(originalText) else { fallthrough }
                     if let target = findBillTarget(targetTitle: bill.targetTitle, fallbackToLatest: false) {
-                        SafeDelete.bill(target, in: context)
+                        // >>> CHANGE-[2026-08-17 11:21:30]-[临时对象失效崩溃] 开始
+                        // 原因：同 ChatView 饮食删除，避免延时闭包访问失效活对象。
+                        // 回退：改回 SafeDelete.bill(target, in: context)
+                        SafeDelete.billByID(target.persistentModelID, in: context)
+                        // <<< CHANGE-[2026-08-17 11:21:30]-[临时对象失效崩溃] 结束
                         summary.append("🗑 已删除「\(merchant)」")
                     } else {
                         summary.append("我没找到你想删除的账单，能再描述一下吗？")
@@ -3704,7 +3721,11 @@ struct ChatView: View {
             case "delete":
                 guard ChatView.hasExplicitDeleteIntent(originalText) else { fallthrough }
                 if let target = findReminderTarget(targetTitle: todo.targetTitle, fallbackToLatest: false) {
-                    SafeDelete.reminder(target, in: context)
+                    // >>> CHANGE-[2026-08-17 11:22:00]-[临时对象失效崩溃] 开始
+                    // 原因：同 ChatView 饮食/账单删除，避免延时闭包访问失效活对象。
+                    // 回退：改回 SafeDelete.reminder(target, in: context)
+                    SafeDelete.reminderByID(target.persistentModelID, in: context)
+                    // <<< CHANGE-[2026-08-17 11:22:00]-[临时对象失效崩溃] 结束
                     summary.append("🗑 已删除「\(target.title)」")
                 } else {
                     summary.append("我没找到你想删除的提醒，能再描述一下吗？")

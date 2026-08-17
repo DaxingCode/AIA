@@ -50,7 +50,12 @@ enum BillDeduplicator {
             return 0
         }
 
-        for b in toDelete { SafeDelete.bill(b, in: context) }
+        // >>> CHANGE-[2026-08-17 11:20:00]-[临时对象失效崩溃] 开始
+        // 原因：toDelete 里来自 fetFetch 的活对象在异步/列表刷新窗口下可能被释放或失效，
+        //       直接传活对象进 SafeDelete.bill 的 DispatchQueue.main.async 闭包会在下一帧访问已失效对象 → fatalError。
+        // 回退：恢复为 for b in toDelete { SafeDelete.bill(b, in: context) } 即可。
+        for b in toDelete { SafeDelete.billByID(b.persistentModelID, in: context) }
+        // <<< CHANGE-[2026-08-17 11:20:00]-[临时对象失效崩溃] 结束
         // 自动入库的防抖同步会由 autoSave 触发，此处额外触发确保去重结果尽快推送
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
         onProgress?(toDelete.count)

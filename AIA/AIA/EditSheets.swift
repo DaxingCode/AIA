@@ -183,12 +183,18 @@ struct EditFoodView: View {
     }
 
 
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                AIATheme.fillSoft.ignoresSafeArea()
-                ScrollView {
-                    VStack(spacing: 16) {
+    // MARK: - 主体内容（拆分自 body，降低类型推导深度）
+    // >>> CHANGE-[2026-08-17 20:15:00]-[body 拆分降类型推导深度] 开始
+    // 原因: body 主表达式原先内嵌 ZStack+ScrollView+6 个修饰链，触发 Swift 编译器
+    //       「unable to type-check this expression in reasonable time」
+    //       （249 行 toolbar Button 处的连锁报错，实为整个 body 表达式深度超限）。
+    //       把 ZStack 内容抽成 contentStack，body 只剩一层修饰链。
+    // 回退: 把 contentStack 展开回原 ZStack { ... } 整段即可。
+    private var contentStack: some View {
+        ZStack {
+            AIATheme.fillSoft.ignoresSafeArea()
+            ScrollView {
+                VStack(spacing: 16) {
                         nameCard
                         infoCard
                         weightCard
@@ -200,18 +206,33 @@ struct EditFoodView: View {
                     .padding(.vertical, 12)
                 }
                 .scrollDismissesKeyboard(.immediately)
-                // >>> CHANGE-[2026-08-17 15:00:00]-[编辑页大图改ZStack overlay] 开始
-                // 原因: fullScreenCover 挂在 NavigationStack 上，present 首帧易撞项目已知 NavigationStack 多轮重算断言，
-                //       cover 被系统强制 dismiss，表现为点小图白屏后自动回编辑页。改用 ZStack 内条件渲染绕开系统转场。
-                // 回退: 删除此 if 块，恢复上面注释掉的 fullScreenCover(isPresented: $showFullImage) 写法即可
-                if let selectedImage {
-                    FullImageView(image: selectedImage, onDismiss: { self.selectedImage = nil })
-                        .ignoresSafeArea()
-                        .zIndex(100)
-                        .transition(.opacity)
-                }
-                // <<< CHANGE-[2026-08-17 15:00:00]-[编辑页大图改ZStack overlay] 结束
             }
+    }
+    // <<< CHANGE-[2026-08-17 20:15:00]-[body 拆分降类型推导深度] 结束
+
+    var body: some View {
+        // >>> CHANGE-[2026-08-17 16:40:00]-[编辑页去掉内部NavigationStack] 开始
+        // 原因: sheet 内自建 NavigationStack + 条件 toolbar 首帧多轮重算，触发项目已知
+        //       _NavigationRequestObserver 断言导致主线程卡死（页面渲染完成但"动不了"）。
+        //       参照 EditTodoView+EditTodoSheet 已验证模式（2026-07-24 注释）：
+        //       NavigationStack 移到 sheet 入口包一层。
+        // 回退: 恢复 NavigationStack { 包裹，并把 RecordsViews.swift 的 sheet 入口改回直出 EditFoodView。
+        contentStack
+            // >>> CHANGE-[2026-08-17 21:10:00]-[食物编辑大图改全屏fullScreenCover] 开始
+            // 原因: 用户要求编辑食物进大图=像聊天页那样全屏新页面。原 .overlay 浮层不是独立全屏容器，
+            //       .statusBarHidden(true) 不生效（状态栏白胶囊仍在），且顶部"关闭/保存"被编辑页导航栏区域吞成色块。
+            //       现 body 已拆 contentStack（20:15 解决 type-check）、点击时已传已加载 UIImage（11:20 解决白屏），
+            //       fullScreenCover 两条历史坑均已排除，故改回与聊天页一致的 fullScreenCover。
+            // 回退: 恢复 .overlay(alignment: .center) { if let selectedImage { ... } } 整段即可。
+            .fullScreenCover(isPresented: Binding(
+                get: { selectedImage != nil },
+                set: { if !$0 { selectedImage = nil } }
+            )) {
+                if let img = selectedImage {
+                    FullImageView(image: img, onDismiss: { selectedImage = nil })
+                }
+            }
+            // <<< CHANGE-[2026-08-17 21:10:00]-[食物编辑大图改全屏fullScreenCover] 结束
             .navigationTitle("编辑食物")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showImagePicker) {
@@ -234,16 +255,25 @@ struct EditFoodView: View {
             // 原因: 大图改成 ZStack 条件渲染后，NavigationStack 顶部"取消/保存"仍浮在大图上方，看大图时应隐藏。
             // 回退: 去掉外层 if selectedImage == nil 包裹，恢复两个 ToolbarItem 直接并列即可。
             .toolbar {
-                if selectedImage == nil {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("取消") { dismiss() }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("保存") { save() }
-                            .font(AIATheme.Font.callout.weight(.semibold))
-                            .foregroundStyle(AIATheme.blue)
-                    }
+                // >>> CHANGE-[2026-08-17 16:40:00]-[toolbar稳定化] 开始
+                // 原因: 条件 if selectedImage == nil 让 NavigationStack 首帧反复重建导航栏，
+                //       加剧 _NavigationRequestObserver 多轮重算卡死。改为结构恒定的两个 ToolbarItem，
+                //       看大图时用 opacity+disabled 隐藏，行为与原条件渲染一致。
+                // 回退: 恢复 if selectedImage == nil 条件包裹即可。
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                        .opacity(selectedImage == nil ? 1 : 0)
+                        .disabled(selectedImage != nil)
+                        .accessibilityHidden(selectedImage != nil)
                 }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") { save() }
+                        .font(AIATheme.Font.callout.weight(.semibold))
+                        .foregroundStyle(selectedImage == nil ? AIATheme.blue : .clear)
+                        .disabled(selectedImage != nil)
+                        .accessibilityHidden(selectedImage != nil)
+                }
+                // <<< CHANGE-[2026-08-17 16:40:00]-[toolbar稳定化] 结束
             }
             // <<< CHANGE-[2026-08-17 16:05:00]-[看大图时隐藏编辑页顶部按钮] 结束
             .alert("删除食物记录", isPresented: $showDeleteConfirm) {
@@ -310,7 +340,7 @@ struct EditFoodView: View {
                 searchTask?.cancel()
                 searchTask = nil
             }
-        }
+        // <<< CHANGE-[2026-08-17 16:40:00]-[编辑页去掉内部NavigationStack] 结束
     }
 
     // MARK: - 卡片
@@ -3511,3 +3541,24 @@ struct EditTodoSheet: View {
         }
     }
 }
+
+/// EditFoodView 的 sheet 包装：所有 sheet 入口必须用本 wrapper（自身包 NavigationStack 提供 toolbar context）。
+/// EditFoodView 自身不带 NavigationStack 包装，**只**通过本 wrapper 在 sheet 模式下被调用（与 EditTodoSheet 同模式）。
+// >>> CHANGE-[2026-08-17 17:25:00]-[编辑食物统一EditFoodSheet] 开始
+// 原因: 曾只有一个入口(RecordsViews)包 NavigationStack，其余三个(ResultRowCard/AllRecordsView/FoodDetailView)漏包，
+//      导致这些入口进来的编辑页没有导航栏、看不到「取消/保存」按钮。统一为 wrapper 后不再易漏。
+// 回退: 删除本 struct，并把各入口恢复为直接调 EditFoodView(entry:)。
+struct EditFoodSheet: View {
+    let entry: FoodEntry
+
+    init(entry: FoodEntry) {
+        self.entry = entry
+    }
+
+    var body: some View {
+        NavigationStack {
+            EditFoodView(entry: entry)
+        }
+    }
+}
+// <<< CHANGE-[2026-08-17 17:25:00]-[编辑食物统一EditFoodSheet] 结束

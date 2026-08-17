@@ -1116,49 +1116,106 @@ struct RecognizeService {
                let value = Double(ns.substring(with: m.range(at: 1))) {
                 let unitRange = m.range(at: 2)
                 let unit = unitRange.location != NSNotFound ? ns.substring(with: unitRange).lowercased() : ""
-                if unit.contains("千") || unit.contains("kcal") || unit.contains("大卡") {
+                // 注意：「千焦」含「千」但它是 kJ，必须换算；只有「千卡」才是 kcal 可直接返回。
+                if unit.contains("千卡") || unit.contains("kcal") || unit.contains("大卡") {
                     return value
                 }
                 // 双单位写法（如 "1760kJ(420kcal)"）：同行若有更直接的 kcal，优先用它（省换算误差）。
                 if let kcal = extractValue(line, units: ["kcal", "千卡", "大卡"]), kcal > 0 {
                     return kcal
                 }
-                // 默认按 kJ 处理（国标营养成分表常见）
+                // 其余（含「千焦」/kJ/无单位/K）一律按 kJ 换算成 kcal（国标营养成分表常见）
                 return value / 4.184
             }
         }
         return nil
     }
 
-    /// 从营养成分表行中提取三大营养素（每 100g，克）。
-    private static func parseMacros(from lines: [String]) -> (protein: Double?, carbs: Double?, fat: Double?) {
+    /// 从营养成分表行中提取宏量营养素与扩展项（每 100g）。
+    /// 返回：蛋白质/碳水/脂肪（克）+ 糖/钠/膳食纤维（糖与碳水同单位克；钠毫克）。
+    private static func parseMacros(from lines: [String]) -> (protein: Double?, carbs: Double?, fat: Double?, sugar: Double?, sodium: Double?, fiber: Double?) {
+        // >>> CHANGE-[2026-08-17 18:40:00]-营养成分表文本解析按关键字后取值 开始
+        // 原因: 原 extract() 抓整行第一个「数字+单位」，遇到「碳水化合物 32.6g 糖 13.7g」
+        //       这种两列挤一行的 OCR 结果时，糖/钠会抓到碳水的 32.6，导致糖/钠错值或漏 0。
+        //       现改成每个营养素只取「自己关键字后面」的第一个数字，错位不再互相污染。
+        // 回退: 删除本 CHANGE 段，恢复 18:00:00 版 parseMacros 即可。
         var protein: Double?
         var carbs: Double?
         var fat: Double?
+        var sugar: Double?
+        var sodium: Double?
+        var fiber: Double?
 
-        func extract(_ line: String, keywords: [String]) -> Double? {
+        // 极端形近兜底：含「钠/钙/盐/氯化」的行即便 OCR 蹭到营养关键词也不应计入宏量。
+        let noiseLine: Set<String> = ["钙", "盐", "氯化", "ca", "sodium", "calcium", "nr", "nrv"]
+
+        /// 取「关键字后面的第一个带单位数值」。
+        func valueAfterKeyword(_ line: String, keywordsRegex: String, unitsRegex: String) -> (value: Double, unit: String)? {
             let lowered = line.lowercased()
-            guard keywords.contains(where: { lowered.contains($0) }) else { return nil }
-            // 极端形近兜底：含「钠/钙/盐/氯化」的行即便 OCR 蹭到营养关键词也不应计入宏量。
-            let noiseLine = ["钠", "钙", "盐", "氯化", "钠", "na", "ca", "sodium", "calcium", "nr", "nrv"]
             guard !noiseLine.contains(where: { lowered.contains($0) }) else { return nil }
-            // 匹配行中第一个 "数字 g"，如 "蛋白质 3.1g" / "3.1 克"
-            let pattern = #"(\d+(?:\.\d+)?)\s*(g|克|g/100g)"#
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
+            let pattern = "(?:" + keywordsRegex + #")\D*?(\d+(?:\.\d+)?)\s*("# + unitsRegex + #")"#
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
             let ns = line as NSString
-            if let m = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) {
-                return Double(ns.substring(with: m.range(at: 1)))
+            if let m = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+               let v = Double(ns.substring(with: m.range(at: 1))) {
+                let unitRange = m.range(at: 2)
+                let unit = unitRange.location != NSNotFound ? ns.substring(with: unitRange).lowercased() : ""
+                return (v, unit)
             }
             return nil
         }
 
         for line in lines {
-            if protein == nil, let v = extract(line, keywords: ["蛋白质", "protein"]) { protein = v }
-            if fat == nil, let v = extract(line, keywords: ["脂肪", "fat"]) { fat = v }
+            if protein == nil,
+               let r = valueAfterKeyword(line,
+                                         keywordsRegex: "蛋白质|protein",
+                                         unitsRegex: "g|克") {
+                protein = r.value
+            }
+            // 脂肪子项（饱和/反式/单不饱和/多不饱和/糖醇）不能覆盖主脂肪。
+            if fat == nil,
+               !line.contains("饱和"), !line.contains("反式"), !line.contains("糖醇"),
+               let r = valueAfterKeyword(line,
+                                         keywordsRegex: "脂肪|fat",
+                                         unitsRegex: "g|克") {
+                fat = r.value
+            }
             // 碳水别名：国标常写「糖类」，OCR 易把「碳水化合物」误识成「碳水化台物/碳水化食物」。
-            if carbs == nil, let v = extract(line, keywords: ["碳水化合物", "碳水化台物", "碳水化食物", "糖类", "碳水", "carbohydrate", "carbs"]) { carbs = v }
+            if carbs == nil,
+               let r = valueAfterKeyword(line,
+                                         keywordsRegex: "碳水化合物|碳水化台物|碳水化食物|糖类|碳水|carbohydrate|carbs",
+                                         unitsRegex: "g|克") {
+                carbs = r.value
+            }
+            // 糖：国标常列「-糖」作为碳水子集；「(?<![水化])糖(?![化物类])」避免命中「碳水化合物/糖类」里的糖字。
+            if sugar == nil,
+               !line.contains("无糖"), !line.contains("含糖"), !line.contains("糖醇"),
+               let r = valueAfterKeyword(line,
+                                         keywordsRegex: "(?<![水化])糖(?![化物类])|sugar",
+                                         unitsRegex: "g|克") {
+                sugar = r.value
+            }
+            // 膳食纤维
+            if fiber == nil,
+               let r = valueAfterKeyword(line,
+                                         keywordsRegex: "膳食纤维|纤维|dietary fiber|fiber",
+                                         unitsRegex: "g|克") {
+                fiber = r.value
+            }
+            // 钠（毫克）；命中 mg/毫克 直接采用，命中 g/克 换算成毫克。
+            if sodium == nil,
+               let r = valueAfterKeyword(line,
+                                         keywordsRegex: "钠|sodium|na",
+                                         unitsRegex: "mg|毫克|g|克") {
+                if r.unit.contains("mg") || r.unit.contains("毫克") {
+                    sodium = r.value
+                } else {
+                    sodium = r.value * 1000
+                }
+            }
         }
-        return (protein, carbs, fat)
+        return (protein, carbs, fat, sugar, sodium, fiber)
+        // <<< CHANGE-[2026-08-17 18:40:00]-营养成分表文本解析按关键字后取值 结束
     }
 
     /// 从产品信息行提取食物名称（文本版）。
@@ -1192,10 +1249,20 @@ struct RecognizeService {
                      "产品说明", "使用方法", "食用方法", "贮藏方法", "储藏方法", "储存条件",
                      "标准", "编码", "条码", "条形码", "许可证", "sc", "qs", "执行标准", "gb", "gb/t",
                      "nr", "nrv", "营养参考值", "参考值"]
+        // 配料拆分行特征词：一行里出现这些词，说明它是被 OCR 拆断的「配料：…」续行，不是食品名。
+        let ingredientFragments = ["磷脂", "脂肪酸酯", "食用香料", "白砂糖", "麦芽糖浆", "植物油",
+                                    "复合调味料", "单，双", "单双", "甘油", "香精", "乳化剂", "水分保持剂",
+                                    "食用盐", "酿造", "果葡", "山梨", "卡拉胶", "明胶", "淀粉", "奶粉",
+                                    "植物油", "精炼", "葡萄糖", "果葡糖浆", "增稠剂", "防腐剂", "抗氧化剂"]
+        // 食用说明动词：出现 ≥2 个即视为「食用方法/方法说明」行，跳过（如「拿出/加入/拌匀/即食」）。
+        let cookingVerbs = ["拿出", "加入", "拌匀", "即食", "根据喜好", "冷藏", "冷冻", "加热", "搅拌",
+                             "倒入", "浸泡", "煮沸", "开封", "开袋", "撕开", "摇匀", "冲泡", "微波", "蒸", "煮"]
         for i in (0..<tableIdx).reversed() {
             let line = lines[i]
             if line.count < 4 || line.count > 40 { continue }
             if noise.contains(where: { line.localizedCaseInsensitiveContains($0) }) { continue }
+            if ingredientFragments.contains(where: { line.localizedCaseInsensitiveContains($0) }) { continue }
+            if cookingVerbs.filter({ line.localizedCaseInsensitiveContains($0) }).count >= 2 { continue }
             if line.range(of: #"^\d"#, options: .regularExpression) != nil { continue }
             return line
         }
@@ -1210,7 +1277,8 @@ struct RecognizeService {
         guard hasNutritionTable(in: lines) else { return nil }
         guard let energyKcal = parseEnergy(from: lines) else { return nil }
         let macros = parseMacros(from: lines)
-        guard macros.protein != nil || macros.fat != nil || macros.carbs != nil else { return nil }
+        guard macros.protein != nil || macros.fat != nil || macros.carbs != nil ||
+              macros.sugar != nil || macros.sodium != nil else { return nil }
 
         return makeNutritionFoodResult(name: extractProductName(from: lines),
                                        energyKcal: energyKcal,
@@ -1266,13 +1334,21 @@ struct RecognizeService {
         let leftItems = bodyItems.filter { abs($0.box.midX - valueCenter) > abs($0.box.midX - labelCenter) }
             .sorted { $0.box.midY > $1.box.midY }
 
-        // 分别把左右栏聚合成行（同 y 坐标带内的文本拼成一行）。
+        // >>> CHANGE-[2026-08-17 20:30:00]-营养表左栏按x+y合并行列 开始
+        // 原因: 旧 groupRows 只按 y 距离近就合并，导致「碳水化合物」与缩进子项「-糖」被拼成一行，
+        //       合并行去右栏找最近 y 时命中「饱和脂肪 9.8g」，碳水错填 9.8、糖被吞、钠也因行距过大被跳过。
+        //       现改为 y 近且 x 重心差足够小（同一列对齐）才合并，缩进子项单独成行，不再吞掉主项数值。
+        // 回退: 删除本 CHANGE 段，恢复上方旧 groupRows 即可。
+
+        // 分别把左右栏聚合成行（同 y 坐标带、且 x 重心接近的文本拼成一行）。
         let rowThreshold: CGFloat = 0.05
         func groupRows(_ items: [NutritionItem]) -> [(text: String, midY: CGFloat)] {
             var rows: [(text: String, midY: CGFloat)] = []
             var currentRow: [NutritionItem] = []
             for item in items {
-                if let last = currentRow.last, abs(item.box.midY - last.box.midY) > rowThreshold {
+                if let last = currentRow.last,
+                   (abs(item.box.midY - last.box.midY) > rowThreshold ||
+                    abs(item.box.midX - last.box.midX) > 0.06) {
                     let text = currentRow.sorted { $0.box.midX < $1.box.midX }.map { $0.text }.joined(separator: " ")
                     rows.append((text, currentRow.reduce(0) { $0 + $1.box.midY } / CGFloat(currentRow.count)))
                     currentRow = []
@@ -1285,40 +1361,156 @@ struct RecognizeService {
             }
             return rows
         }
+        // <<< CHANGE-[2026-08-17 20:30:00]-营养表左栏按x+y合并行列 结束
         let leftRows = groupRows(leftItems)
-        let rightRows = groupRows(rightItems)
 
-        // 按左栏标签找到最近的右栏数值行并解析。
+        // >>> CHANGE-[2026-08-17 18:00:00]-营养表兼容按列OCR与兜底 开始
+        // 原因: 14:00:00 版一一配对加了 rowThreshold，且左栏未排除子项（饱和脂肪/反式脂肪酸），
+        //       对 Vision 按列输出的 OCR 直接丢失全部宏量（protein/carbs/fat/sugar/sodium 全 nil→显示 0）。
+        //       现改成「左右按 y 排序后顺序一一对应」兼容按列/按行两种输出，并恢复 gramOrderSorted 兜底，
+        //       任何情况下都不会让宏量全空。
+        // 回退: 删除本 CHANGE 段，恢复 14:00:00 版本即可。
+
+        let isPercentRow: (NutritionItem) -> Bool = { item in
+            item.text.contains("%") ||
+            item.text.localizedCaseInsensitiveContains("nrv") ||
+            item.text.localizedCaseInsensitiveContains("参考值")
+        }
+
+        // 左栏保留所有行（含子项），用于判断右栏数值到底属于哪一行语义。
+        let allLeftRows = groupRows(leftItems)
+
+        // >>> CHANGE-[2026-08-17 20:35:00]-右栏数值排除干扰行 开始
+        // 原因: 右栏过滤只查 NRV%/表头/数值，但「净含量 60克」「生产日期」等含「克/克」的干扰行
+        //       也会被 extractValue 命中混入右栏，挤占真实含量行位置导致配对错位。
+        //       现加 nonNutritionLines 排除词（净含量/生产日期/保质期/地址/电话/产地/许可证等）。
+        // 回退: 删除本 CHANGE 段，恢复上方旧 rightValueRows 过滤即可。
+        let rightValueRows = groupRows(
+            rightItems.filter { item in
+                !isPercentRow(item) &&
+                !item.text.localizedCaseInsensitiveContains("每100") &&
+                !item.text.localizedCaseInsensitiveContains("项目") &&
+                !["净含量", "生产日期", "保质期", "产品标准", "产品规格", "规格",
+                  "标准代号", "许可证", "食品生产", "sc", "gb", "贮藏", "贮存",
+                  "储存", "保存", "地址", "电话", "产地"].contains(where: { kw in item.text.localizedCaseInsensitiveContains(kw) }) &&
+                extractValue(item.text, units: Array(valueUnits)) != nil
+            }
+        )
+        // <<< CHANGE-[2026-08-17 20:35:00]-右栏数值排除干扰行 结束
+
         var energyKcal: Double?
         var protein: Double?
         var fat: Double?
         var carbs: Double?
-        var gramOrder: [Double] = []
+        var sugar: Double?
+        var sodium: Double?
+        var fiber: Double?
 
-        for lRow in leftRows {
-            guard let nearestR = rightRows.min(by: { abs($0.midY - lRow.midY) < abs($1.midY - lRow.midY) }) else { continue }
-            let lText = lRow.text
+        // >>> CHANGE-[2026-08-17 21:00:00]-营养成分表右栏数值找最近左栏行 开始
+        // 原因: 18:40:00 版「左栏找右栏」会先把靠前的左栏（如蛋白质）配上靠后的右栏数值（如13.7g），
+        //       因为 Vision 的 y 坐标不完全对齐，13.7g 可能比 18.9g 更靠近「蛋白质」的 midY；
+        //       同时右栏子项（饱和脂肪 9.8g / 反式脂肪酸 0g）没被过滤，继续被碳水、糖误配。
+        // 现改成「右栏数值找最近左栏行」：每个数值只归属一个左栏语义行；若最近左栏行是子项（饱和/反式/糖醇/胆固醇），
+        // 则该数值是子项值，直接跳过；主营养素行保留最近的一个候选值。
+        // 回退: 删除本 CHANGE 段，恢复 18:40:00 版即可。
+
+        // 收集每个主营养素的候选值（value, originalUnit, distance）
+        var candidates: [String: [(value: Double, unit: String, distance: CGFloat)]] = [:]
+
+        for rRow in rightValueRows {
+            guard let nearestLeft = allLeftRows.min(by: {
+                abs($0.midY - rRow.midY) < abs($1.midY - rRow.midY)
+            }) else { continue }
+
+            // 距离太大说明是孤立噪声，不要
+            guard abs(nearestLeft.midY - rRow.midY) <= rowThreshold * 1.5 else { continue }
+
+            let lText = nearestLeft.text
+
+            // 跳过表头行
+            let isHeader = lText.localizedCaseInsensitiveContains("项目") ||
+                           lText.localizedCaseInsensitiveContains("每100") ||
+                           lText.localizedCaseInsensitiveContains("营养成分") ||
+                           lText.localizedCaseInsensitiveContains("nutrition") ||
+                           ((lText.localizedCaseInsensitiveContains("千焦") || lText.localizedCaseInsensitiveContains("kJ")) &&
+                            !lText.contains(where: { $0.isNumber }))
+            // 跳过子项行：这些值不是我们要的三大营养素
+            let isSub = lText.localizedCaseInsensitiveContains("饱和") ||
+                        lText.localizedCaseInsensitiveContains("反式") ||
+                        lText.localizedCaseInsensitiveContains("糖醇") ||
+                        lText.localizedCaseInsensitiveContains("胆固醇")
+            guard !isHeader, !isSub else { continue }
+
+            // 判断这个左栏行属于哪种主营养素，把数值归类
             if lText.localizedCaseInsensitiveContains("能量") || lText.localizedCaseInsensitiveContains("热量") {
-                if let kcal = extractValue(nearestR.text, units: ["kcal", "千卡", "大卡"]) { energyKcal = kcal }
-                else if let kj = extractValue(nearestR.text, units: ["kJ", "千焦", "KJ"]) { energyKcal = kj / 4.184 }
+                if let kcal = extractValue(rRow.text, units: ["kcal", "千卡", "大卡"]) {
+                    candidates["energy", default: []].append((kcal, "kcal", abs(nearestLeft.midY - rRow.midY)))
+                } else if let kj = extractValue(rRow.text, units: ["kJ", "千焦", "KJ", "kj"]) {
+                    candidates["energy", default: []].append((kj / 4.184, "kJ", abs(nearestLeft.midY - rRow.midY)))
+                }
             } else if lText.localizedCaseInsensitiveContains("蛋白质") {
-                if let v = extractValue(nearestR.text, units: ["g", "克"]) { protein = v }
+                if let v = extractValue(rRow.text, units: ["g", "克"]) {
+                    candidates["protein", default: []].append((v, "g", abs(nearestLeft.midY - rRow.midY)))
+                }
             } else if lText.localizedCaseInsensitiveContains("脂肪") {
-                if let v = extractValue(nearestR.text, units: ["g", "克"]) { fat = v }
-            } else if lText.localizedCaseInsensitiveContains("碳水化合物") || lText.localizedCaseInsensitiveContains("碳水") {
-                if let v = extractValue(nearestR.text, units: ["g", "克"]) { carbs = v }
+                if let v = extractValue(rRow.text, units: ["g", "克"]) {
+                    candidates["fat", default: []].append((v, "g", abs(nearestLeft.midY - rRow.midY)))
+                }
+            } else if lText.localizedCaseInsensitiveContains("碳水化合物") ||
+                        lText.localizedCaseInsensitiveContains("碳水") ||
+                        lText.localizedCaseInsensitiveContains("糖类") {
+                if let v = extractValue(rRow.text, units: ["g", "克"]) {
+                    candidates["carbs", default: []].append((v, "g", abs(nearestLeft.midY - rRow.midY)))
+                }
+            } else if lText.localizedCaseInsensitiveContains("糖") &&
+                        !lText.localizedCaseInsensitiveContains("无糖") &&
+                        !lText.localizedCaseInsensitiveContains("含糖") &&
+                        !lText.localizedCaseInsensitiveContains("糖醇") {
+                if let v = extractValue(rRow.text, units: ["g", "克"]) {
+                    candidates["sugar", default: []].append((v, "g", abs(nearestLeft.midY - rRow.midY)))
+                }
+            } else if lText.localizedCaseInsensitiveContains("膳食纤维") ||
+                        lText.localizedCaseInsensitiveContains("纤维") {
+                if let v = extractValue(rRow.text, units: ["g", "克"]) {
+                    candidates["fiber", default: []].append((v, "g", abs(nearestLeft.midY - rRow.midY)))
+                }
+            } else if lText.localizedCaseInsensitiveContains("钠") {
+                if let v = extractValue(rRow.text, units: ["mg", "毫克"]) {
+                    candidates["sodium", default: []].append((v, "mg", abs(nearestLeft.midY - rRow.midY)))
+                } else if let v = extractValue(rRow.text, units: ["g", "克"]) {
+                    candidates["sodium", default: []].append((v * 1000, "g", abs(nearestLeft.midY - rRow.midY)))
+                }
             }
         }
 
-        // 兜底：扫描所有数值行（不只 rightRows），按单位再补一遍（能量/宏量缺失时）。
-        // 关键：Vision 可能把「能量」行错分到左栏或单列输出，导致 rightRows 里没有能量行 → energyKcal 缺失。
-        // 这里扫全部 bodyItems，并让含「能量/热量」关键词的行直接走 parseEnergy 文本版逻辑，覆盖该场景。
-        // 注意：只把"非钠/钙/盐"行的 g 值纳入 gramOrder 兜底，避免钠（若误标成 g）占掉 protein 位置。
-        let nonMacroNoise: Set<String> = ["钠", "钙", "盐", "na", "ca", "sodium", "calcium", "nr", "nrv"]
-        let fallbackItems = bodyItems.filter { matchesValue($0.text) && !$0.text.contains("每100") }
+        // 对每个主营养素，取最近的一个候选值；能量优先 kcal（千卡）而非 kJ（千焦）
+        if let energyCandidates = candidates["energy"] {
+            if let kcalCandidate = energyCandidates.first(where: { $0.unit == "kcal" }) {
+                energyKcal = kcalCandidate.value
+            } else {
+                energyKcal = energyCandidates.min(by: { $0.distance < $1.distance })?.value
+            }
+        }
+        protein = candidates["protein"]?.min(by: { $0.distance < $1.distance })?.value
+        fat     = candidates["fat"]?.min(by: { $0.distance < $1.distance })?.value
+        carbs   = candidates["carbs"]?.min(by: { $0.distance < $1.distance })?.value
+        sugar   = candidates["sugar"]?.min(by: { $0.distance < $1.distance })?.value
+        fiber   = candidates["fiber"]?.min(by: { $0.distance < $1.distance })?.value
+        sodium  = candidates["sodium"]?.min(by: { $0.distance < $1.distance })?.value
+        // <<< CHANGE-[2026-08-17 21:00:00]-营养成分表右栏数值找最近左栏行 结束
+
+        // 兜底：扫描全部 bodyItems 中的含量数值，按 y 顺序补全缺失的宏量（恢复老逻辑 gramOrderSorted）。
+        let nonMacroNoise: Set<String> = ["钙", "盐", "氯化", "ca", "sodium", "calcium", "nr", "nrv"]
+        let nonNutritionLines: Set<String> = ["净含量", "生产日期", "保质期", "产品标准", "产品规格", "规格",
+                                              "标准代号", "许可证", "食品生产", "sc", "gb", "贮藏", "贮存",
+                                              "储存", "保存", "地址", "电话", "产地"]
+        let fallbackItems = bodyItems.filter {
+            matchesValue($0.text) && !isPercentRow($0) && !$0.text.contains("每100")
+        }
         for rRow in fallbackItems {
-            let isNoise = nonMacroNoise.contains { rRow.text.localizedCaseInsensitiveContains($0) }
-            let isEnergyRow = rRow.text.localizedCaseInsensitiveContains("能量") || rRow.text.localizedCaseInsensitiveContains("热量") || rRow.text.localizedCaseInsensitiveContains("energy")
+            let isEnergyRow = rRow.text.localizedCaseInsensitiveContains("能量") ||
+                              rRow.text.localizedCaseInsensitiveContains("热量") ||
+                              rRow.text.localizedCaseInsensitiveContains("energy")
             if energyKcal == nil, isEnergyRow,
                let kcal = parseEnergy(from: [rRow.text]) {
                 energyKcal = kcal
@@ -1329,27 +1521,45 @@ struct RecognizeService {
             if energyKcal == nil, let kj = extractValue(rRow.text, units: ["kJ", "千焦", "KJ", "kj"]) {
                 energyKcal = kj / 4.184
             }
-            if !isNoise, let v = extractValue(rRow.text, units: ["g", "克"]) {
-                gramOrder.append(v)
-            }
         }
+        let gramOrderSorted = fallbackItems
+            .compactMap { it -> (Double, CGFloat)? in
+                guard !nonNutritionLines.contains(where: { it.text.localizedCaseInsensitiveContains($0) }),
+                      !nonMacroNoise.contains(where: { it.text.localizedCaseInsensitiveContains($0) }),
+                      let v = extractValue(it.text, units: ["g", "克"]) else { return nil }
+                return (v, it.box.midY)
+            }
+            .sorted { $0.1 > $1.1 }
+            .map { $0.0 }
 
-        if protein == nil, gramOrder.count > 0 { protein = gramOrder[0] }
-        if fat == nil, gramOrder.count > 1     { fat = gramOrder[1] }
-        if carbs == nil, gramOrder.count > 2   { carbs = gramOrder[2] }
+        if protein == nil, gramOrderSorted.count > 0 { protein = gramOrderSorted[0] }
+        if fat == nil, gramOrderSorted.count > 1     { fat = gramOrderSorted[1] }
+        if carbs == nil, gramOrderSorted.count > 2   { carbs = gramOrderSorted[2] }
+
+        // 用文本解析再补一遍糖/钠/纤维等。
+        if let tr = localParseNutritionTable(text: fullText)?.food {
+            if energyKcal == nil { energyKcal = tr.calories }
+            if protein == nil     { protein = tr.protein }
+            if fat == nil         { fat = tr.fat }
+            if carbs == nil       { carbs = tr.carbs }
+            if sugar == nil       { sugar = tr.sugar }
+            if sodium == nil      { sodium = tr.sodium }
+            if fiber == nil       { fiber = tr.fiber }
+        }
 
         // 如果能量缺失但三大营养素都有，按 4/9/4 估算。
         if energyKcal == nil, let p = protein, let f = fat, let c = carbs {
             energyKcal = p * 4 + f * 9 + c * 4
         }
 
-        guard energyKcal != nil || !gramOrder.isEmpty else { return nil }
+        guard energyKcal != nil || protein != nil || fat != nil || carbs != nil else { return nil }
 
         // 食物名：优先从版面左栏显式标签取，否则文本兜底。
         let name = extractProductName(fromObservations: leftItems, fullText: fullText)
         return makeNutritionFoodResult(name: name,
                                        energyKcal: energyKcal ?? 0,
-                                       macros: (protein, carbs, fat))
+                                       macros: (protein, carbs, fat, sugar, sodium, fiber))
+        // <<< CHANGE-[2026-08-17 18:00:00]-营养表兼容按列OCR与兜底 结束
     }
 
     /// 从行文本中提取带单位的数值。
@@ -1379,7 +1589,7 @@ struct RecognizeService {
     /// 统一构造营养成分表识别结果。
     private static func makeNutritionFoodResult(name: String?,
                                                  energyKcal: Double,
-                                                 macros: (protein: Double?, carbs: Double?, fat: Double?)) -> RecognitionResult {
+                                                 macros: (protein: Double?, carbs: Double?, fat: Double?, sugar: Double?, sodium: Double?, fiber: Double?)) -> RecognitionResult {
         let foodName = (name?.trimmingCharacters(in: .whitespaces).isEmpty == false) ? name! : "包装食品"
         let payload = FoodPayload(
             name: foodName,
@@ -1387,6 +1597,9 @@ struct RecognizeService {
             protein: macros.protein,
             carbs: macros.carbs,
             fat: macros.fat,
+            fiber: macros.fiber,
+            sugar: macros.sugar,
+            sodium: macros.sodium,
             portion: "100克",
             meal: nil,
             action: "create",
@@ -1397,6 +1610,45 @@ struct RecognizeService {
                                   bill: nil, bills: nil, food: payload,
                                   todo: nil, health: nil)
     }
+
+    // >>> CHANGE-[2026-08-17 14:00:00]-营养表结果择优 开始
+    // 原因：版面解析与文本解析各有优势；版面解析错配时会丢字段，文本解析反而能读出糖/钠。
+    //       选「字段更多、能量与宏量更吻合」的结果，可自动纠错。
+    // 回退：删除本段，调用处改回 `layout ?? text` 即可。
+
+    /// 给营养成分表识别结果打分：fill=非空字段数，energyDiff=4/9/4公式与标称能量的差距。
+    private static func nutritionQuality(_ result: RecognitionResult?) -> (fill: Int, energyDiff: Double) {
+        guard let food = result?.food, let energy = food.calories else {
+            return (0, .greatestFiniteMagnitude)
+        }
+        let fill = [food.protein, food.carbs, food.fat,
+                    food.sugar, food.sodium, food.fiber].filter { $0 != nil }.count
+        let computed = (food.protein ?? 0) * 4
+                     + (food.fat ?? 0) * 9
+                     + (food.carbs ?? 0) * 4
+        return (fill, abs(computed - energy))
+    }
+
+    /// 在版面解析和文本解析之间选更可信的结果。
+    private static func chooseBetterNutrition(_ layout: RecognitionResult?,
+                                              _ text: RecognitionResult?) -> RecognitionResult? {
+        guard let layout = layout else { return text }
+        guard let text = text else { return layout }
+
+        let layoutHasMacro = layout.food?.protein != nil || layout.food?.carbs != nil || layout.food?.fat != nil
+        let textHasMacro   = text.food?.protein != nil || text.food?.carbs != nil || text.food?.fat != nil
+
+        // 版面解析只出了热量、没出宏量，但文本解析有宏量时，优先用文本。
+        if layout.food?.calories != nil && !layoutHasMacro && textHasMacro {
+            return text
+        }
+
+        let (fillL, diffL) = nutritionQuality(layout)
+        let (fillT, diffT) = nutritionQuality(text)
+        if fillL != fillT { return fillL > fillT ? layout : text }
+        return diffL <= diffT ? layout : text
+    }
+    // <<< CHANGE-[2026-08-17 14:00:00]-营养表结果择优 结束
 
     /// 本地优先识别入口（UIImage 版）。先 OCR+规则；命中返回 local，否则回退云端。
     static func recognizeWithLocalPriority(image: UIImage, in context: ModelContext) async throws -> (result: RecognitionResult, rawText: String, source: RecognitionSource) {
@@ -1452,8 +1704,9 @@ struct RecognizeService {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         if hasNutritionTable(in: nutritionLines) {
-            if let food = localParseNutritionTable(observations: observations)
-                        ?? localParseNutritionTable(text: cleanText) {
+            let layoutFood = localParseNutritionTable(observations: observations)
+            let textFood   = localParseNutritionTable(text: cleanText)
+            if let food = chooseBetterNutrition(layoutFood, textFood) {
                 print("[识别] 营养成分表本地解析命中，source=local")
                 return (food, cleanText, .local)
             }
@@ -1461,11 +1714,13 @@ struct RecognizeService {
             // 用更低最小文字高度（0.005）二次 OCR 再试，提升小号数字/标签的捕获率。
             let fineOcr = localOCR(from: imageData, customWords: merchantBiasWords(in: context), minTextHeight: 0.005)
             if let fineText = fineOcr?.text.trimmingCharacters(in: .whitespacesAndNewlines), !fineText.isEmpty,
-               let refinedLines = fineOcr?.observations,
-               let food = localParseNutritionTable(observations: refinedLines)
-                           ?? localParseNutritionTable(text: fineText) {
-                print("[识别] 营养成分表二次 OCR（小字）本地解析命中，source=local")
-                return (food, fineText, .local)
+               let refinedLines = fineOcr?.observations {
+                let fineLayoutFood = localParseNutritionTable(observations: refinedLines)
+                let fineTextFood   = localParseNutritionTable(text: fineText)
+                if let food = chooseBetterNutrition(fineLayoutFood, fineTextFood) {
+                    print("[识别] 营养成分表二次 OCR（小字）本地解析命中，source=local")
+                    return (food, fineText, .local)
+                }
             }
             // 仍失败：先让视觉模型试着读品牌/名称，失败再用占位 food。
             // 关键：绝不落到账单路径（避免把「3.1g/12.0g」当金额）。

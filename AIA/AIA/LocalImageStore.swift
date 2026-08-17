@@ -103,6 +103,7 @@ struct FullImageView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var scale: CGFloat = 1
     @State private var toast: String?
+    @State private var photoSaver = PhotoSaveHelper()
 
     var body: some View {
         ZStack {
@@ -119,11 +120,46 @@ struct FullImageView: View {
                 // 单击关闭：与缩放手势同属交互手势，不冲突，不再与长按混排
                 .onTapGesture { onDismiss?() ?? dismiss() }
 
-            // >>> CHANGE-[2026-08-17 19:30:00]-[大图查看去掉顶部按钮] 开始
-            // 原因: 大图查看页顶部两个白色圆按钮（保存/关闭）在亮色图片上像"白点/空白椭圆"，用户认为多余。
-            //       关闭已可由"点击图片任意处"完成(.onTapGesture)，保存功能非必需，统一去掉顶部按钮。
-            // 回退: 恢复被删除的 VStack{HStack{保存按钮 Spacer 关闭按钮}...} 整段即可。
-            // <<< CHANGE-[2026-08-17 19:30:00]-[大图查看去掉顶部按钮] 结束
+            // >>> CHANGE-[2026-08-17 19:40:00]-[大图查看顶部关闭保存按钮] 开始
+            // 原因: 用户在大图查看页要求左上角"关闭"按钮、右上角"保存"按钮，替代之前被移除的顶部按钮。
+            //       关闭走 onDismiss/dismiss，保存把当前图写入系统相册并 toast 提示结果。
+            // 回退: 删除本 VStack（顶部按钮）整段即可恢复无顶部按钮状态。
+            VStack {
+                HStack {
+                    Button {
+                        onDismiss?() ?? dismiss()
+                    } label: {
+                        Text("关闭")
+                            .font(AIATheme.Font.subhead.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background { Color.white.opacity(0.22) }
+                            .clipShape(Capsule())
+                    }
+
+                    Spacer()
+
+                    Button {
+                        photoSaver.save(image) { error in
+                            toast = error == nil ? "已保存到相册" : "保存失败：\(error!.localizedDescription)"
+                            hideToastAfterDelay()
+                        }
+                    } label: {
+                        Text("保存")
+                            .font(AIATheme.Font.subhead.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background { Color.white.opacity(0.22) }
+                            .clipShape(Capsule())
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                Spacer()
+            }
+            // <<< CHANGE-[2026-08-17 19:40:00]-[大图查看顶部关闭保存按钮] 结束
 
             if let toast {
                 VStack {
@@ -140,5 +176,32 @@ struct FullImageView: View {
                 .allowsHitTesting(false)   // toast 永不挡住底层交互
             }
         }
+        // >>> CHANGE-[2026-08-17 20:15:00]-[大图查看状态栏改现代API] 开始
+        // 原因: .statusBar(hidden:) 在 iOS 17+ 已弃用，iOS 26 行为未定义（用户截图可见
+        //       状态栏白胶囊仍浮在大图上方）。改 .statusBarHidden(true)（iOS 16+ 现代 API）。
+        // 回退: 恢复 .statusBar(hidden: true) 并删除本行即可。
+        .statusBarHidden(true)
+        // <<< CHANGE-[2026-08-17 20:15:00]-[大图查看状态栏改现代API] 结束
+    }
+
+    private func hideToastAfterDelay() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            toast = nil
+        }
+    }
+}
+
+// 相册保存回调辅助类（须以 @State 持有，保证回调跑完前对象不释放）
+private final class PhotoSaveHelper: NSObject {
+    private var completion: ((Error?) -> Void)?
+
+    func save(_ image: UIImage, completion: @escaping (Error?) -> Void) {
+        self.completion = completion
+        UIImageWriteToSavedPhotosAlbum(image, self, #selector(saveCompleted(_:didFinishSavingWithError:contextInfo:)), nil)
+    }
+
+    @objc private func saveCompleted(_ image: UIImage, didFinishSavingWithError error: Error?, contextInfo: UnsafeRawPointer) {
+        completion?(error)
+        completion = nil
     }
 }

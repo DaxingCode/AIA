@@ -349,9 +349,13 @@ struct BodyDataView: View {
     private func deleteGroup(_ group: DayGroup) {
         let target = group.day
         let batch = allHealths.filter { $0.date == target }
+        // >>> CHANGE-[2026-08-17 11:24:00]-[临时对象失效崩溃] 开始
+        // 原因：batch 来自 @Query 数组 allHealths，循环软删期间若 @Query 刷新会释放引用 → 下一帧访问失效对象。
+        // 回退：改回 for h in batch { SafeDelete.health(h, in: context) }
         for h in batch {
-            SafeDelete.health(h, in: context)
+            SafeDelete.healthByID(h.persistentModelID, in: context)
         }
+        // <<< CHANGE-[2026-08-17 11:24:00]-[临时对象失效崩溃] 结束
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
     }
 
@@ -359,9 +363,12 @@ struct BodyDataView: View {
         let targets = selectedDates
         for group in historyByDay where targets.contains(group.day) {
             let batch = allHealths.filter { $0.date == group.day }
+            // >>> CHANGE-[2026-08-17 11:24:30]-[临时对象失效崩溃] 开始
+            // 同 deleteGroup 理由
             for h in batch {
-                SafeDelete.health(h, in: context)
+                SafeDelete.healthByID(h.persistentModelID, in: context)
             }
+            // <<< CHANGE-[2026-08-17 11:24:30]-[临时对象失效崩溃] 结束
         }
         multiSelectMode = false
         selectedDates.removeAll()

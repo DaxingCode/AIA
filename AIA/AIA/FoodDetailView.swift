@@ -149,7 +149,11 @@ struct FoodDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .centeredAlert(isPresented: Binding(get: { toast != nil }, set: { if !$0 { toast = nil } }),
                        message: toast ?? "")
-        .sheet(isPresented: $showEdit) { EditFoodView(entry: entry) }
+        // >>> CHANGE-[2026-08-17 17:25:00]-[编辑食物统一EditFoodSheet] 开始
+        // 原因: 统一走 EditFoodSheet wrapper，避免此入口编辑页无导航栏（看不到取消/保存按钮）。
+        // 回退: 改回 EditFoodView(entry: entry)。
+        .sheet(isPresented: $showEdit) { EditFoodSheet(entry: entry) }
+        // <<< CHANGE-[2026-08-17 17:25:00]-[编辑食物统一EditFoodSheet] 结束
         .onDisappear {
             // 2026-07-20 实测：onDisappear 仍可能在父页面刚刚显示、pop 动画尚未完全收尾时调用。
             // 同步改模型触发 @Query 重 fetch，会与父页面初始渲染竞争，导致返回列表后卡死。

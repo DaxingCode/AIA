@@ -694,7 +694,12 @@ struct FoodListView: View {
                     onTap: { editFoodID = f.persistentModelID },
                     onLongPress: { enterFoodMultiSelect(f.persistentModelID) },
                     onToggle: { toggleFoodSelection(f.persistentModelID) },
-                    onDelete: { SafeDelete.food(f, in: context) }
+                    onDelete: {
+                        // >>> CHANGE-[2026-08-17 11:26:00]-[临时对象失效崩溃] 开始
+                        // 原因：f 来自 @Query ForEach 行，多选手动删除后底层数组变动可能释放引用。回退：改回 SafeDelete.food(f, in: context)
+                        SafeDelete.foodByID(f.persistentModelID, in: context)
+                        // <<< CHANGE-[2026-08-17 11:26:00]-[临时对象失效崩溃] 结束
+                    }
                 ) {
                     VStack(alignment: .leading, spacing: 10) {
                         // hero：左食物名 + 餐次·份量；右热量大数字
@@ -1229,9 +1234,14 @@ struct FoodListView: View {
             .presentationDetents([.height(360)])
         }
         .sheet(item: $editFoodID) { id in
+            // >>> CHANGE-[2026-08-17 17:25:00]-[编辑食物统一EditFoodSheet] 开始
+            // 原因: 统一所有编辑食物入口走 EditFoodSheet wrapper（见 EditSheets.swift 同时间戳标记），
+            //       替代原先内联 NavigationStack，避免其他入口漏包导致无导航栏。
+            // 回退: 恢复为内联 NavigationStack 直出 EditFoodView。
             if let food = context.model(for: id) as? FoodEntry {
-                EditFoodView(entry: food)
+                EditFoodSheet(entry: food)
             }
+            // <<< CHANGE-[2026-08-17 17:25:00]-[编辑食物统一EditFoodSheet] 结束
         }
         .onAppear { meal = FoodListView.defaultMeal(for: .now) }
         .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker, navigateToChat: true)
@@ -1254,7 +1264,10 @@ struct FoodListView: View {
     private func deleteFood(_ f: FoodEntry) {
         // 使用 SafeDelete 软删：设置 syncDeleted=true 后由 CloudSyncManager 推送到云端，
         // 避免直接硬删导致 deleted=true 标志无法到达云端（详见 SafeDelete 注释）。
-        SafeDelete.food(f, in: context)
+        // >>> CHANGE-[2026-08-17 11:26:30]-[临时对象失效崩溃] 开始
+        // 原因：f 来自 @Query 行对象，转场/@Query 刷新后可能失效。回退：改回 SafeDelete.food(f, in: context)
+        SafeDelete.foodByID(f.persistentModelID, in: context)
+        // <<< CHANGE-[2026-08-17 11:26:30]-[临时对象失效崩溃] 结束
     }
 
     // MARK: 多选删除
@@ -2018,7 +2031,12 @@ struct HealthListView: View {
                                 onTap: { editHealth = h },
                                 onLongPress: { enterHealthMultiSelect(h.persistentModelID) },
                                 onToggle: { toggleHealthSelection(h.persistentModelID) },
-                                onDelete: { SafeDelete.health(h, in: context) }
+                                onDelete: {
+                                // >>> CHANGE-[2026-08-17 11:27:00]-[临时对象失效崩溃] 开始
+                                // 原因：h 来自 @Query ForEach 行，多选手动删除后底层数组变动可能释放引用。回退：改回 SafeDelete.health(h, in: context)
+                                SafeDelete.healthByID(h.persistentModelID, in: context)
+                                // <<< CHANGE-[2026-08-17 11:27:00]-[临时对象失效崩溃] 结束
+                            }
                             ) {
                                 HStack(spacing: 12) {
                                     Image(systemName: "heart.circle").foregroundStyle(AIATheme.health)
@@ -3993,7 +4011,12 @@ struct ReminderListView: View {
                 // 不传 onLongPress → SelectableRow 内部不挂 SwiftUI 长按手势，
                 // 避免两个 0.5s 长按互抢 touch、并消除重复震动。
                 onToggle: { toggleTodoSelection(r.persistentModelID) },
-                onDelete: { SafeDelete.reminder(r, in: context) },
+                onDelete: {
+                    // >>> CHANGE-[2026-08-17 11:28:00]-[临时对象失效崩溃] 开始
+                    // 原因：r 来自 @Query ForEach 行，多选手动删除后底层数组变动可能释放引用。回退：改回 SafeDelete.reminder(r, in: context)
+                    SafeDelete.reminderByID(r.persistentModelID, in: context)
+                    // <<< CHANGE-[2026-08-17 11:28:00]-[临时对象失效崩溃] 结束
+                },
                 // 长按起拖中摘掉本行左滑手势，避免水平拖动同时误露「删除」按钮
                 disableSwipe: longPressArmed
             ) {
@@ -4422,7 +4445,10 @@ struct ReminderListView: View {
     }
 
     private func deleteReminder(_ r: Reminder) {
-        SafeDelete.reminder(r, in: context)
+        // >>> CHANGE-[2026-08-17 11:27:30]-[临时对象失效崩溃] 开始
+        // 原因：r 来自 @Query 行对象，转场/@Query 刷新后可能失效。回退：改回 SafeDelete.reminder(r, in: context)
+        SafeDelete.reminderByID(r.persistentModelID, in: context)
+        // <<< CHANGE-[2026-08-17 11:27:30]-[临时对象失效崩溃] 结束
     }
 
 }

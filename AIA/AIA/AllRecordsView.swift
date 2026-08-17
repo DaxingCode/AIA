@@ -53,7 +53,12 @@ struct AllRecordsView: View {
                 date: f.date,
                 systemImage: "fork.knife",
                 color: .orange,
-                delete: { SafeDelete.food(f, in: context) }
+                delete: {
+                    // >>> CHANGE-[2026-08-17 11:29:00]-[临时对象失效崩溃] 开始
+                    // 原因：f 来自 @Query，删除闭包执行时视图可能已释放引用。回退：改回 SafeDelete.food(f, in: context)
+                    SafeDelete.foodByID(f.persistentModelID, in: context)
+                    // <<< CHANGE-[2026-08-17 11:29:00]-[临时对象失效崩溃] 结束
+                }
             ))
         }
 
@@ -69,7 +74,12 @@ struct AllRecordsView: View {
                 date: b.time,
                 systemImage: "yensign.circle",
                 color: .green,
-                delete: { SafeDelete.bill(b, in: context) }
+                delete: {
+                    // >>> CHANGE-[2026-08-17 11:29:30]-[临时对象失效崩溃] 开始
+                    // 原因：b 来自 @Query，删除闭包执行时视图可能已释放引用。回退：改回 SafeDelete.bill(b, in: context)
+                    SafeDelete.billByID(b.persistentModelID, in: context)
+                    // <<< CHANGE-[2026-08-17 11:29:30]-[临时对象失效崩溃] 结束
+                }
             ))
         }
 
@@ -84,7 +94,12 @@ struct AllRecordsView: View {
                 date: h.date,
                 systemImage: "heart.circle",
                 color: .blue,
-                delete: { SafeDelete.health(h, in: context) }
+                delete: {
+                    // >>> CHANGE-[2026-08-17 11:30:00]-[临时对象失效崩溃] 开始
+                    // 原因：h 来自 @Query，删除闭包执行时视图可能已释放引用。回退：改回 SafeDelete.health(h, in: context)
+                    SafeDelete.healthByID(h.persistentModelID, in: context)
+                    // <<< CHANGE-[2026-08-17 11:30:00]-[临时对象失效崩溃] 结束
+                }
             ))
         }
 
@@ -100,7 +115,12 @@ struct AllRecordsView: View {
                 date: dueDate,
                 systemImage: "checklist",
                 color: .purple,
-                delete: { SafeDelete.reminder(r, in: context) }
+                delete: {
+                    // >>> CHANGE-[2026-08-17 11:30:30]-[临时对象失效崩溃] 开始
+                    // 原因：r 来自 @Query，删除闭包执行时视图可能已释放引用。回退：改回 SafeDelete.reminder(r, in: context)
+                    SafeDelete.reminderByID(r.persistentModelID, in: context)
+                    // <<< CHANGE-[2026-08-17 11:30:30]-[临时对象失效崩溃] 结束
+                }
             ))
         }
 
@@ -158,7 +178,11 @@ struct AllRecordsView: View {
                     }
                 }
                 .listStyle(.plain)
-                .sheet(item: $editFood) { EditFoodView(entry: $0) }
+                // >>> CHANGE-[2026-08-17 17:25:00]-[编辑食物统一EditFoodSheet] 开始
+                // 原因: 统一走 EditFoodSheet wrapper，避免此入口编辑页无导航栏（看不到取消/保存按钮）。
+                // 回退: 改回 EditFoodView(entry: $0)。
+                .sheet(item: $editFood) { EditFoodSheet(entry: $0) }
+                // <<< CHANGE-[2026-08-17 17:25:00]-[编辑食物统一EditFoodSheet] 结束
                 .sheet(item: $editBill) { EditBillView(bill: $0) }
                 .sheet(item: $editTodo) { EditTodoSheet(reminder: $0) }
                 .sheet(item: $editHealth) { EditHealthView(metric: $0) }
