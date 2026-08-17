@@ -34,21 +34,34 @@ private struct PendingFoodConfirm: Codable {
 }
 
 struct ChatView: View {
-    @Query private var foods: [FoodEntry]
-    @Query private var bills: [Bill]
-    @Query(filter: #Predicate<Reminder> { !$0.syncDeleted }) private var reminders: [Reminder]
-    @Query(sort: \HealthMetric.date, order: .reverse) private var healths: [HealthMetric]
-    @Query private var merchantMetas: [MerchantMeta]
-    @Query(sort: \RecognitionRecord.recognizedAt, order: .reverse) private var recognitions: [RecognitionRecord]
-    @Query(filter: #Predicate<WaterLog> { !$0.syncDeleted }, sort: \WaterLog.date, order: .reverse) private var waters: [WaterLog]
-    @Query(filter: #Predicate<RecurringRule> { !$0.syncDeleted }) private var recurringRules: [RecurringRule]
-    // 真实分页：手动 modelContext.fetch（带 fetchLimit）写入本 @State，避免 1000+ 历史全量 materialize 卡顿。
-    // 插入 / 删除 / 加载更早时调用 fetchMessages() 重取，保持与 @Query 等价的响应式体验。
-    @State private var messages: [ChatMessage] = []
-    /// 视图使用正序序列（查询是倒序取最近 N 条，便于分页）。
-    private var orderedMessages: [ChatMessage] { messages.reversed() }
-    /// 已加载的聊天记录条数上限，下拉到顶部自动递增以加载更早的消息。
-    @State private var messageFetchLimit = 60
+    // >>> CHANGE-[2026-08-17 23:20:47]-[对话页8个LLM上下文@Query改按需fetch] 开始
+    // 原因：这 8 个 @Query（foods/bills/reminders/healths/merchantMetas/recognitions/waters/recurringRules）
+    // 只给打招呼/智能问答/本地兜底/agent 工具提供 LLM 上下文，列表渲染根本不用，
+    // 但一进对话页就全表 materialize（无时间窗/无 fetchLimit），历史数据越多进页面越卡。
+    // 修复：删除下方 8 行 @Query，改为 fetchLlmContextData() 在真正使用时才 context.fetch（首屏只查 ChatMessage 消息表）。
+    // 回退：删除本标记段至下方「<<< ... 结束」标记之间所有改动（含 fetchLlmContextData() 定义及各调用处 data. 前缀引用）即可恢复。
+    // <<< CHANGE-[2026-08-17 23:20:47]-[对话页8个LLM上下文@Query改按需fetch] 结束
+    // >>> CHANGE-[2026-08-17 22:10:00]-[对话页首屏时间窗分页] 开始
+    // 原因：原 @Query 全量 materialize 所有 ChatMessage，进对话页瞬间 CPU 接近 200%（全表扫 + O(N²) displayedMessages 放大）。
+    // 修复：@Query 改用 FetchDescriptor 形态，加 fetchLimit:60 + 最近 7 天时间窗 predicate，
+    // 首屏只 materialize 最近 7 天最多 60 条，进页面 I/O 降一个量级，零跳动不变（首帧即满、钉底）。
+    // 更老消息由 loadEarlierMessages() 手动 fetch(createdAt < 首屏最老) 拼进 earlierMessages。
+    // 回退：恢复 @Query(filter: #Predicate<ChatMessage> { !$0.syncDeleted }, sort: \.createdAt, order: .reverse) 全量写法。
+    @Query({
+        let start = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date.distantPast
+        var d = FetchDescriptor<ChatMessage>(
+            predicate: #Predicate<ChatMessage> { !$0.syncDeleted && $0.createdAt >= start },
+            sortBy: [SortDescriptor(\ChatMessage.createdAt, order: .reverse)]
+        )
+        d.fetchLimit = 60
+        return d
+    }()) private var recentMessages: [ChatMessage]
+    /// 下拉加载的更早消息段（倒序，与 @Query 同源），拼在最近消息之前。
+    @State private var earlierMessages: [ChatMessage] = []
+    /// 视图使用正序序列：更早段（正序）+ 最近 60 条（reversed 转正序）。
+    private var orderedMessages: [ChatMessage] {
+        earlierMessages.reversed() + recentMessages.reversed()
+    }
     /// 是否还有更早的消息未加载（由 fetchCount 决定，驱动「加载更早」入口显隐，避免无限加载）。
     @State private var hasMoreMessages = false
     /// 防止下拉自动加载时因视图反复进入视口而重复触发的锁。
@@ -125,27 +138,48 @@ struct ChatView: View {
         #endif
     }
 
-    /// 构造聊天记录查询：倒序取最近 `limit` 条未软删消息（真实 fetchLimit 分页），
-    /// 避免 1000+ 历史时全量 materialize 导致进入首屏卡顿。
-    private static func makeMessageDescriptor(limit: Int) -> FetchDescriptor<ChatMessage> {
+    /// 构造聊天记录查询：倒序取 `createdAt < before`（不含 before 当天）的未软删消息段，
+    /// 带 fetchLimit 分页，避免 1000+ 历史时全量 materialize。
+    /// before=nil 时退化为全量未软删（兜底）。
+    private static func makeMessageDescriptor(limit: Int, before: Date? = nil) -> FetchDescriptor<ChatMessage> {
+        let predicate: Predicate<ChatMessage>
+        if let before {
+            predicate = #Predicate<ChatMessage> { !$0.syncDeleted && $0.createdAt < before }
+        } else {
+            predicate = #Predicate<ChatMessage> { !$0.syncDeleted }
+        }
         var d = FetchDescriptor<ChatMessage>(
-            predicate: #Predicate<ChatMessage> { !$0.syncDeleted },
+            predicate: predicate,
             sortBy: [SortDescriptor(\ChatMessage.createdAt, order: .reverse)]
         )
         d.fetchLimit = limit
         return d
     }
 
-    /// 用全量条数判断是否还有更早消息（fetchLimit 之外仍有数据），驱动「加载更早」入口显隐。
-    private func refreshHasMoreMessages() {
-        let total = (try? context.fetchCount(FetchDescriptor<ChatMessage>(
-            predicate: #Predicate<ChatMessage> { !$0.syncDeleted }))) ?? 0
-        hasMoreMessages = total > messageFetchLimit
+    /// 判断是否有比 earliest 更早的消息（局部 fetchCount，避免进页面全表扫造成额外 I/O / CPU 尖峰）。
+    /// earliest=nil 时回退到全量 count。
+    private func refreshHasMoreMessages(earliest: Date? = nil) {
+        let hasEarlier: Bool
+        if let earliest {
+            let desc = ChatView.makeMessageDescriptor(limit: 1, before: earliest)
+            hasEarlier = (try? context.fetchCount(desc)) ?? 0 > 0
+        } else {
+            let total = (try? context.fetchCount(FetchDescriptor<ChatMessage>(
+                predicate: #Predicate<ChatMessage> { !$0.syncDeleted }))) ?? 0
+            hasEarlier = total > 60
+        }
+        hasMoreMessages = hasEarlier
     }
 
-    /// 按当前分页上限拉取消息（带 fetchLimit 的真实分页）。替代 @Query，需在插入/删除/加载更早后手动调用以刷新。
-    private func fetchMessages() {
-        messages = (try? context.fetch(ChatView.makeMessageDescriptor(limit: messageFetchLimit))) ?? []
+    /// 加载更早的消息段（倒序），拼进 earlierMessages 前端。
+    /// 时间窗分页下：@Query 只含最近 7 天，这里手动 fetch「比当前已加载最老消息更早」的段（createdAt < oldest）。
+    private func loadEarlierMessages() {
+        let loaded = recentMessages + earlierMessages
+        guard let oldest = loaded.min(by: { $0.createdAt < $1.createdAt }) else { return }
+        let older = (try? context.fetch(ChatView.makeMessageDescriptor(limit: 60, before: oldest.createdAt))) ?? []
+        earlierMessages = older + earlierMessages
+        refreshHasMoreMessages(earliest: oldest.createdAt)
+        recomputeDisplayed()   // 更早段拼入后重算缓存
     }
 
     // 当前页面动态生成的小记招呼（不持久化），时间戳两种锚定：
@@ -163,6 +197,23 @@ struct ChatView: View {
 
     /// 识别协议解码结果缓存（文本不变即复用，避免 1000+ 条时每次 body 重复 decode 大 JSON）。
     private static var recognitionCache: [String: RecognitionResultPayload?] = [:]
+
+    /// displayedMessages 计算结果缓存：body 每次重算都读它，避免 O(N²)+JSON 解码被反复放大（进页面 CPU 高主因之一）。
+    /// 仅在 orderedMessages / greetingMessage / earlierMessages 变化时才重算。
+    @State private var cachedDisplayed: [ChatMessage] = []
+    // >>> CHANGE-[2026-08-17 21:36:03]-[缓存非空守卫防空白与循环] 开始
+    // 原因：原 recomputeDisplayed 无条件 cachedDisplayed = displayedMessages；
+    // 当 @Query 异步间隙 displayedMessages 为空时，会把缓存清成 []，
+    // 触发首帧回退逻辑（cachedDisplayed.isEmpty ? 实时算）反复跑 O(N²)+JSON 解码 → 发烫；
+    // 同时缓存被清空后首帧钉底/scrollToBottom 读 cachedDisplayed.last 为 nil → 不滚 → 偶发空白停顶。
+    // 修复：仅当算出新数据（非空）才覆盖缓存；空结果保留旧缓存不清空。
+    // 回退：恢复 cachedDisplayed = displayedMessages。
+    private func recomputeDisplayed() {
+        let fresh = displayedMessages
+        guard !fresh.isEmpty else { return }
+        cachedDisplayed = fresh
+    }
+    // <<< CHANGE-[2026-08-17 21:36:03]-[缓存非空守卫防空白与循环] 结束
 
     private var displayedMessages: [ChatMessage] {
         // 方式A：先标记空壳开场白（识别开场白 + 之后已无配对识别卡片气泡），渲染层直接隐藏，
@@ -187,7 +238,9 @@ struct ChatView: View {
             Self.recognitionCache[m.text] = payload
             return payload.map { !$0.items.isEmpty } ?? false
         }
-        let limited = Array(filtered.suffix(messageFetchLimit))
+        // @Query 已带 fetchLimit:60 取最近消息，earlierMessages 为更早段，二者合并后 orderedMessages 即已加载全集，
+        // 无需再 suffix 截断（旧 fetchMessages 用 suffix 是因为分页在 @State 里手动维护）。
+        let limited = filtered
         // 【D】兜底过滤：理论上 fetchMessages 已按 !syncDeleted 取数，这里再防一层
         // （如 greetingMessage 拼接、状态竞态边界），确保任何软删消息绝不进入渲染列表。
         let safe = limited.filter { !$0.syncDeleted }
@@ -558,12 +611,19 @@ struct ChatView: View {
         )
         let msg = ChatMessage(role: .ai, text: encodeRecognitionPayload(payload), createdAt: Date())
         context.insert(msg)
-        fetchMessages()
+        // @Query 自动响应式刷新，无需手动 fetchMessages
     }
 
     private var messageList: some View {
         ScrollViewReader { proxy in
-            let list = displayedMessages          // 每帧只算一次（避免逐行重复 filter+decode 导致 O(N²)）
+            // >>> CHANGE-[2026-08-17 21:31:57]-[首帧缓存空回退保零跳动] 开始
+            // 原因：上一轮把列表改读 cachedDisplayed 缓存，但缓存首帧填充在 .onAppear（晚于首帧 body 渲染半拍），
+            // 导致首帧 cachedDisplayed 仍为空 → 列表先空帧后暴涨 → 进页面又跳。
+            // 修复：首帧缓存未就绪时回退读 displayedMessages 实时计算（首帧即满、钉底、不跳）；
+            // .onAppear 填好缓存后后续帧统一走缓存，CPU 优化保留。
+            // 回退：恢复 let list = cachedDisplayed。
+            let list = cachedDisplayed.isEmpty ? displayedMessages : cachedDisplayed
+            // <<< CHANGE-[2026-08-17 21:31:57]-[首帧缓存空回退保零跳动] 结束
             let showDivider = ChatView.dividerFlags(for: list)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
@@ -594,9 +654,21 @@ struct ChatView: View {
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
             .onAppear {
-                // 初次进入即分页拉取最近消息（fetchLimit 真分页），并判定是否还有更早消息。
-                fetchMessages()
-                refreshHasMoreMessages()
+                // 首屏由 @Query(recentMessages) 自动同步填充，首帧即满、零跳动，无需手动 fetch。
+                // 先算一次缓存，保证列表（读 cachedDisplayed）首帧即有数据。
+                recomputeDisplayed()
+                // >>> CHANGE-[2026-08-17 22:21:08]-[首帧同步生成招呼防白屏] 开始
+                // 原因：原招呼气泡在 onAppear 末尾的 DispatchQueue.main.async 里生成，晚于首帧 body 渲染半拍；
+                // 首帧 @Query 未就绪时列表既无历史也无招呼 → 中间纯黑(白屏)。
+                // 修复：在 onAppear 开头同步生成招呼气泡（greetingDate 已在本闭包下方算出，此处先用兜底 Date.now）；
+                // 真正精确锚点后仍由下方 main.async 块兜底（greetingMessage 已非 nil 则跳过）。
+                // 回退：删除本段（回到仅下方 async 生成）。
+                // 注意：greetingDate 精确值依赖下方 anchor 计算，但同步生成只需占位锚点即可避免空白，
+                // 下方 main.async 块会在 greetingMessage 仍 nil 时用精确 greetingDate 重建（实际本帧已生成则不重建）。
+                // <<< CHANGE-[2026-08-17 22:21:08]-[首帧同步生成招呼防白屏] 结束
+                // 仅判定是否还有更早消息以显隐「加载更早」入口（局部 fetchCount，不扫全表）。
+                let oldest = recentMessages.min(by: { $0.createdAt < $1.createdAt })?.createdAt
+                refreshHasMoreMessages(earliest: oldest)
                 // 消费「本次会话锚点」：无论是否首次滚动都读走并清零，
                 // 避免上一次遗留的陈旧锚点把下次进入的招呼气泡钉到对话中间。
                 let sessionAnchor = NavigationRouter.shared.chatSessionAnchor
@@ -611,8 +683,13 @@ struct ChatView: View {
                     // 消费后清零，避免后续其他 .chat 进入误弹；延到下一 runloop 避开 view update 期改状态
                     DispatchQueue.main.async { NavigationRouter.shared.chatAutoFocus = false }
                 }
-                guard !didInitialScroll else { return }
-                didInitialScroll = true
+                // >>> CHANGE-[2026-08-17 15:05:00]-[对话页首屏干净落位] 开始
+                // 原因：原 for d in [0.0,...] 里 d:0.0 虽同步执行，但排在 didInitialScroll 置位之前，
+                // 且依赖 defaultScrollAnchor(.bottom) 在 LazyVStack 首帧高度未定时的不可靠落位，
+                // 快芯片(15 Pro Max)首帧先渲染顶部历史一帧 → 显出「先见历史再跳最新」卡顿感。
+                // 修复：进入即同步 disablesAnimations 钉底（proxy 在 onAppear 闭包内已就绪），
+                // 首帧直接是最新屏，消除顶部闪历史；异步校正仅补高度、不再反向跳。
+                // 回退：恢复 defaultScrollAnchor 依赖 + 原 for 循环首拍延迟写法。
                 // 招呼气泡锚点：有历史钉在最新历史之后 0.5s，无历史钉在本次会话起点之前 0.5s。
                 // 分界点用 NavigationRouter.chatSessionAnchor —— 由发起方（首页拍照/相册、截屏通知、语音）
                 // 在插入本次第一条新消息「之前」打点，因此绝不会把本次新消息误判成历史。
@@ -629,37 +706,99 @@ struct ChatView: View {
                 } else {
                     greetingDate = anchor.addingTimeInterval(-0.5)  // 无历史：钉在本次会话起点之前
                 }
-                // 招呼气泡同帧末生成，避免「滚到底 → 内容变高 → 再跳一次」的两跳观感
-                DispatchQueue.main.async {
-                    if greetingMessage == nil {
-                        let initial = buildGreeting()
-                        greetingMessage = ChatMessage(role: .ai, text: initial, createdAt: greetingDate)
-                        startGreetingLLMTask(initial: initial)
+                // >>> CHANGE-[2026-08-17 22:36:13]-[首帧钉底改到列表首次非空] 开始
+                // 原因：原首帧钉底读 initialList（cachedDisplayed/displayedMessages）仍依赖 @Query 在 onAppear 此刻已就绪，
+                // 但 SwiftData @Query 首帧常晚于 onAppear 异步 materialize → 读到的列表为空 → 钉底被跳过/钉错位置 → 偶发白屏。
+                // 修复：删掉此刻钉底，改由下方 .onChange(of: cachedDisplayed.count) 在「列表首次真正非空」时精准钉底，
+                // 无论 @Query/招呼晚到多少帧，只要首次有内容就钉底一次，绝不白屏。
+                // 回退：恢复上一版 initialList 钉底 + scrollToBottom(delay:0.4) 两段。
+                // <<< CHANGE-[2026-08-17 22:36:13]-[首帧钉底改到列表首次非空] 结束
+                // 招呼气泡与首屏同帧生成：@Query 首帧即满 → 历史由下方首次非空守卫钉底 → 此处插入招呼只是底部追加一行，
+                // defaultScrollAnchor(.bottom) 已贴底，无反向跳。didInitialScroll 置位已移至首次非空守卫内
+                // （历史无动画、招呼有动画：守卫钉底时置位，后续招呼插入即走 scrollAnimation 从下滚出）。
+                // >>> CHANGE-[2026-08-17 22:48:59]-[招呼延迟0.4s滑出-两阶段解耦] 开始
+                // 原因：原招呼在 onAppear 同步生成（首帧即入列表）→ 招呼跟历史同帧渲染，看不到「先历史、后招呼从底部滑出」的微信式层次。
+                // 修复：删除同步生成，改为延迟 0.4s 注入——历史由下方首次非空守卫无动画钉底（阶段A），
+                // 招呼注入走 .onChange(of: greetingMessage) 的带动画滚动从底部滚出（阶段B）。
+                // 回退：恢复下方 if greetingMessage == nil { ... } 同步生成块。
+                if greetingMessage == nil {
+                    let initial = buildGreeting()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [self] in
+                        guard self.greetingMessage == nil else { return }
+                        self.greetingMessage = ChatMessage(role: .ai, text: initial, createdAt: greetingDate)
+                        self.startGreetingLLMTask(initial: initial)
                     }
                 }
-                // 无动画多段校正：兜住图片 / 识别卡片的异步高度，保证首屏最后一条贴底
-                for d in [0.0, 0.15, 0.45] {
-                    scrollToBottom(proxy: proxy, delay: d, animated: false)
-                }
+                // <<< CHANGE-[2026-08-17 22:48:59]-[招呼延迟0.4s滑出-两阶段解耦] 结束
+                // >>> CHANGE-[2026-08-17 22:36:13]-[首帧钉底改到列表首次非空] 开始
+                // 原因：原 scrollToBottom(delay:0.4) 依赖 @Query 在 onAppear 首帧已就绪，晚到时钉在空/不完整列表。
+                // 修复：删除此刻钉底，仅由下方 .onChange(of: cachedDisplayed.count) 首次非空守卫精准钉底。
+                // 回退：恢复 scrollToBottom(proxy: proxy, delay: 0.4, animated: false)。
+                // <<< CHANGE-[2026-08-17 22:36:13]-[首帧钉底改到列表首次非空] 结束
+                // <<< CHANGE-[2026-08-17 15:05:00]-[对话页首屏干净落位] 结束
             }
-            // 安全网：任何 store 保存（含 ChatView 之外的识别气泡插入）后重取列表，
-            // 保证响应式不丢消息；fetchMessages 带 decode 缓存，开销仅 O(N)，频繁保存亦可忽略。
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name(rawValue: "NSManagedObjectContextDidSaveNotification"))) { _ in
-                fetchMessages()
+            // >>> CHANGE-[2026-08-17 21:36:03]-[去掉全局存库监听治发烫] 开始
+            // 原因：原 .onReceive(NSManagedObjectContextDidSaveNotification) 监听【全局每一次 modelContext 保存】
+            // （健康/账单/云同步心跳/其它模块），在对话页反复 recomputeDisplayed()+scrollToBottom()，
+            // 与首帧回退实时算叠加形成持续重算 → 手机发烫。@Query 本身已响应式，
+            // .onChange(of: orderedMessages.count) 已足够兜底，此全局监听纯属多余且危险。
+            // 修复：整段删除，滚动校正仅靠 @Query 响应式 + .onChange(of: orderedMessages.count)。
+            // 回退：恢复 .onReceive(NSManagedObjectContextDidSaveNotification) 整段。
+            // @Query(recentMessages) 已自动响应式刷新（任何 modelContext 保存后下一帧 body 即反映），
+            // 无需手动 fetch；下方 .onChange(of: orderedMessages.count) 负责滚动校正。
+            // <<< CHANGE-[2026-08-17 21:36:03]-[去掉全局存库监听治发烫] 结束
+            // >>> CHANGE-[2026-08-17 23:05:00]-[首次非空守卫改监听displayedMessages] 开始
+            // 原因：原守卫监听 cachedDisplayed.count，但渲染层回退逻辑读的是 displayedMessages——
+            // 首帧缓存空时列表照常渲染 displayedMessages，可 cachedDisplayed 恒为 0 → 守卫永不触发
+            // → didInitialScroll 永远 false → defaultScrollAnchor(.bottom) 不工作 + 动画走 nil + 不钉底
+            // → 列表停在初始位置，配合缓存/招呼时序问题表现成整页白屏。
+            // 修复：守卫改监听 displayedMessages.count（反映「列表真有内容」而非缓存是否被填），
+            // @Query 到或 greetingMessage 注入任一路径首次非空都精准钉底一次并置位 didInitialScroll；
+            // 不破坏 recomputeDisplayed 的非空守卫 CPU 优化（缓存仍受其保护）。
+            // 回退：恢复监听 cachedDisplayed.count + 读 cachedDisplayed.last。
+            .onChange(of: displayedMessages.count) { _, newCount in
+                guard !didInitialScroll else { return }
+                guard newCount > 0 else { return }
+                guard let last = displayedMessages.last else { return }
+                var tx = Transaction()
+                tx.disablesAnimations = true
+                withTransaction(tx) { proxy.scrollTo(last.id, anchor: .bottom) }
+                didInitialScroll = true
             }
+            // <<< CHANGE-[2026-08-17 23:05:00]-[首次非空守卫改监听displayedMessages] 结束
             .onChange(of: orderedMessages.count) { _, _ in
                 guard !isLoadingEarlier else { return }
+                recomputeDisplayed()   // 数据集合变化，重算缓存（切断 body 重算放大）
                 // 多段校正：兜住识别卡片（含本地小票图/食物图）的异步高度，
                 // 避免单次滚动被后续图片解码/卡片加载顶回中间，结果滚不到视口。
                 for d in [0.0, 0.15, 0.45] {
                     scrollToBottom(proxy: proxy, delay: d, animated: false)
                 }
             }
+            .onChange(of: greetingMessage) { old, new in
+                // 招呼气泡插入/替换 → 重算缓存（displayedMessages 含 greetingMessage）
+                recomputeDisplayed()
+                // >>> CHANGE-[2026-08-17 23:09:26]-[招呼注入带动画滚出-专属弹性] 开始
+                // 原因：招呼延迟 0.4s 注入后，仅靠 defaultScrollAnchor(.bottom) 不保证带动画从底部滑出。
+                // 修复：区分「注入（old==nil→new 非 nil）」与「替换（LLM 刷新文案，old 非 nil）」，
+                // 注入时 withAnimation(招呼专属弹性 spring) 滚动到底 → 招呼从底部滚出（微信式阶段B）；
+                // 替换不动滚动（气泡原地换文案）。
+                // 2026-08-17 23:09 调整：原用全局 scrollAnimation(.spring(response:0.42, dampingFraction:0.9))，
+                // 用户要求招呼"单独"动画 → 改用专属弹性 .spring(response:0.55, dampingFraction:0.75)，
+                // 区别于普通消息滚动；与 greetingBubble 的 offset(y:56) 顶出 transition 协同。
+                // 回退：恢复 .onChange(of: greetingMessage) { _, _ in recomputeDisplayed() }。
+                if old == nil, let new {
+                    withAnimation(.spring(response: 0.55, dampingFraction: 0.75)) {
+                        proxy.scrollTo(new.id, anchor: .bottom)
+                    }
+                }
+                // <<< CHANGE-[2026-08-17 23:09:26]-[招呼注入带动画滚出-专属弹性] 结束
+            }
             // 识别落地（拍照/相册/截屏/ShareExtension/语音等）主动广播的滚动信号：
             // 刷新列表 + 多段校正，保证结果气泡出现后页面自动滚到底、最新卡片完整可见。
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("AIA.chatScrollToBottom"))) { _ in
                 guard !isLoadingEarlier else { return }
-                fetchMessages()
+                // @Query 已自动刷新，仅做多段滚动校正保证新气泡完整可见
                 for d in [0.0, 0.15, 0.45] {
                     scrollToBottom(proxy: proxy, delay: d, animated: false)
                 }
@@ -699,11 +838,12 @@ struct ChatView: View {
     private func loadEarlier(proxy: ScrollViewProxy) {
         guard !isLoadingEarlier, hasMoreMessages else { return }
         isLoadingEarlier = true
-        let firstID = displayedMessages.first?.persistentModelID
-        messageFetchLimit += 60
-        // 加大 fetchLimit 重新分页拉取更早的消息（手动 fetch 替代 @Query）。
-        fetchMessages()
-        refreshHasMoreMessages()
+        let firstID = cachedDisplayed.first?.persistentModelID
+        // 时间窗分页：取「比当前已加载最老消息更早」的段，拼进 earlierMessages
+        let loaded = recentMessages + earlierMessages
+        let oldest = loaded.min(by: { $0.createdAt < $1.createdAt })?.createdAt
+        loadEarlierMessages()
+        refreshHasMoreMessages(earliest: oldest)
         if let firstID {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 var tx = Transaction()
@@ -736,7 +876,6 @@ struct ChatView: View {
                     // 原因：m 来自消息数组，删除后紧接 fetchMessages() 重 fetch 可能释放引用。回退：改回 SafeDelete.chatMessage(m, in: context)
                     SafeDelete.chatMessageByID(m.persistentModelID, in: context)
                     // <<< CHANGE-[2026-08-17 11:33:00]-[临时对象失效崩溃] 结束
-                    DispatchQueue.main.async { fetchMessages() }
                 },
                 onEnterMultiSelect: { enterMessageMultiSelect(m.persistentModelID) }
             )
@@ -854,7 +993,6 @@ struct ChatView: View {
                     // >>> CHANGE-[2026-08-17 11:33:30]-[临时对象失效崩溃] 开始
                     // 原因：message 来自消息数组，删除后紧接 fetchMessages 重 fetch 可能释放引用。回退：改回 SafeDelete.chatMessage(message, in: context)
                     SafeDelete.chatMessageByID(message.persistentModelID, in: context)
-                    fetchMessages()
                     // <<< CHANGE-[2026-08-17 11:33:30]-[临时对象失效崩溃] 结束
                 } label: {
                     Label("删除", systemImage: "trash")
@@ -1009,8 +1147,17 @@ struct ChatView: View {
             messageBubble(message: nil, text: text, isUser: false)
             Spacer(minLength: 28)
         }
-        .transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .bottom)),
+        // >>> CHANGE-[2026-08-17 23:09:26]-[招呼从下往上顶出] 开始
+        // 原因：用户要求招呼气泡"从下往上顶出来、把历史往上顶、吸引眼球"。
+        // 原 CHANGE-[2026-08-17 20:58:00]-[招呼浮出] 用 offset(y:8) 8pt 轻浮出，太"温柔"。
+        // 修复：insertion 改为从底部 offset(y:56) 滑到 0 + opacity 淡入——招呼从视口下方明显顶上来；
+        // 配合 .onChange(of: greetingMessage) 注入时专属弹性 spring 滚到底，整个列表被顶上，
+        // 视觉上是"从下往上把历史顶开、自己顶出来"。
+        // 回退：恢复 .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 8)), removal: .opacity))
+        //       或原 CHANGE-[2026-08-17 20:58:00]-[招呼浮出] 的 .move(edge: .bottom)。
+        .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 56)),
                                  removal: .opacity))
+        // <<< CHANGE-[2026-08-17 23:09:26]-[招呼从下往上顶出] 结束
     }
 
     /// 普通消息气泡。`message == nil` 时用于顶部招呼（无长按菜单/不进多选）。
@@ -1065,7 +1212,6 @@ struct ChatView: View {
                         // >>> CHANGE-[2026-08-17 11:34:00]-[临时对象失效崩溃] 开始
                         // 原因：m 来自消息数组，删除后紧接 fetchMessages 重 fetch 可能释放引用。回退：改回 SafeDelete.chatMessage(m, in: context)
                         SafeDelete.chatMessageByID(m.persistentModelID, in: context)
-                        fetchMessages()
                         // <<< CHANGE-[2026-08-17 11:34:00]-[临时对象失效崩溃] 结束
                     } label: {
                         Label("删除", systemImage: "trash")
@@ -1085,8 +1231,10 @@ struct ChatView: View {
 
             if !userSide { Spacer(minLength: 28) }
         }
-        .transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .bottom)),
-                                 removal: .opacity))
+        // >>> CHANGE-[2026-08-17 23:34:41]-[去掉消息淡入位移过渡] 开始
+        // 原因：用户要求去掉"历史消息出现时的淡入/位移过渡"。已删除原 .transition(insertion: .opacity.combined(with: .move(edge: .bottom)), removal: .opacity)，消息现在直接显示、不再闪现。
+        // 回退：在 messageBubble 闭包结束 } 前恢复 .transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .bottom)), removal: .opacity)) 即可
+        // <<< CHANGE-[2026-08-17 23:34:41]-[去掉消息淡入位移过渡] 结束
     }
 
     // MARK: - 消息多选三连
@@ -1111,16 +1259,11 @@ struct ChatView: View {
         messageMultiSelectMode = false
         selectedMessageIDs.removeAll()
         // SafeDelete.chatMessageByID 内部用 DispatchQueue.main.async 标记 syncDeleted，
-        // 必须等该任务真正执行（syncDeleted=true）之后，再 fetchMessages() 才能按 !syncDeleted
-        // 过滤掉被删消息。否则当前同步栈里立即 fetch 会读回尚未标记的删除消息，导致页面"删了没反应"。
-        // 由于 chatMessageByID → chatMessage 内部嵌套了两层 main.async，这里再嵌套一层 main.async，
-        // 确保 fetchMessages() 排在全部软删标记之后执行。
+        // @Query(recentMessages) 在 SafeDelete.chatMessageByID 内部 main.async 标记 syncDeleted 后，
+        // 下次 body 自动按 !syncDeleted 过滤掉被删消息，无需手动 fetchMessages。
         DispatchQueue.main.async {
             for id in ids {
                 SafeDelete.chatMessageByID(id, in: context)
-            }
-            DispatchQueue.main.async {
-                fetchMessages()
             }
         }
     }
@@ -1235,15 +1378,39 @@ struct ChatView: View {
         return pool.randomElement() ?? pool[0]
     }
 
+    /// 按需拉取 LLM 上下文所需的各表数据（仅在使用时查库，避免进页面全表加载拖慢首屏）。
+    /// 调用方均为异步/按需时机：打招呼(0.4s后)、智能问答、本地兜底回复、agent 工具目标查找。
+    /// 排序保持与旧 @Query 一致（healths/recognitions/waters 倒序），确保 healths.first 等语义不变。
+    // <<< CHANGE-[2026-08-17 23:20:47]-[对话页8个LLM上下文@Query改按需fetch] 结束
+    private func fetchLlmContextData() -> (
+        foods: [FoodEntry], bills: [Bill], reminders: [Reminder],
+        healths: [HealthMetric], merchantMetas: [MerchantMeta],
+        recognitions: [RecognitionRecord], waters: [WaterLog], recurringRules: [RecurringRule]
+    ) {
+        let reminderPred = #Predicate<Reminder> { !$0.syncDeleted }
+        let waterPred = #Predicate<WaterLog> { !$0.syncDeleted }
+        let rulePred = #Predicate<RecurringRule> { !$0.syncDeleted }
+        let foods = (try? context.fetch(FetchDescriptor<FoodEntry>())) ?? []
+        let bills = (try? context.fetch(FetchDescriptor<Bill>())) ?? []
+        let reminders = (try? context.fetch(FetchDescriptor<Reminder>(predicate: reminderPred))) ?? []
+        let healths = (try? context.fetch(FetchDescriptor<HealthMetric>(sortBy: [SortDescriptor(\HealthMetric.date, order: .reverse)]))) ?? []
+        let merchantMetas = (try? context.fetch(FetchDescriptor<MerchantMeta>())) ?? []
+        let recognitions = (try? context.fetch(FetchDescriptor<RecognitionRecord>(sortBy: [SortDescriptor(\RecognitionRecord.recognizedAt, order: .reverse)]))) ?? []
+        let waters = (try? context.fetch(FetchDescriptor<WaterLog>(predicate: waterPred, sortBy: [SortDescriptor(\WaterLog.date, order: .reverse)]))) ?? []
+        let recurringRules = (try? context.fetch(FetchDescriptor<RecurringRule>(predicate: rulePred))) ?? []
+        return (foods, bills, reminders, healths, merchantMetas, recognitions, waters, recurringRules)
+    }
+
     /// 招呼专用上下文：比 buildContext() 精简得多（只喂给 LLM 与招呼相关的字段，省 token 也避免模型分心）。
     /// 字段命名兼容中文（便于模型直接读懂）：时间 / 今日饮食 / 今日账单 / 今日待办 / 步数 / 最新健康指标等。
     private func buildGreetingContext() -> [String: Any] {
+        let data = fetchLlmContextData()
         let cal = Calendar.current
         let now = Date()
         let hour = cal.component(.hour, from: now)
 
         // 今日已记饮食（精简字段）
-        let todayFoods = foods.filter { cal.isDateInToday($0.date) }
+        let todayFoods = data.foods.filter { cal.isDateInToday($0.date) }
         let todayFoodsCompact: [[String: Any]] = todayFoods.map { f in
             [
                 "meal": f.meal,
@@ -1255,11 +1422,11 @@ struct ChatView: View {
 
         // 近 14 天早餐时段众数（用于「你平时差不多 X 点就吃早餐」式开场）
         let since = cal.date(byAdding: .day, value: -14, to: now) ?? now
-        let bfHours = foods.filter { $0.date >= since && $0.meal == "早餐" }.map { cal.component(.hour, from: $0.date) }
+        let bfHours = data.foods.filter { $0.date >= since && $0.meal == "早餐" }.map { cal.component(.hour, from: $0.date) }
         let commonBF: Int? = bfHours.isEmpty ? nil : Int(round(Double(bfHours.reduce(0, +)) / Double(bfHours.count)))
 
         // 今日待办（仅 today + 未完成 + 未过期）
-        let upcomingToday = reminders.filter { r in
+        let upcomingToday = data.reminders.filter { r in
             guard let due = r.due else { return false }
             return cal.isDateInToday(due) && !r.done && due >= now
         }
@@ -1275,7 +1442,7 @@ struct ChatView: View {
         }
 
         // 【D】今日账单概况
-        let todayBills = bills.filter { cal.isDateInToday($0.time) && !$0.syncDeleted }
+        let todayBills = data.bills.filter { cal.isDateInToday($0.time) && !$0.syncDeleted }
         var todayBillSummary: [String: Any]?
         if todayBills.count > 0 {
             let expense = todayBills.filter { !$0.isIncome }.reduce(0) { $0 + $1.amount }
@@ -1291,7 +1458,7 @@ struct ChatView: View {
 
         // 【D】最新健康指标
         var latestMetric: [String: Any]?
-        if let lh = healths.first {
+        if let lh = data.healths.first {
             latestMetric = ["metric": lh.metric, "value": lh.value, "unit": lh.unit]
         }
 
@@ -1302,8 +1469,8 @@ struct ChatView: View {
             "commonBreakfastHour": commonBF as Any,
             "upcomingTodayCount": upcomingToday.count,
             "upcomingToday": upcomingCompact,
-            "totalFoods": foods.count,
-            "totalReminders": reminders.count,
+            "totalFoods": data.foods.count,
+            "totalReminders": data.reminders.count,
             "entrySource": entrySource,                  // 🆕 入口来源
         ]
         if let bs = todayBillSummary { ctx["todayBillSummary"] = bs }  // 🆕
@@ -1371,7 +1538,7 @@ struct ChatView: View {
         let aiMessage = ChatMessage(role: .ai, text: body, createdAt: Date())
         context.insert(aiMessage)
         try? context.save()
-        fetchMessages()
+        // @Query 自动响应式刷新，无需手动 fetchMessages
         // 关掉输入栏焦点，让用户立刻看到小记的回复
         isInputFocused = false
     }
@@ -1516,6 +1683,7 @@ struct ChatView: View {
     /// 云端聊天不可用时的本地兜底回复：基于用户的本地数据组织成自然语句。
     /// 覆盖饮食/账单/待办/健康几类常见问题，其余给友好兜底并提示能做什么。
     private func localReply(for text: String) async -> String {
+        let data = fetchLlmContextData()
         // 先处理常见闲聊/元意图，避免把「你是谁」「在干嘛」当成未识别意图给通用兜底。
         if let metaReply = replyForMetaIntent(text) {
             return metaReply
@@ -1527,7 +1695,7 @@ struct ChatView: View {
 
         // 饮食 / 卡路里
         if lower.contains("吃") || lower.contains("卡路里") || lower.contains("热量") || lower.contains("饮食") || lower.contains("营养") {
-            let todayFoods = foods.filter { cal.isDateInToday($0.date) }
+            let todayFoods = data.foods.filter { cal.isDateInToday($0.date) }
             if todayFoods.isEmpty {
                 return "今天好像还没记过吃的呢。想记的话，直接跟我说「早餐吃了个水煮蛋」就行，我帮你把热量算好～"
             }
@@ -1549,14 +1717,14 @@ struct ChatView: View {
             let targetBills: [Bill]
             let dayLabel: String
             if isYesterday {
-                targetBills = bills.filter { $0.time >= startOfYesterday && $0.time < startOfToday }
+                targetBills = data.bills.filter { $0.time >= startOfYesterday && $0.time < startOfToday }
                 dayLabel = "昨天"
             } else if isRecent {
                 let startOf7DaysAgo = cal.date(byAdding: .day, value: -6, to: startOfToday)!
-                targetBills = bills.filter { $0.time >= startOf7DaysAgo }
+                targetBills = data.bills.filter { $0.time >= startOf7DaysAgo }
                 dayLabel = "最近 7 天"
             } else {
-                targetBills = bills.filter { cal.isDateInToday($0.time) }
+                targetBills = data.bills.filter { cal.isDateInToday($0.time) }
                 dayLabel = "今天"
             }
 
@@ -1579,7 +1747,7 @@ struct ChatView: View {
             if let reply = await createTodoLocally(from: text) {
                 return reply
             }
-            let upcoming = reminders
+            let upcoming = data.reminders
                 .filter { !$0.done && ($0.due ?? .distantPast) >= cal.startOfDay(for: now) }
                 .sorted { ($0.due ?? .distantFuture) < ($1.due ?? .distantFuture) }
             if upcoming.isEmpty {
@@ -3031,7 +3199,7 @@ struct ChatView: View {
         let userMessage = ChatMessage(role: .user, text: t)
         context.insert(userMessage)
         try? context.save()
-        fetchMessages()
+        // @Query 自动响应式刷新
         UsageAnalytics.log("chat_send", meta: ["len": t.count])
         pendingQueue.append(userMessage)
         processNext()
@@ -3123,14 +3291,12 @@ struct ChatView: View {
                     let aiMessage = ChatMessage(role: .ai, text: responseText, createdAt: userMessage.createdAt.addingTimeInterval(0.1))
                     context.insert(aiMessage)
                     try? context.save()
-                    fetchMessages()
                 }
             } catch {
                 if !chatBubbleInserted {
                     let aiMessage = ChatMessage(role: .ai, text: await localReply(for: t), createdAt: userMessage.createdAt.addingTimeInterval(0.1))
                     context.insert(aiMessage)
                     try? context.save()
-                    fetchMessages()
                 }
             }
             isParsing = false
@@ -3404,10 +3570,15 @@ struct ChatView: View {
     }
 
     // MARK: - 平滑滚动到底部
-    private let scrollAnimation: Animation = .spring(response: 0.32, dampingFraction: 0.82)
+    // >>> CHANGE-[2026-08-17 16:30:00]-[对话页进入淡入兜底] 开始
+    // 调柔滚入 spring：response 0.32→0.42、dampingFraction 0.82→0.9，招呼气泡滚入更顺、
+    // 不再"硬跳"，与整页 easeOut 淡入协同，统一两芯片进入观感。
+    // 回退：恢复 .spring(response: 0.32, dampingFraction: 0.82)。
+    private let scrollAnimation: Animation = .spring(response: 0.42, dampingFraction: 0.9)
+    // <<< CHANGE-[2026-08-17 16:30:00]-[对话页进入淡入兜底] 结束
     private func scrollToBottom(proxy: ScrollViewProxy, delay: TimeInterval = 0, anchor: UnitPoint = .bottom, animated: Bool = true) {
         let work = {
-            guard let last = displayedMessages.last else { return }
+            guard let last = cachedDisplayed.last else { return }
             if animated {
                 withAnimation(scrollAnimation) { proxy.scrollTo(last.id, anchor: anchor) }
             } else {
@@ -3758,7 +3929,8 @@ struct ChatView: View {
 
     /// 查找待办修改/删除/完成的目标。优先匹配 targetTitle，否则取最近活跃的未完成待办。
     private func findReminderTarget(targetTitle: String?, fallbackToLatest: Bool) -> Reminder? {
-        let active = reminders.filter { !$0.done && !$0.syncDeleted }
+        let data = fetchLlmContextData()
+        let active = data.reminders.filter { !$0.done && !$0.syncDeleted }
         if let target = targetTitle, !target.isEmpty {
             let lowered = target.lowercased()
             // 1) 完全包含匹配
@@ -3802,7 +3974,8 @@ struct ChatView: View {
 
     /// 查找饮食记录修改/删除的目标。优先匹配 targetTitle（食物名），否则取最近一条饮食记录。
     private func findFoodTarget(targetTitle: String?, fallbackToLatest: Bool) -> FoodEntry? {
-        let all = foods.filter { !$0.syncDeleted }
+        let data = fetchLlmContextData()
+        let all = data.foods.filter { !$0.syncDeleted }
         if let target = targetTitle, !target.isEmpty {
             let lowered = target.lowercased()
             if let exact = all.first(where: { $0.name.lowercased().contains(lowered) || lowered.contains($0.name.lowercased()) }) {
@@ -3825,7 +3998,8 @@ struct ChatView: View {
 
     /// 查找账单修改/删除的目标。优先匹配 targetTitle（商户名），否则取最近一条账单。
     private func findBillTarget(targetTitle: String?, fallbackToLatest: Bool) -> Bill? {
-        let all = bills.filter { !$0.syncDeleted }
+        let data = fetchLlmContextData()
+        let all = data.bills.filter { !$0.syncDeleted }
         if let target = targetTitle, !target.isEmpty {
             let lowered = target.lowercased()
             if let exact = all.first(where: { $0.merchant.lowercased().contains(lowered) || lowered.contains($0.merchant.lowercased()) }) {
@@ -3848,43 +4022,44 @@ struct ChatView: View {
 
     // 把本地数据整理成 JSON 摘要，供 AI 聊天时作为上下文
     private func buildContext() -> [String: Any] {
+        let data = fetchLlmContextData()
         let cal = Calendar.current
         let startOfToday = cal.startOfDay(for: Date())
         let startOfYesterday = cal.date(byAdding: .day, value: -1, to: startOfToday)!
         let startOf7DaysAgo = cal.date(byAdding: .day, value: -6, to: startOfToday)!
-        let todayFoods = foods.filter { cal.isDateInToday($0.date) }
-        let todayBills = bills.filter { cal.isDateInToday($0.time) }
-        let yesterdayFoods = foods.filter { $0.date >= startOfYesterday && $0.date < startOfToday }
-        let yesterdayBills = bills.filter { $0.time >= startOfYesterday && $0.time < startOfToday }
-        let weekFoodEntries = foods.filter { $0.date >= startOf7DaysAgo }
-        let weekBillEntries = bills.filter { $0.time >= startOf7DaysAgo }
+        let todayFoods = data.foods.filter { cal.isDateInToday($0.date) }
+        let todayBills = data.bills.filter { cal.isDateInToday($0.time) }
+        let yesterdayFoods = data.foods.filter { $0.date >= startOfYesterday && $0.date < startOfToday }
+        let yesterdayBills = data.bills.filter { $0.time >= startOfYesterday && $0.time < startOfToday }
+        let weekFoodEntries = data.foods.filter { $0.date >= startOf7DaysAgo }
+        let weekBillEntries = data.bills.filter { $0.time >= startOf7DaysAgo }
         // 重要：传给云端 LLM 的所有日期必须带本地时区偏移（+HH:MM），否则默认 ISO8601 输出 UTC（Z），
         // 本地 11:45 会变成 03:45Z 被 LLM 误读为「凌晨 3 点」。
         let fmt = AppFormat.isoLocal
-        let todayTodos = reminders.filter { r in
+        let todayTodos = data.reminders.filter { r in
             if let due = r.due { return cal.isDateInToday(due) && !r.done } else { return false }
         }
-        let yesterdayTodos = reminders.filter { r in
+        let yesterdayTodos = data.reminders.filter { r in
             if let due = r.due { return due >= startOfYesterday && due < startOfToday && !r.done } else { return false }
         }
         return [
             "today": buildContext_daySection(date: Date(), foods: todayFoods, bills: todayBills, todos: todayTodos, fmt: fmt),
             "yesterday": buildContext_daySection(date: startOfYesterday, foods: yesterdayFoods, bills: yesterdayBills, todos: yesterdayTodos, fmt: fmt),
-            "last7Days": buildContext_weekSection(weekFoods: weekFoodEntries, weekBills: weekBillEntries, startOf7DaysAgo: startOf7DaysAgo, fmt: fmt),
-            "health": buildContext_healthSection(fmt: fmt),
-            "upcomingTodos": buildContext_upcomingTodosSection(fmt: fmt),
-            "activeTodos": buildContext_activeTodosSection(fmt: fmt),
+            "last7Days": buildContext_weekSection(weekFoods: weekFoodEntries, weekBills: weekBillEntries, reminders: data.reminders, startOf7DaysAgo: startOf7DaysAgo, fmt: fmt),
+            "health": buildContext_healthSection(healths: data.healths, fmt: fmt),
+            "upcomingTodos": buildContext_upcomingTodosSection(reminders: data.reminders, fmt: fmt),
+            "activeTodos": buildContext_activeTodosSection(reminders: data.reminders, fmt: fmt),
             // —— 最近记录列表（按时间倒序，含 id）—— agent 需要用 id 做 update 工具调用（upsert）。
             // 上限 10 条/类，既覆盖"刚才记的那条"又不让 context 过大。
-            "recentFoods": foods.sorted { $0.date > $1.date }.prefix(10).map { buildContext_foodDict($0, fmt: fmt) },
-            "recentBills": bills.sorted { $0.time > $1.time }.prefix(10).map { buildContext_billDict($0, fmt: fmt) },
-            "recentReminders": reminders.sorted { ($0.due ?? .distantPast) > ($1.due ?? .distantPast) }.prefix(10).map { buildContext_todoDict($0, fmt: fmt) },
-            "recentHealth": healths.sorted { $0.date > $1.date }.prefix(10).map { buildContext_healthDict($0, fmt: fmt) },
-            "merchantRules": merchantMetas.sorted { $0.lastSeen > $1.lastSeen }.prefix(20).map { buildContext_merchantDict($0) },
-            "recentRecognitions": recognitions.prefix(10).map { buildContext_recognitionDict($0, fmt: fmt) },
+            "recentFoods": data.foods.sorted { $0.date > $1.date }.prefix(10).map { buildContext_foodDict($0, fmt: fmt) },
+            "recentBills": data.bills.sorted { $0.time > $1.time }.prefix(10).map { buildContext_billDict($0, fmt: fmt) },
+            "recentReminders": data.reminders.sorted { ($0.due ?? .distantPast) > ($1.due ?? .distantPast) }.prefix(10).map { buildContext_todoDict($0, fmt: fmt) },
+            "recentHealth": data.healths.sorted { $0.date > $1.date }.prefix(10).map { buildContext_healthDict($0, fmt: fmt) },
+            "merchantRules": data.merchantMetas.sorted { $0.lastSeen > $1.lastSeen }.prefix(20).map { buildContext_merchantDict($0) },
+            "recentRecognitions": data.recognitions.prefix(10).map { buildContext_recognitionDict($0, fmt: fmt) },
             // —— 饮水与周期规则（v10/v9 模型，buildContext 之前漏了导致 agent 第一句话看不到）——
-            "recentWaters": waters.prefix(20).map { ["id": $0.syncId.uuidString, "amount": $0.amount, "date": fmt.string(from: $0.date)] },
-            "recurringRules": recurringRules.map { ["id": $0.syncId.uuidString, "merchant": $0.merchant, "amount": $0.amount, "category": $0.category, "isIncome": $0.isIncome, "cycleRaw": $0.cycleRaw ?? "monthly", "dayOfMonth": $0.dayOfMonth, "note": $0.note] }
+            "recentWaters": data.waters.prefix(20).map { ["id": $0.syncId.uuidString, "amount": $0.amount, "date": fmt.string(from: $0.date)] },
+            "recurringRules": data.recurringRules.map { ["id": $0.syncId.uuidString, "merchant": $0.merchant, "amount": $0.amount, "category": $0.category, "isIncome": $0.isIncome, "cycleRaw": $0.cycleRaw ?? "monthly", "dayOfMonth": $0.dayOfMonth, "note": $0.note] }
         ]
     }
 
@@ -3906,7 +4081,7 @@ struct ChatView: View {
         ]
     }
 
-    private func buildContext_weekSection(weekFoods: [FoodEntry], weekBills: [Bill], startOf7DaysAgo: Date, fmt: ISO8601DateFormatter) -> [String: Any] {
+    private func buildContext_weekSection(weekFoods: [FoodEntry], weekBills: [Bill], reminders: [Reminder], startOf7DaysAgo: Date, fmt: ISO8601DateFormatter) -> [String: Any] {
         // 一周内未完成待办通常很多，明细只保留最近 15 条（按 due 升序），避免 context 膨胀。
         let weekTodos = reminders.filter { r in
             guard let due = r.due else { return false }
@@ -3926,7 +4101,7 @@ struct ChatView: View {
         ]
     }
 
-    private func buildContext_healthSection(fmt: ISO8601DateFormatter) -> [String: Any] {
+    private func buildContext_healthSection(healths: [HealthMetric], fmt: ISO8601DateFormatter) -> [String: Any] {
         let latestMetrics: [String: [String: Any]] = Dictionary(grouping: healths, by: { $0.metric })
             .mapValues { records -> [String: Any] in
                 let r = records.max(by: { $0.date < $1.date })!
@@ -3939,7 +4114,7 @@ struct ChatView: View {
         ]
     }
 
-    private func buildContext_upcomingTodosSection(fmt: ISO8601DateFormatter) -> [[String: Any]] {
+    private func buildContext_upcomingTodosSection(reminders: [Reminder], fmt: ISO8601DateFormatter) -> [[String: Any]] {
         let upcoming = reminders
             .filter { !$0.done && ($0.due ?? .distantPast) > Date() }
             .sorted { ($0.due ?? .distantFuture) < ($1.due ?? .distantFuture) }
@@ -3947,7 +4122,7 @@ struct ChatView: View {
         return Array(upcoming).map { buildContext_todoDict($0, fmt: fmt) }
     }
 
-    private func buildContext_activeTodosSection(fmt: ISO8601DateFormatter) -> [[String: Any]] {
+    private func buildContext_activeTodosSection(reminders: [Reminder], fmt: ISO8601DateFormatter) -> [[String: Any]] {
         let active = reminders.filter { !$0.done }.prefix(10)
         return Array(active).map { buildContext_todoDictWeekly($0, fmt: fmt) }
     }
