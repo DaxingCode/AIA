@@ -80,13 +80,26 @@ struct EditFoodView: View {
     // 图片添加 / 查看
     @State private var showImageSourceDialog = false
     @State private var showImagePicker = false
-    @State private var showFullImage = false
-    @State private var fullImageName: String? = nil
+    // >>> CHANGE-[2026-08-17 11:20:00]-[食物编辑大图白屏] 开始
+    // 原因: 大图页 fullScreenCover 内重新读文件易落空导致白屏，改为点击时直接传已加载的 UIImage
+    // 回退: 删除 selectedImage 这一行及下方 fullScreenCover/点击回调的 selectedImage 赋值即可
+    @State private var selectedImage: UIImage? = nil
+    // <<< CHANGE-[2026-08-17 11:20:00]-[食物编辑大图白屏] 结束
     @State private var pickedImage: UIImage? = nil
 
     // 删除
     @State private var showDeleteConfirm = false
     @State private var pendingDeleteID: PersistentIdentifier? = nil
+
+    // >>> CHANGE-[2026-08-17 14:30:00]-[编辑页白屏重弹] 开始
+    // 原因: 备注图片记录一打开就同步 LocalImageStore.load 读盘 + performSearch localSearch 双重主线程阻塞，
+    //       超过 sheet 入场动画容忍阈值，系统判呈现失败→dismiss→重弹，表现即"白屏几秒后消失又重开"。
+    //       改为异步缓存：进入 onAppear 后台读图，body 只读缓存，无图时显示占位。
+    // 回退: 删除 loadedImages 这一行、onAppear 里的 Task.detached 读图段、noteCard 里 loadedImages 读取替换回 LocalImageStore.load 即可
+    @State private var loadedImages: [String: UIImage] = [:]
+    // 首帧守卫：init 给的初值 name 不要触发搜索，避免 sheet 入场时主线程 fetch 阻塞
+    @State private var didInitialLoad = false
+    // <<< CHANGE-[2026-08-17 14:30:00]-[编辑页白屏重弹] 结束
 
     // 食物库搜索（与手动添加页共用 FoodSearcher，改名时自动检索 → 用户确认 → 营养自动更新）
     @State private var searchText: String = ""
@@ -187,16 +200,22 @@ struct EditFoodView: View {
                     .padding(.vertical, 12)
                 }
                 .scrollDismissesKeyboard(.immediately)
+                // >>> CHANGE-[2026-08-17 15:00:00]-[编辑页大图改ZStack overlay] 开始
+                // 原因: fullScreenCover 挂在 NavigationStack 上，present 首帧易撞项目已知 NavigationStack 多轮重算断言，
+                //       cover 被系统强制 dismiss，表现为点小图白屏后自动回编辑页。改用 ZStack 内条件渲染绕开系统转场。
+                // 回退: 删除此 if 块，恢复上面注释掉的 fullScreenCover(isPresented: $showFullImage) 写法即可
+                if let selectedImage {
+                    FullImageView(image: selectedImage, onDismiss: { self.selectedImage = nil })
+                        .ignoresSafeArea()
+                        .zIndex(100)
+                        .transition(.opacity)
+                }
+                // <<< CHANGE-[2026-08-17 15:00:00]-[编辑页大图改ZStack overlay] 结束
             }
             .navigationTitle("编辑食物")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(image: $pickedImage)
-            }
-            .fullScreenCover(isPresented: $showFullImage) {
-                if let img = LocalImageStore.load(fullImageName) {
-                    FullImageView(image: img)
-                }
             }
             .confirmationDialog("添加图片", isPresented: $showImageSourceDialog, titleVisibility: .visible) {
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
@@ -211,16 +230,22 @@ struct EditFoodView: View {
                 Button("从相册选择") { showImagePicker = true }
                 Button("取消", role: .cancel) {}
             }
+            // >>> CHANGE-[2026-08-17 16:05:00]-[看大图时隐藏编辑页顶部按钮] 开始
+            // 原因: 大图改成 ZStack 条件渲染后，NavigationStack 顶部"取消/保存"仍浮在大图上方，看大图时应隐藏。
+            // 回退: 去掉外层 if selectedImage == nil 包裹，恢复两个 ToolbarItem 直接并列即可。
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }
-                        .font(AIATheme.Font.callout.weight(.semibold))
-                        .foregroundStyle(AIATheme.blue)
+                if selectedImage == nil {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { dismiss() }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("保存") { save() }
+                            .font(AIATheme.Font.callout.weight(.semibold))
+                            .foregroundStyle(AIATheme.blue)
+                    }
                 }
             }
+            // <<< CHANGE-[2026-08-17 16:05:00]-[看大图时隐藏编辑页顶部按钮] 结束
             .alert("删除食物记录", isPresented: $showDeleteConfirm) {
                 Button("取消", role: .cancel) {}
                 Button("删除", role: .destructive) {
@@ -238,15 +263,38 @@ struct EditFoodView: View {
                     noteText = existing.note
                     noteImageNames = existing.imageNames
                 }
+                // >>> CHANGE-[2026-08-17 14:30:00]-[编辑页白屏重弹] 开始
+                // 异步读图：避免首帧同步读文件阻塞 sheet 入场动画
+                let names = ([sourceImageName] + noteImageNames).compactMap { $0 }
+                Task.detached(priority: .userInitiated) {
+                    var dict: [String: UIImage] = [:]
+                    for n in names {
+                        if let img = LocalImageStore.load(n) {
+                            dict[n] = img
+                        }
+                    }
+                    await MainActor.run { loadedImages = dict }
+                }
+                // <<< CHANGE-[2026-08-17 14:30:00]-[编辑页白屏重弹] 结束
             }
             .onChange(of: pickedImage) { _, new in
                 guard let img = new else { return }
                 pickedImage = nil
                 if let name = LocalImageStore.save(img) {
                     noteImageNames.append(name)
+                    // >>> CHANGE-[2026-08-17 14:30:00]-[编辑页白屏重弹] 开始
+                    loadedImages[name] = img
+                    // <<< CHANGE-[2026-08-17 14:30:00]-[编辑页白屏重弹] 结束
                 }
             }
             .onChange(of: name) { _, newValue in
+                // >>> CHANGE-[2026-08-17 14:30:00]-[编辑页白屏重弹] 开始
+                // 首帧（init 设的初值）不触发搜索，避免 sheet 入场时主线程 fetch 阻塞
+                if !didInitialLoad {
+                    didInitialLoad = true
+                    return
+                }
+                // <<< CHANGE-[2026-08-17 14:30:00]-[编辑页白屏重弹] 结束
                 performSearch(newValue)
             }
             .onDisappear {
@@ -564,31 +612,35 @@ struct EditFoodView: View {
                 .frame(minHeight: 48)
                 .scrollContentBackground(.hidden)
 
-            let hasSource = LocalImageStore.load(sourceImageName) != nil
-            let hasNoteImg = !noteImageNames.isEmpty
+            // >>> CHANGE-[2026-08-17 14:30:00]-[编辑页白屏重弹] 开始
+            let hasSource = sourceImageName.map { loadedImages[$0] != nil } ?? false
+            let hasNoteImg = noteImageNames.contains { loadedImages[$0] != nil }
             if hasSource || hasNoteImg {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
                         // 来源识别原图（绿色角标「来源」），点击看大图
-                        if let sImg = LocalImageStore.load(sourceImageName), let sName = sourceImageName {
+                        if let sName = sourceImageName, let sImg = loadedImages[sName] {
                             thumbnail(image: sImg, badge: "来源",
-                                      onTap: { fullImageName = sName; showFullImage = true },
+                                      onTap: { selectedImage = sImg },
                                       onDelete: {
                                           LocalImageStore.delete(sName)
+                                          loadedImages[sName] = nil
                                           sourceImageName = nil
                                       })
                         }
                         // 备注附件图片
                         ForEach(Array(noteImageNames.enumerated()), id: \.offset) { _, name in
-                            if let img = LocalImageStore.load(name) {
+                            if let img = loadedImages[name] {
                                 thumbnail(image: img, badge: nil,
-                                          onTap: { fullImageName = name; showFullImage = true },
+                                          onTap: { selectedImage = img },
                                           onDelete: {
                                               LocalImageStore.delete(name)
+                                              loadedImages[name] = nil
                                               noteImageNames.removeAll { $0 == name }
                                           })
                             }
                         }
+                        // <<< CHANGE-[2026-08-17 14:30:00]-[编辑页白屏重弹] 结束
                         addImageButton
                     }
                     .padding(.vertical, 2)
@@ -894,9 +946,18 @@ struct EditFoodView: View {
         cloudErrorMessage = nil
         isCloudSearching = false
 
-        let results = FoodSearcher.localSearch(trimmed, foodMetas: foodMetas, in: context)
-        searchResults = results
-        isSearching = false
+        // >>> CHANGE-[2026-08-17 14:30:00]-[编辑页白屏重弹] 开始
+        // 本地检索涉及 context fetch，丢到后台线程避免主线程阻塞 sheet 入场动画
+        let ctx = context
+        let metas = foodMetas
+        Task.detached(priority: .userInitiated) {
+            let results = FoodSearcher.localSearch(trimmed, foodMetas: metas, in: ctx)
+            Task { @MainActor in
+                searchResults = results
+                isSearching = false
+            }
+        }
+        // <<< CHANGE-[2026-08-17 14:30:00]-[编辑页白屏重弹] 结束
         // 联网搜索由 searchResultList 底部的「联网搜索营养」按钮手动触发，不自动发起。
     }
 
@@ -989,8 +1050,10 @@ private struct BillDraft: Identifiable {
     var showCategoryPicker = false
     var showImageSourceDialog = false
     var showImagePicker = false
-    var showFullImage = false
     var pickedImage: UIImage? = nil
+    // >>> CHANGE-[2026-08-17 15:00:00]-[草稿卡大图改ZStack overlay] 开始
+    var selectedImage: UIImage? = nil
+    // <<< CHANGE-[2026-08-17 15:00:00]-[草稿卡大图改ZStack overlay] 结束
     // 结果态
     var saved = false
     var savedBill: Bill? = nil
@@ -1036,8 +1099,10 @@ struct EditBillView: View {
     @State private var showCategoryPicker = false
     @State private var showImageSourceDialog = false
     @State private var showImagePicker = false
-    @State private var showFullImage = false
     @State private var showDeleteConfirm = false
+    // >>> CHANGE-[2026-08-17 11:20:00]-[账单编辑大图白屏] 开始
+    @State private var selectedImage: UIImage? = nil
+    // <<< CHANGE-[2026-08-17 11:20:00]-[账单编辑大图白屏] 结束
     @State private var pickedImage: UIImage? = nil
     @State private var pendingDeleteID: PersistentIdentifier? = nil
 
@@ -1100,35 +1165,52 @@ struct EditBillView: View {
                     }
                     .scrollDismissesKeyboard(.immediately)
                 }
+                // >>> CHANGE-[2026-08-17 15:00:00]-[编辑页大图改ZStack overlay] 开始
+                // 原因: fullScreenCover 挂在 NavigationStack 上 present 首帧易撞 NavigationStack 多轮重算断言被强制 dismiss，
+                //      表现点小图白屏后自动回编辑页。改为 ZStack 内条件渲染绕开系统转场。
+                // 回退: 删除此 if 块，恢复 fullScreenCover(isPresented: $showFullImage) 写法即可
+                if let selectedImage {
+                    FullImageView(image: selectedImage, onDismiss: { self.selectedImage = nil })
+                        .ignoresSafeArea()
+                        .zIndex(100)
+                        .transition(.opacity)
+                }
+                // <<< CHANGE-[2026-08-17 15:00:00]-[编辑页大图改ZStack overlay] 结束
             }
             .navigationTitle(isAdding ? "添加账单" : "编辑账单")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showCategoryPicker) {
                 BillCategoryPickerSheet(selection: $category)
             }
+            // >>> CHANGE-[2026-08-17 16:05:00]-[看大图时隐藏编辑页顶部按钮] 开始
+            // 原因: 大图改成 ZStack 条件渲染后，NavigationStack 顶部"取消/保存/完成"仍浮在大图上方，看大图时应隐藏。
+            // 回退: 去掉外层 if selectedImage == nil 包裹，恢复 ToolbarItem 直接并列即可。
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    if isAdding {
-                        // 还有待保存草稿 → "保存"（批量入库）；全部已保存 → "完成"直接关闭
-                        if drafts.contains(where: { !$0.saved }) {
-                            Button("保存") { saveAllDrafts() }
-                                .font(AIATheme.Font.callout.weight(.semibold))
-                                .foregroundStyle(AIATheme.blue)
+                if selectedImage == nil {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { dismiss() }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        if isAdding {
+                            // 还有待保存草稿 → "保存"（批量入库）；全部已保存 → "完成"直接关闭
+                            if drafts.contains(where: { !$0.saved }) {
+                                Button("保存") { saveAllDrafts() }
+                                    .font(AIATheme.Font.callout.weight(.semibold))
+                                    .foregroundStyle(AIATheme.blue)
+                            } else {
+                                Button("完成") { dismiss() }
+                                    .font(AIATheme.Font.callout.weight(.semibold))
+                                    .foregroundStyle(AIATheme.blue)
+                            }
                         } else {
-                            Button("完成") { dismiss() }
+                            Button("保存") { save() }
                                 .font(AIATheme.Font.callout.weight(.semibold))
                                 .foregroundStyle(AIATheme.blue)
                         }
-                    } else {
-                        Button("保存") { save() }
-                            .font(AIATheme.Font.callout.weight(.semibold))
-                            .foregroundStyle(AIATheme.blue)
                     }
                 }
             }
+            // <<< CHANGE-[2026-08-17 16:05:00]-[看大图时隐藏编辑页顶部按钮] 结束
             .confirmationDialog("添加图片", isPresented: $showImageSourceDialog, titleVisibility: .visible) {
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
                     // 直接弹独立黑窗相机（不经 fullScreenCover，无白屏过渡）；
@@ -1144,11 +1226,6 @@ struct EditBillView: View {
             }
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(image: $pickedImage)
-            }
-            .fullScreenCover(isPresented: $showFullImage) {
-                if let img = LocalImageStore.load(imageName) {
-                    FullImageView(image: img)
-                }
             }
             .alert("删除账单", isPresented: $showDeleteConfirm) {
                 Button("取消", role: .cancel) {}
@@ -1203,7 +1280,8 @@ struct EditBillView: View {
 
     /// 未保存草稿卡：独立可编辑表单 + 底部"保存 / 删除"
     private func draftForm(_ draft: Binding<BillDraft>, proxy: ScrollViewProxy) -> some View {
-        VStack(spacing: 0) {
+        ZStack {
+            VStack(spacing: 0) {
             VStack(spacing: 0) {
                 billRow(icon: "building.2.fill", label: "商户 / 对象", text: draft.merchant, placeholder: "如 星巴克")
                 Divider().padding(.leading, 46)
@@ -1309,7 +1387,7 @@ struct EditBillView: View {
                     HStack(spacing: 12) {
                         ZStack(alignment: .topTrailing) {
                             Button {
-                                draft.showFullImage.wrappedValue = true
+                                draft.selectedImage.wrappedValue = img
                             } label: {
                                 Image(uiImage: img)
                                     .resizable()
@@ -1389,6 +1467,15 @@ struct EditBillView: View {
                 .padding(.top, 4)
             }
         }
+        // >>> CHANGE-[2026-08-17 15:00:00]-[草稿卡大图改ZStack overlay] 开始
+        if let sel = draft.selectedImage.wrappedValue {
+            FullImageView(image: sel, onDismiss: { draft.selectedImage.wrappedValue = nil })
+                .ignoresSafeArea()
+                .zIndex(100)
+                .transition(.opacity)
+        }
+        // <<< CHANGE-[2026-08-17 15:00:00]-[草稿卡大图改ZStack overlay] 结束
+        }
         .sheet(isPresented: draft.showCategoryPicker) {
             BillCategoryPickerSheet(selection: draft.category)
         }
@@ -1405,11 +1492,6 @@ struct EditBillView: View {
         }
         .sheet(isPresented: draft.showImagePicker) {
             ImagePicker(image: draft.pickedImage)
-        }
-        .fullScreenCover(isPresented: draft.showFullImage) {
-            if let img = LocalImageStore.load(draft.imageName.wrappedValue) {
-                FullImageView(image: img)
-            }
         }
         .onChange(of: draft.pickedImage.wrappedValue) { _, new in
             guard let img = new else { return }
@@ -1627,7 +1709,7 @@ struct EditBillView: View {
                 HStack(spacing: 12) {
                     ZStack(alignment: .topTrailing) {
                         Button {
-                            showFullImage = true
+                            selectedImage = img
                         } label: {
                             Image(uiImage: img)
                                 .resizable()
@@ -1914,9 +1996,11 @@ private struct TodoDraft: Identifiable {
     // 每卡独立 UI 状态
     var editingCustom: AlertItem? = nil
     var showImagePicker = false
-    var showFullImage = false
     var showImageSourceDialog = false
     var pickedImage: UIImage? = nil
+    // >>> CHANGE-[2026-08-17 15:00:00]-[草稿卡大图改ZStack overlay] 开始
+    var selectedImage: UIImage? = nil
+    // <<< CHANGE-[2026-08-17 15:00:00]-[草稿卡大图改ZStack overlay] 结束
     // 结果态
     var saved = false
     var savedReminder: Reminder? = nil
@@ -1978,7 +2062,9 @@ struct EditTodoView: View {
 
     // 来源识别原图（Reminder.imageName），仅本地；在备注卡展示，与 EditBillView 同款
     @State private var imageName: String?
-    @State private var showFullImage = false
+    // >>> CHANGE-[2026-08-17 11:20:00]-[待办编辑大图白屏] 开始
+    @State private var selectedImage: UIImage? = nil
+    // <<< CHANGE-[2026-08-17 11:20:00]-[待办编辑大图白屏] 结束
     @State private var showImageSourceDialog = false
     @State private var showImagePicker = false
     @State private var pickedImage: UIImage? = nil
@@ -2072,43 +2158,55 @@ struct EditTodoView: View {
                 }
                 .scrollDismissesKeyboard(.immediately)
             }
+            // >>> CHANGE-[2026-08-17 15:00:00]-[编辑页大图改ZStack overlay] 开始
+            // 原因: fullScreenCover 挂在 NavigationStack 上 present 首帧易撞 NavigationStack 多轮重算断言被强制 dismiss,
+            //      表现点小图白屏后自动回编辑页。改为 ZStack 内条件渲染绕开系统转场。
+            // 回退: 删除此 if 块，恢复 fullScreenCover(isPresented: $showFullImage) 写法即可
+            if let selectedImage {
+                FullImageView(image: selectedImage, onDismiss: { self.selectedImage = nil })
+                    .ignoresSafeArea()
+                    .zIndex(100)
+                    .transition(.opacity)
+            }
+            // <<< CHANGE-[2026-08-17 15:00:00]-[编辑页大图改ZStack overlay] 结束
         }
         .navigationTitle(isAdding ? "添加待办" : "编辑待办")
         .navigationBarTitleDisplayMode(.inline)
+        // >>> CHANGE-[2026-08-17 16:05:00]-[看大图时隐藏编辑页顶部按钮] 开始
+        // 原因: 大图改成 ZStack 条件渲染后，NavigationStack 顶部"取消/保存/完成"仍浮在大图上方，看大图时应隐藏。
+        // 回退: 去掉外层 if selectedImage == nil 包裹，恢复 ToolbarItem 直接并列即可。
         .toolbar {
-            // sheet 弹起模式：左「取消」dismiss 关闭 sheet（无系统返回箭头）
-            ToolbarItem(placement: .cancellationAction) {
-                Button("取消") { dismiss() }
-            }
-            ToolbarItem(placement: .confirmationAction) {
-                if isAdding {
-                    // 还有待保存草稿 → "保存"（批量入库）；全部已保存 → "完成"直接关闭
-                    if drafts.contains(where: { !$0.saved }) {
-                        Button("保存") { saveAllTodoDrafts() }
-                            .font(AIATheme.Font.callout.weight(.semibold))
-                            .foregroundStyle(AIATheme.blue)
+            if selectedImage == nil {
+                // sheet 弹起模式：左「取消」dismiss 关闭 sheet（无系统返回箭头）
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if isAdding {
+                        // 还有待保存草稿 → "保存"（批量入库）；全部已保存 → "完成"直接关闭
+                        if drafts.contains(where: { !$0.saved }) {
+                            Button("保存") { saveAllTodoDrafts() }
+                                .font(AIATheme.Font.callout.weight(.semibold))
+                                .foregroundStyle(AIATheme.blue)
+                        } else {
+                            Button("完成") { dismiss() }
+                                .font(AIATheme.Font.callout.weight(.semibold))
+                                .foregroundStyle(AIATheme.blue)
+                        }
                     } else {
-                        Button("完成") { dismiss() }
+                        Button("保存") { save() }
                             .font(AIATheme.Font.callout.weight(.semibold))
                             .foregroundStyle(AIATheme.blue)
                     }
-                } else {
-                    Button("保存") { save() }
-                        .font(AIATheme.Font.callout.weight(.semibold))
-                        .foregroundStyle(AIATheme.blue)
                 }
             }
         }
+        // <<< CHANGE-[2026-08-17 16:05:00]-[看大图时隐藏编辑页顶部按钮] 结束
         .sheet(item: $editingCustom) { item in
             customTimeSheet(item: item)
         }
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(image: $pickedImage)
-        }
-        .fullScreenCover(isPresented: $showFullImage) {
-            if let img = LocalImageStore.load(imageName) {
-                FullImageView(image: img)
-            }
         }
         .confirmationDialog("添加图片", isPresented: $showImageSourceDialog, titleVisibility: .visible) {
             if UIImagePickerController.isSourceTypeAvailable(.camera) {
@@ -2335,7 +2433,7 @@ struct EditTodoView: View {
                 HStack(spacing: 12) {
                     ZStack(alignment: .topTrailing) {
                         Button {
-                            showFullImage = true
+                            selectedImage = img
                         } label: {
                             Image(uiImage: img)
                                 .resizable()
@@ -2639,7 +2737,8 @@ struct EditTodoView: View {
 
     /// 未保存草稿卡：独立可编辑表单 + 底部"删除"（仅多于 1 张时显示）
     private func todoForm(_ draft: Binding<TodoDraft>, showDelete: Bool, proxy: ScrollViewProxy) -> some View {
-        VStack(spacing: 0) {
+        ZStack {
+            VStack(spacing: 0) {
             // 内容
             VStack(alignment: .leading, spacing: 8) {
                 Text("内容")
@@ -2699,16 +2798,20 @@ struct EditTodoView: View {
                 .padding(.top, 4)
             }
         }
+        // >>> CHANGE-[2026-08-17 15:00:00]-[草稿卡大图改ZStack overlay] 开始
+        if let sel = draft.selectedImage.wrappedValue {
+            FullImageView(image: sel, onDismiss: { draft.selectedImage.wrappedValue = nil })
+                .ignoresSafeArea()
+                .zIndex(100)
+                .transition(.opacity)
+        }
+        // <<< CHANGE-[2026-08-17 15:00:00]-[草稿卡大图改ZStack overlay] 结束
+        }
         .sheet(item: draft.editingCustom) { item in
             customTimeSheetDraft(item: item, draft: draft)
         }
         .sheet(isPresented: draft.showImagePicker) {
             ImagePicker(image: draft.pickedImage)
-        }
-        .fullScreenCover(isPresented: draft.showFullImage) {
-            if let img = LocalImageStore.load(draft.imageName.wrappedValue) {
-                FullImageView(image: img)
-            }
         }
         .confirmationDialog("添加图片", isPresented: draft.showImageSourceDialog, titleVisibility: .visible) {
             if UIImagePickerController.isSourceTypeAvailable(.camera) {
@@ -2805,7 +2908,7 @@ struct EditTodoView: View {
             HStack(spacing: 12) {
                 ZStack(alignment: .topTrailing) {
                     Button {
-                        draft.showFullImage.wrappedValue = true
+                        draft.selectedImage.wrappedValue = img
                     } label: {
                         Image(uiImage: img)
                             .resizable()
@@ -3126,7 +3229,9 @@ struct EditHealthView: View {
 
     // 来源识别原图（HealthMetric.imageName），仅本地；在备注卡展示，与 EditBillView 同款
     @State private var imageName: String?
-    @State private var showFullImage = false
+    // >>> CHANGE-[2026-08-17 11:20:00]-[健康编辑大图白屏] 开始
+    @State private var selectedImage: UIImage? = nil
+    // <<< CHANGE-[2026-08-17 11:20:00]-[健康编辑大图白屏] 结束
     @State private var showImageSourceDialog = false
     @State private var showImagePicker = false
     @State private var pickedImage: UIImage? = nil
@@ -3160,26 +3265,38 @@ struct EditHealthView: View {
                     .padding(.vertical, 12)
                 }
                 .scrollDismissesKeyboard(.immediately)
+                // >>> CHANGE-[2026-08-17 15:00:00]-[编辑页大图改ZStack overlay] 开始
+                // 原因: fullScreenCover 挂在 NavigationStack 上 present 首帧易撞 NavigationStack 多轮重算断言被强制 dismiss,
+                //      表现点小图白屏后自动回编辑页。改为 ZStack 内条件渲染绕开系统转场。
+                // 回退: 删除此 if 块，恢复 fullScreenCover(isPresented: $showFullImage) 写法即可
+                if let selectedImage {
+                    FullImageView(image: selectedImage, onDismiss: { self.selectedImage = nil })
+                        .ignoresSafeArea()
+                        .zIndex(100)
+                        .transition(.opacity)
+                }
+                // <<< CHANGE-[2026-08-17 15:00:00]-[编辑页大图改ZStack overlay] 结束
             }
             .navigationTitle("编辑健康指标")
             .navigationBarTitleDisplayMode(.inline)
+            // >>> CHANGE-[2026-08-17 16:05:00]-[看大图时隐藏编辑页顶部按钮] 开始
+            // 原因: 大图改成 ZStack 条件渲染后，NavigationStack 顶部"取消/保存"仍浮在大图上方，看大图时应隐藏。
+            // 回退: 去掉外层 if selectedImage == nil 包裹，恢复两个 ToolbarItem 直接并列即可。
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }
-                        .font(AIATheme.Font.callout.weight(.semibold))
-                        .foregroundStyle(AIATheme.blue)
+                if selectedImage == nil {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { dismiss() }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("保存") { save() }
+                            .font(AIATheme.Font.callout.weight(.semibold))
+                            .foregroundStyle(AIATheme.blue)
+                    }
                 }
             }
+            // <<< CHANGE-[2026-08-17 16:05:00]-[看大图时隐藏编辑页顶部按钮] 结束
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(image: $pickedImage)
-            }
-            .fullScreenCover(isPresented: $showFullImage) {
-                if let img = LocalImageStore.load(imageName) {
-                    FullImageView(image: img)
-                }
             }
             .confirmationDialog("添加图片", isPresented: $showImageSourceDialog, titleVisibility: .visible) {
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
@@ -3285,7 +3402,7 @@ struct EditHealthView: View {
                 HStack(spacing: 12) {
                     ZStack(alignment: .topTrailing) {
                         Button {
-                            showFullImage = true
+                            selectedImage = img
                         } label: {
                             Image(uiImage: img)
                                 .resizable()

@@ -584,9 +584,8 @@ struct BillRowCard: View {
     var onRemove: () -> Void
     @Environment(\.modelContext) private var context
 
-    /// 编辑弹窗目标实例。待确认态点「编辑」/点卡片会先提交入库再弹 EditBillView；
-    /// 已保存态点「编辑」/点卡片直接弹。sheet 挂在 Group 稳定祖先上，避免提交后分支切换丢 sheet。
-    @State private var editTarget: Bill?
+    /// 编辑弹窗目标：存 PersistentIdentifier，sheet 内取活实例，避免 @Query 刷新抖动导致 sheet 重弹。
+    @State private var editTargetID: PersistentIdentifier?
 
     private var live: Bill? { allBills.first { $0.syncId.uuidString == (item.syncId ?? "") } }
     private var payloadBill: BillPayload? {
@@ -615,13 +614,17 @@ struct BillRowCard: View {
                     BillSavedCard(bill: bill,
                                   onDelete: { SafeDelete.bill(bill, in: context); onRemove() },
                                   onCopy: { copySummary(bill.summaryText) },
-                                  onEdit: { editTarget = bill })
+                                  onEdit: { editTargetID = bill.persistentModelID })
                 }
             } else {
                 EmptyView()
             }
         }
-        .sheet(item: $editTarget) { EditBillView(bill: $0, isAdding: false) }
+        .sheet(item: $editTargetID) { id in
+            if let b = context.model(for: id) as? Bill {
+                EditBillView(bill: b, isAdding: false)
+            }
+        }
     }
 
     private var pendingBody: some View {
@@ -692,7 +695,7 @@ struct BillRowCard: View {
         let bill = commitBill()
         item.syncId = bill.syncId.uuidString
         persist()
-        DispatchQueue.main.async { editTarget = bill }
+        DispatchQueue.main.async { editTargetID = bill.persistentModelID }
     }
 
     private func copySummary(_ s: String) {
@@ -753,9 +756,8 @@ struct TodoRowCard: View {
     var onRemove: () -> Void
     @Environment(\.modelContext) private var context
 
-    /// 编辑弹窗目标实例。待确认态点「编辑」/点卡片先入库再弹 EditTodoSheet；
-    /// 已保存态点「编辑」/点卡片直接弹。sheet 挂在 Group 稳定祖先上。
-    @State private var editTarget: Reminder?
+    /// 编辑弹窗目标：存 PersistentIdentifier，sheet 内取活实例，避免 @Query 刷新抖动导致 sheet 重弹。
+    @State private var editTargetID: PersistentIdentifier?
 
     private var live: Reminder? { allReminders.first { $0.syncId.uuidString == (item.syncId ?? "") } }
     private var payloadTodo: TodoPayload? {
@@ -784,13 +786,17 @@ struct TodoRowCard: View {
                     TodoSavedCard(reminder: r,
                                   onDelete: { SafeDelete.reminder(r, in: context); onRemove() },
                                   onCopy: { UIPasteboard.general.string = r.title },
-                                  onEdit: { editTarget = r })
+                                  onEdit: { editTargetID = r.persistentModelID })
                 }
             } else {
                 EmptyView()
             }
         }
-        .sheet(item: $editTarget) { EditTodoSheet(reminder: $0, isAdding: false) }
+        .sheet(item: $editTargetID) { id in
+            if let r = context.model(for: id) as? Reminder {
+                EditTodoSheet(reminder: r, isAdding: false)
+            }
+        }
     }
 
     private var pendingBody: some View {
@@ -847,7 +853,7 @@ struct TodoRowCard: View {
         let r = commitReminder()
         item.syncId = r.syncId.uuidString
         persist()
-        DispatchQueue.main.async { editTarget = r }
+        DispatchQueue.main.async { editTargetID = r.persistentModelID }
     }
 }
 
@@ -887,10 +893,9 @@ struct FoodRowCard: View {
     var onRemove: () -> Void
     @Environment(\.modelContext) private var context
 
-    /// 编辑弹窗的目标实例。待确认态点「编辑」会先提交入库、再把刚建的 FoodEntry 交给
-    /// EditFoodView 整页弹窗——与已保存态的「编辑」行为完全一致（不再做 in-place 行内编辑）。
-    /// sheet 挂在 Group 这一稳定祖先上，避免提交后 syncId 变非空导致视图分支切换时 sheet 丢失。
-    @State private var editTarget: FoodEntry?
+    /// 编辑弹窗目标：存 PersistentIdentifier（ID 永远稳定），sheet 内再取活实例，
+    /// 避免后台 @Query 刷新导致 FoodEntry 引用/fault 抖动、sheet item identity 变化触发 dismiss→重弹。
+    @State private var editTargetID: PersistentIdentifier?
 
     private var live: FoodEntry? { allFoods.first { $0.syncId.uuidString == (item.syncId ?? "") } }
 
@@ -929,8 +934,12 @@ struct FoodRowCard: View {
             }
         }
         // EditFoodView 自包 NavigationStack，sheet 内点「保存/取消/删除」自己 dismiss；
-        // .sheet(item:) 在用户关闭时自动把 editTarget 置 nil。
-        .sheet(item: $editTarget) { EditFoodView(entry: $0) }
+        // .sheet(item:) 在用户关闭时自动把 editTargetID 置 nil。
+        .sheet(item: $editTargetID) { id in
+            if let f = context.model(for: id) as? FoodEntry {
+                EditFoodView(entry: f)
+            }
+        }
     }
 
     private var pendingCard: some View {
@@ -983,7 +992,7 @@ struct FoodRowCard: View {
             FoodSavedCard(food: f,
                           onDelete: { SafeDelete.food(f, in: context); onRemove() },
                           onCopy: { UIPasteboard.general.string = f.name },
-                          onEdit: { editTarget = f })
+                          onEdit: { editTargetID = f.persistentModelID })
         }
     }
 
@@ -1058,7 +1067,7 @@ struct FoodRowCard: View {
         guard let f = commitEntry() else { return }
         item.syncId = f.syncId.uuidString
         persist()
-        DispatchQueue.main.async { editTarget = f }
+        DispatchQueue.main.async { editTargetID = f.persistentModelID }
     }
 }
 
@@ -1123,9 +1132,8 @@ struct HealthRowCard: View {
     var onRemove: () -> Void
     @Environment(\.modelContext) private var context
 
-    /// 编辑弹窗目标实例。待确认态点「编辑」/点卡片先入库再弹 EditHealthView；
-    /// 已保存态点「编辑」/点卡片直接弹。sheet 挂在 Group 稳定祖先上。
-    @State private var editTarget: HealthMetric?
+    /// 编辑弹窗目标：存 PersistentIdentifier，sheet 内取活实例，避免 @Query 刷新抖动导致 sheet 重弹。
+    @State private var editTargetID: PersistentIdentifier?
 
     private var live: HealthMetric? { allHealths.first { $0.syncId.uuidString == (item.syncId ?? "") } }
     private var payloadHealth: HealthPayload? {
@@ -1154,13 +1162,17 @@ struct HealthRowCard: View {
                     HealthSavedCard(health: h,
                                     onDelete: { SafeDelete.health(h, in: context); onRemove() },
                                     onCopy: { UIPasteboard.general.string = "\(h.metric) \(h.value)\(h.unit)" },
-                                    onEdit: { editTarget = h })
+                                    onEdit: { editTargetID = h.persistentModelID })
                 }
             } else {
                 EmptyView()
             }
         }
-        .sheet(item: $editTarget) { EditHealthView(metric: $0) }
+        .sheet(item: $editTargetID) { id in
+            if let h = context.model(for: id) as? HealthMetric {
+                EditHealthView(metric: h)
+            }
+        }
     }
 
     private var pendingBody: some View {
@@ -1211,7 +1223,7 @@ struct HealthRowCard: View {
         let h = commitHealth()
         item.syncId = h.syncId.uuidString
         persist()
-        DispatchQueue.main.async { editTarget = h }
+        DispatchQueue.main.async { editTargetID = h.persistentModelID }
     }
 }
 

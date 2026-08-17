@@ -99,6 +99,7 @@ struct AttachmentSection: View {
 // 全屏查看大图（可缩放、双指平移、单击关闭、点保存按钮存相册）
 struct FullImageView: View {
     let image: UIImage
+    var onDismiss: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var scale: CGFloat = 1
     @State private var toast: String?
@@ -120,7 +121,7 @@ struct FullImageView: View {
                         .onEnded { _ in withAnimation { scale = max(1, min(scale, 4)) } }
                 )
                 // 单击关闭：与缩放手势同属交互手势，不冲突，不再与长按混排
-                .onTapGesture { dismiss() }
+                .onTapGesture { onDismiss?() ?? dismiss() }
 
             VStack {
                 HStack {
@@ -137,7 +138,7 @@ struct FullImageView: View {
                             .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
                     }
                     Spacer()
-                    Button { dismiss() } label: {
+                    Button { onDismiss?() ?? dismiss() } label: {
                         Image(systemName: "xmark")
                             .font(AIATheme.Font.body.weight(.bold))
                             .foregroundStyle(.black)
