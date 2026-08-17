@@ -103,10 +103,6 @@ struct FullImageView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var scale: CGFloat = 1
     @State private var toast: String?
-    @State private var showSaveAlert = false
-    @State private var saving = false
-    // 强持有保存回调目标，避免 UIImageWriteToSavedPhotosAlbum（ObjC 弱持有）回调时目标已被 ARC 释放
-    @State private var photoSaver: ImageSaveDelegate?
 
     var body: some View {
         ZStack {
@@ -123,35 +119,11 @@ struct FullImageView: View {
                 // 单击关闭：与缩放手势同属交互手势，不冲突，不再与长按混排
                 .onTapGesture { onDismiss?() ?? dismiss() }
 
-            VStack {
-                HStack {
-                    // 保存按钮（实打实的 Button，不依赖手势识别，最稳）
-                    Button {
-                        showSaveAlert = true
-                    } label: {
-                        Image(systemName: "square.and.arrow.down")
-                            .font(AIATheme.Font.body.weight(.bold))
-                            .foregroundStyle(.black)
-                            .frame(width: 32, height: 32)
-                            .background(.white)
-                            .clipShape(Circle())
-                            .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
-                    }
-                    Spacer()
-                    Button { onDismiss?() ?? dismiss() } label: {
-                        Image(systemName: "xmark")
-                            .font(AIATheme.Font.body.weight(.bold))
-                            .foregroundStyle(.black)
-                            .frame(width: 32, height: 32)
-                            .background(.white)
-                            .clipShape(Circle())
-                            .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
-                    }
-                }
-                .padding(.top, 8)
-                .padding(.horizontal, 16)
-                Spacer()
-            }
+            // >>> CHANGE-[2026-08-17 19:30:00]-[大图查看去掉顶部按钮] 开始
+            // 原因: 大图查看页顶部两个白色圆按钮（保存/关闭）在亮色图片上像"白点/空白椭圆"，用户认为多余。
+            //       关闭已可由"点击图片任意处"完成(.onTapGesture)，保存功能非必需，统一去掉顶部按钮。
+            // 回退: 恢复被删除的 VStack{HStack{保存按钮 Spacer 关闭按钮}...} 整段即可。
+            // <<< CHANGE-[2026-08-17 19:30:00]-[大图查看去掉顶部按钮] 结束
 
             if let toast {
                 VStack {
@@ -167,42 +139,6 @@ struct FullImageView: View {
                 .transition(.opacity)
                 .allowsHitTesting(false)   // toast 永不挡住底层交互
             }
-        }
-        .alert("保存到相册", isPresented: $showSaveAlert) {
-            Button("取消", role: .cancel) {}
-            Button("保存") { saveToPhotos() }
-        } message: {
-            Text("将这张照片保存到系统相册？")
-        }
-    }
-
-    private func saveToPhotos() {
-        guard !saving else { return }
-        saving = true
-        let saver = ImageSaveDelegate { error in
-            // 完成回调可能不在主线程，强制切回主线程再更新 SwiftUI 状态，避免跨线程操作 UI 导致卡死
-            DispatchQueue.main.async {
-                withAnimation {
-                    toast = error == nil ? "已保存到相册" : "保存失败：\(error?.localizedDescription ?? "未知错误")"
-                }
-                saving = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                    withAnimation { toast = nil }
-                }
-            }
-        }
-        photoSaver = saver // @State 强持有，保证回调目标存活到回调完成
-        UIImageWriteToSavedPhotosAlbum(image, saver, #selector(ImageSaveDelegate.didFinishSaving(_:didFinishSavingWithError:contextInfo:)), nil)
-    }
-
-    /// 保存相册的 Objective-C 回调代理
-    final class ImageSaveDelegate: NSObject {
-        let completion: (Error?) -> Void
-        init(completion: @escaping (Error?) -> Void) {
-            self.completion = completion
-        }
-        @objc func didFinishSaving(_ image: UIImage, didFinishSavingWithError error: Error?, contextInfo: UnsafeRawPointer) {
-            completion(error)
         }
     }
 }
