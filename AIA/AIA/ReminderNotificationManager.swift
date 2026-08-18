@@ -292,8 +292,50 @@ extension ReminderNotificationManager {
         }
         // 健康目标提醒独立子开关，但排程需 ModelContext（这里统一处理取消/重排）。
         rescheduleHealthGoalReminder(context: ModelContext(container))
+        // >>> CHANGE-[2026-08-18 18:28:46]-[睡眠提醒排程] 开始
+        // 原因: 新增"睡觉提醒"独立功能，默认开+默认23:00，点通知进首页并开始记录睡眠。
+        // 回退: 删除本段 + 删除文件末尾 sleepReminder extension 即可。
+        rescheduleSleepReminder()
+        // <<< CHANGE-[2026-08-18 18:28:46]-[睡眠提醒排程] 结束
     }
 }
+
+// >>> CHANGE-[2026-08-18 18:28:46]-[睡眠提醒扩展] 开始
+// MARK: - 睡觉提醒（独立开关，默认开、默认 23:00）
+// 到点发「睡眠时间到咯」提醒，点通知进首页并自动开始记录睡眠时间（弹睡眠遮罩）。
+extension ReminderNotificationManager {
+    static let sleepReminderID = "sleep-reminder"
+    static let sleepEnabledKey = "sleepReminderEnabled"
+    static let sleepHourKey = "sleepReminderHour"
+    static let sleepMinuteKey = "sleepReminderMinute"
+
+    /// 从 UserDefaults 读开关/时间，开启则排程、关闭则取消。identifier 固定 → 幂等覆盖。
+    static func rescheduleSleepReminder() {
+        guard UserDefaults.standard.bool(forKey: sleepEnabledKey) else {
+            cancelSleepReminder()
+            return
+        }
+        let h = UserDefaults.standard.integer(forKey: sleepHourKey)
+        let m = UserDefaults.standard.integer(forKey: sleepMinuteKey)
+        let content = UNMutableNotificationContent()
+        content.title = "睡眠时间到咯"
+        content.body = "快美美的睡上一觉吧，晚安😴"
+        content.sound = .default
+        // route=sleepReminder → ContentView.consumeNotificationRoute 拦截：
+        // 回首页 + 自动开始一次睡眠记录 + 弹遮罩。
+        content.userInfo = ["route": "sleepReminder"]
+        let trigger = makeDailyTrigger(hour: h, minute: m)
+        let request = UNNotificationRequest(identifier: sleepReminderID, content: content, trigger: trigger)
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error { print("[通知] 睡觉提醒排程失败: \(error)") }
+        }
+    }
+
+    static func cancelSleepReminder() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [sleepReminderID])
+    }
+}
+// <<< CHANGE-[2026-08-18 18:28:46]-[睡眠提醒扩展] 结束
 
 // MARK: - 健康目标傍晚提醒
 /// 傍晚（默认 19:00）发一条轻提醒，提示用户今天步数 / 饮水目标还没完成，

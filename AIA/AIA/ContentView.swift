@@ -2578,6 +2578,19 @@ struct ContentView: View {
             NavigationRouter.shared.popToRoot()
             return
         }
+        // >>> CHANGE-[2026-08-18 18:28:46]-[睡眠提醒通知路由] 开始
+        // 原因: 睡觉提醒通知点按 → 进首页 + 自动开始一次睡眠记录 + 弹遮罩。
+        // 守卫: 已在睡时不重复 toggle（避免误"醒来"），仅回首页。
+        // 回退: 删除本段即可。
+        if route == "sleepReminder" {
+            NavigationRouter.shared.popToRoot()              // 回首页宫格主界面
+            if currentActiveSleepSession(in: sleeps) == nil { // 仅在"未入睡"时自动开始记录
+                let activeAfter = toggleSleepSession(in: context, sleeps: sleeps)
+                showSleepMask = (activeAfter != nil)         // 刚入睡 → 盖遮罩；刚醒来 → 收遮罩
+            }
+            return
+        }
+        // <<< CHANGE-[2026-08-18 18:28:46]-[睡眠提醒通知路由] 结束
         // 桌面「快捷操作」组件（4×2）点击：WidgetKit 的 Link 触发 aia://voice|camera|chat|todo，
         // 直接映射到长按图标快捷操作的落地逻辑 consume(_:)，行为 100% 一致
         //（语音→自动开麦 / 拍照→弹相机 / 问好记→对话页 / 查待办→待办列表）。

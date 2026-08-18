@@ -109,6 +109,56 @@ struct SettingsView: View {
         .card()
     }
 
+    // >>> CHANGE-[2026-08-18 18:28:46]-[睡眠提醒设置卡] 开始
+    // 原因: 新增独立"睡觉提醒"卡，默认开+默认23:00，点通知进首页并开始记录睡眠。
+    // 回退: 删除本 card 定义 + 删除 body 中 sleepReminderCard 调用即可。
+    private var sleepReminderCard: some View {
+        let enabled = Binding<Bool>(
+            get: { UserDefaults.standard.bool(forKey: ReminderNotificationManager.sleepEnabledKey) },
+            set: { on in
+                UserDefaults.standard.set(on, forKey: ReminderNotificationManager.sleepEnabledKey)
+                ReminderNotificationManager.rescheduleFromStoredDefaults()
+            }
+        )
+        let storedHour = UserDefaults.standard.integer(forKey: ReminderNotificationManager.sleepHourKey)
+        let storedMin = UserDefaults.standard.integer(forKey: ReminderNotificationManager.sleepMinuteKey)
+        let timeBinding = Binding<Date>(
+            get: { Calendar.current.date(bySettingHour: storedHour, minute: storedMin, second: 0, of: Date()) ?? Date() },
+            set: { newDate in
+                let c = Calendar.current.dateComponents([.hour, .minute], from: newDate)
+                UserDefaults.standard.set(c.hour ?? 23, forKey: ReminderNotificationManager.sleepHourKey)
+                UserDefaults.standard.set(c.minute ?? 0, forKey: ReminderNotificationManager.sleepMinuteKey)
+                ReminderNotificationManager.rescheduleFromStoredDefaults()
+            }
+        )
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "moon.stars")
+                    .font(AIATheme.Font.callout.weight(.medium))
+                    .foregroundStyle(AIATheme.health)
+                Text("睡觉提醒")
+                    .font(AIATheme.Font.subhead.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            Toggle("到点提醒我该睡觉了", isOn: enabled)
+                .font(AIATheme.Font.subhead)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            if enabled.wrappedValue {
+                DatePicker("提醒时间", selection: timeBinding, displayedComponents: .hourAndMinute)
+                    .font(AIATheme.Font.subhead)
+            }
+            Text("到点发一条睡觉提醒，点通知会进首页并开始记录你的睡眠时间 🌙")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+                .lineSpacing(2)
+        }
+        .padding(14)
+        .card()
+    }
+    // <<< CHANGE-[2026-08-18 18:28:46]-[睡眠提醒设置卡] 结束
+
     @StateObject private var ent = EntitlementManager.shared
     @StateObject private var sub = SubscriptionManager.shared
     @StateObject private var cfg = GlobalConfigStore.shared
@@ -137,6 +187,7 @@ struct SettingsView: View {
                 imageAutoRecogCard
                 membershipCard
                 dailyCheckinCard
+                sleepReminderCard
                 guideCard
                 aboutCard
                 if devUnlocked {
