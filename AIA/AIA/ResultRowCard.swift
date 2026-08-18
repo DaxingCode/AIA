@@ -45,6 +45,14 @@ struct RecognitionItem: Identifiable, Codable {
     let payload: ItemPayload
 }
 
+/// 草稿编辑承载：待确认卡点「编辑」时，把识别 payload 交给编辑页，
+/// 编辑页保存时才真正落库（方案 B：先改草稿、保存才入库；取消不入库）。
+struct DraftEditTarget: Identifiable {
+    let id = UUID()
+    let payload: FoodPayload
+    let imageName: String?
+}
+
 /// 一条对话消息承载的完整识别结果。
 struct RecognitionResultPayload: Codable {
     let types: [String]
@@ -912,6 +920,8 @@ struct FoodRowCard: View {
     /// 编辑弹窗目标：存 PersistentIdentifier（ID 永远稳定），sheet 内再取活实例，
     /// 避免后台 @Query 刷新导致 FoodEntry 引用/fault 抖动、sheet item identity 变化触发 dismiss→重弹。
     @State private var editTargetID: PersistentIdentifier?
+    /// 草稿编辑承载（待确认卡点「编辑」），保存才落库；取消不入库
+    @State private var draftEditTarget: DraftEditTarget?
 
     private var live: FoodEntry? { allFoods.first { $0.syncId.uuidString == (item.syncId ?? "") } }
 
@@ -955,9 +965,16 @@ struct FoodRowCard: View {
         // 原因: 原先 EditFoodView 直出无导航栏（该入口漏包 NavigationStack），看不到取消/保存按钮。
         // 回退: 改回 EditFoodView(entry: f)。
         .sheet(item: $editTargetID) { id in
-            if let f = context.model(for: id) as? FoodEntry {
-                EditFoodSheet(entry: f)
-            }
+            // 去掉 storeIdentifier 拦截：savedCard.onEdit 传入的 @Query 活实例恒非 nil；
+            // 草稿路径走下方 draftEditTarget sheet，不进此处。真正失效引用由 EditFoodView.resolveEntry() 兜底 dismiss。
+            EditFoodSheet(entryID: id)
+        }
+        // 草稿编辑（待确认卡点「编辑」）：保存才落库，取消不入库（方案 B）
+        .sheet(item: $draftEditTarget) { target in
+            EditFoodSheet(draftPayload: target.payload, imageName: target.imageName, onDraftSaved: { syncId in
+                item.syncId = syncId
+                persist()
+            })
         }
         // <<< CHANGE-[2026-08-17 17:25:00]-[编辑食物统一EditFoodSheet] 结束
     }
@@ -1017,7 +1034,16 @@ struct FoodRowCard: View {
                               // <<< CHANGE-[2026-08-17 11:32:00]-[临时对象失效崩溃] 结束
                           },
                           onCopy: { UIPasteboard.general.string = f.name },
-                          onEdit: { editTargetID = f.persistentModelID })
+                          onEdit: {
+                              // >>> CHANGE-[2026-08-18 17:30:00]-[EditFoodView改持有ID根治失效崩溃] 开始
+                              // 原因: 识别链路 @Query 重 fetch 时机可能让 f 的 backing 失效(临时行被替换)。
+                              //       用 storeIdentifier != nil 判定"行已落盘成永久行"(iOS17 可靠, 优于 modelContext==nil),
+                              //       临时/失效行一律不进编辑。EditFoodView 内进一步按 entryID 现取活实例兜底。
+                              // 回退: 删除本 guard, 恢复 editTargetID = f.persistentModelID
+                              if f.persistentModelID.storeIdentifier == nil { return }
+                              editTargetID = f.persistentModelID
+                              // <<< CHANGE-[2026-08-18 17:30:00]-[EditFoodView改持有ID根治失效崩溃] 结束
+                          })
         }
     }
 
@@ -1086,13 +1112,11 @@ struct FoodRowCard: View {
         persist()
     }
 
-    /// 待确认态「编辑」：先按识别结果入库并切到已保存壳，
-    /// 再把弹 sheet 延后一帧，让转场在稳定布局上平滑上滑。
+    /// 待确认态「编辑」：方案 B——只把识别 payload 交给编辑页做草稿，
+    /// 编辑页点「保存」才真正落库（onDraftSaved 回调写 item.syncId），点「取消」不入库。
     private func editPending() {
-        guard let f = commitEntry() else { return }
-        item.syncId = f.syncId.uuidString
-        persist()
-        DispatchQueue.main.async { editTargetID = f.persistentModelID }
+        guard let p = payloadFood else { return }
+        draftEditTarget = DraftEditTarget(payload: p, imageName: item.imageName)
     }
 }
 
