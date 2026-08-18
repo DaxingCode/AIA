@@ -960,12 +960,21 @@ struct EditFoodView: View {
 
     /// 把「每100g基准」和「当前重量」映射成「当前重量下的总量」Binding。
     /// 用户编辑总量时，反向更新每100g基准，保证改重量后能正确联动。
+    // >>> CHANGE-[2026-08-18 18:14:44]-[营养成分显示精度] 开始
+    // 原因: 营养板块6格(蛋白质/碳水/脂肪/纤维/糖/钠)原 get 闭包用 %.0f 永远整数,需求要求有小数显示1位
+    // 回退: 恢复 %.0f 即可
     private func totalBinding(for base: Binding<String>) -> Binding<String> {
         Binding(
             get: {
                 let baseValue = Double(base.wrappedValue) ?? 0
                 let weight = Double(self.weightText) ?? 100
-                return String(format: "%.0f", baseValue * weight / 100)
+                let total = baseValue * weight / 100
+                let rounded = (total * 10).rounded() / 10
+                if rounded == rounded.rounded(.towardZero) {
+                    return "\(Int(rounded))"
+                } else {
+                    return String(format: "%.1f", rounded)
+                }
             },
             set: { newTotal in
                 let total = Double(newTotal) ?? 0
@@ -974,6 +983,7 @@ struct EditFoodView: View {
             }
         )
     }
+    // <<< CHANGE-[2026-08-18 18:14:44]-[营养成分显示精度] 结束
 
     /// 重量步进调整（步长 10g，下限 0）
     private func adjustWeight(by delta: Int) {
