@@ -120,6 +120,12 @@ struct ContentView: View {
     /// 时序不稳被吞 → 冷启动没动画。此处补冷启动递增，与另外两条路径对齐。coldStarted 守卫保证只递增一次。
     /// 回退：删本行 + performOnAppear 内 if !coldStarted 段。
     @State private var coldStarted: Bool = false
+    /// >>> CHANGE-[2026-08-18 14:54:59]-[区分冷启动/热启动进度条延迟] 开始
+    /// 冷启动首播期间为 true（MiniBar 用 growDelay=1.5s 躲首帧重算风暴）；首次 homeEnterToken 变化后主线程置 false，
+    /// 之后热启动/返回首页 MiniBar 走 warmDelay=0.3s 即时播，避免热启动动画出现太晚。
+    /// 回退：删本行 + 三处 MiniBar 的 coldStart: 参数 + onChange(homeEnterToken) 内复位段。
+    @State private var coldPlayPending: Bool = true
+    /// <<< CHANGE-[2026-08-18 14:54:59]-[区分冷启动/热启动进度条延迟] 结束
     /// 好记AI头像呼吸脉冲动画开关
     @State private var abaoPulse = false
     /// 账单宫格隐私遮罩：@AppStorage 自动持久化到 UserDefaults，重启 App 保持
@@ -416,7 +422,17 @@ struct ContentView: View {
         // 回退：删本段 if !coldStarted 块，并恢复上方「不再补 homeEnterToken」注释。
         if !coldStarted {
             coldStarted = true
-            homeEnterToken &+= 1
+            // >>> CHANGE-[2026-08-18 11:50:00]-[冷启动进度条无生长动画-resetToken延迟一帧] 开始
+            // 原因：原写法在 performOnAppear(ContentView.onAppear 同步块)里直接 &+= 1，此时 MiniBar 子视图
+            // 尚未挂载完，其 onChange(resetToken) 首帧收到的初值已是 1（非变化）→ 不 fire；叠加本项目
+            // 首帧 body 多轮重算吞掉 .onAppear/.task 自播 → 冷启动三种触发源全失效（热启动/返回首页走
+            // 变化语义必 fire，故它们有、冷启动没有）。改延迟一帧：让 MiniBar 先以 resetToken=0 挂载，
+            // 下一帧变 1 → onChange 必然 fire → 重播生长，与热/返回路径语义完全对齐。
+            // 回退：删本段 async 包，恢复 `homeEnterToken &+= 1`（同步写法）。
+            DispatchQueue.main.async {
+                self.homeEnterToken &+= 1
+            }
+            // <<< CHANGE-[2026-08-18 11:50:00]-[冷启动进度条无生长动画-resetToken延迟一帧] 结束
         }
         // <<< CHANGE-[2026-08-18 09:31:07]-[XS Max进度条无生长动画修复-冷启动补homeEnterToken] 结束
         // 一次性去重：清理重复记录（仅首次启动执行）
@@ -610,6 +626,13 @@ struct ContentView: View {
                 homeEnterToken &+= 1
             }
         }
+        // >>> CHANGE-[2026-08-18 14:54:59]-[区分冷启动/热启动进度条延迟] 开始
+        // 任意一次 homeEnterToken 变化后（冷启动首播/热启动/返回首页），主线程把 coldPlayPending 置 false，
+        // 使后续 MiniBar 重播走 warmDelay(0.3s) 而非冷启动的 1.5s。
+        .onChange(of: homeEnterToken) { _, _ in
+            DispatchQueue.main.async { coldPlayPending = false }
+        }
+        // <<< CHANGE-[2026-08-18 14:54:59]-[区分冷启动/热启动进度条延迟] 结束
         // 冷启动兜底：didFinishLaunching 里写入的 pending 在 ContentView 订阅 onReceive 之前就已存在，
         // onReceive 不会回放初始值；通知又在订阅前发出会被直接丢弃。因此这里显式读一次 pending 消费冷启动快捷项。
         .onAppear {
@@ -1117,7 +1140,8 @@ struct ContentView: View {
                                  return
                              }
                              router.navigate(.diet)
-                         })
+                         },
+                         coldPlayPending: coldPlayPending)
         case .health:
             HealthTileView(gridIndex: gridIndex,
                            stepGoal: stepGoal,
@@ -1133,6 +1157,7 @@ struct ContentView: View {
                                }
                                router.navigate(.health)
                            },
+                           coldPlayPending: coldPlayPending,
                            showSleepMask: $showSleepMask)
         case .bill:      billTile(gridIndex: gridIndex)
         case .todo:      todoTile(gridIndex: gridIndex)
@@ -1510,6 +1535,13 @@ struct ContentView: View {
         let foods: [FoodEntry]
         let context: ModelContext
         let onTap: () -> Void
+        // >>> CHANGE-[2026-08-18 15:04:36]-[coldPlayPending透传进嵌套TileView] 开始
+        // 原因: coldPlayPending 是 ContentView 的 @State 实例成员，嵌套子结构体访问不到，
+        //       改为通过构造参数值透传(与 homeEnterToken 同套路)；值来源/改写时机/刷新链不变，
+        //       冷启动(true→1.5s)与热启动(false→0.3s)生长动画行为完全保持。
+        // 回退: 删本行 + 调用处 coldPlayPending: coldPlayPending + 1551行改回 coldStart: coldPlayPending 引用外层(不可行)。
+        let coldPlayPending: Bool
+        // <<< CHANGE-[2026-08-18 15:04:36]-[coldPlayPending透传进嵌套TileView] 结束
 
         @ObservedObject private var hd = HomeHealthData.shared
 
@@ -1525,7 +1557,7 @@ struct ContentView: View {
                     ContentView.makeWaterCupButton(context: context)
                  }) {
                 VStack(alignment: .leading, spacing: 8) {
-                    MiniBar(value: hd.calorieGoal > 0 ? todayCalories / hd.calorieGoal : 0, color: AIATheme.food, height: 5, delay: 0, resetToken: homeEnterToken)
+                    MiniBar(value: hd.calorieGoal > 0 ? todayCalories / hd.calorieGoal : 0, color: AIATheme.food, height: 5, delay: 0, resetToken: homeEnterToken, coldStart: coldPlayPending)
                     VStack(alignment: .leading, spacing: 5) {
                         ContentView.calSummaryRow(NSLocalizedString("home.diet.calorieSuggestion", comment: ""), "\(Int(hd.calorieGoal)) kcal", AIATheme.sub)
                         ContentView.calSummaryRow(todayCalories > hd.calorieGoal ? "已超" : "还可摄入",
@@ -1682,6 +1714,11 @@ struct ContentView: View {
         let homeEnterToken: Int
         let context: ModelContext
         let onTap: () -> Void
+        // >>> CHANGE-[2026-08-18 15:04:36]-[coldPlayPending透传进嵌套TileView] 开始
+        // 原因: 同 DietTileView，coldPlayPending 需从 ContentView 透传进本嵌套子结构体。
+        // 回退: 删本行 + 调用处 coldPlayPending: coldPlayPending。
+        let coldPlayPending: Bool
+        // <<< CHANGE-[2026-08-18 15:04:36]-[coldPlayPending透传进嵌套TileView] 结束
         @Binding var showSleepMask: Bool
 
         @ObservedObject private var hd = HomeHealthData.shared
@@ -1720,7 +1757,8 @@ struct ContentView: View {
                     color: AIATheme.health,
                     height: 5,
                     delay: 0.08,
-                    resetToken: homeEnterToken)
+                    resetToken: homeEnterToken,
+                    coldStart: coldPlayPending)
         }
 
         var body: some View {
@@ -2455,7 +2493,8 @@ struct ContentView: View {
         MiniBar(value: stepGoal > 0 ? Double(HomeHealthData.shared.homeSteps) / Double(stepGoal) : 0,
                 color: AIATheme.health,
                 height: 5,
-                resetToken: homeEnterToken)
+                resetToken: homeEnterToken,
+                coldStart: coldPlayPending)
     }
 
     // MARK: - 定时同步器（首次 0.3s 触发让首页先渲染，之后 60s 一次）
