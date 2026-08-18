@@ -766,7 +766,15 @@ struct ChatView: View {
                 didInitialScroll = true
             }
             // <<< CHANGE-[2026-08-17 23:05:00]-[首次非空守卫改监听displayedMessages] 结束
-            .onChange(of: orderedMessages.count) { _, _ in
+            // >>> CHANGE-[2026-08-17 23:41:25]-[新消息不自动显示修复-监听集合而非数量] 开始
+            // 原因：渲染列表绝大多数读 cachedDisplayed 缓存（见 list = cachedDisplayed.isEmpty ? displayedMessages : cachedDisplayed），
+            // 缓存只在 recomputeDisplayed() 更新；原 .onChange(of: orderedMessages.count) 只监听消息【数量】。
+            // 当历史消息 ≥ 60 条（@Query fetchLimit:60）时，发新消息 → recentMessages 挤掉最旧一条 → count 不变
+            // → onChange 不触发 → recomputeDisplayed 不执行 → 新消息已入库但渲染读旧缓存 → 必须退出重进才显示。
+            // 修复：改监听 recentMessages 集合本身（@Model 引用数组，Equatable 逐元素比较 persistentModelID），
+            // 只要 @Query 刷新产生的内容不同的新数组（新增/挤掉均触发，count 不变也触发）就重算缓存+滚动校正。
+            // 回退：恢复 .onChange(of: orderedMessages.count)。
+            .onChange(of: recentMessages) { _, _ in
                 guard !isLoadingEarlier else { return }
                 recomputeDisplayed()   // 数据集合变化，重算缓存（切断 body 重算放大）
                 // 多段校正：兜住识别卡片（含本地小票图/食物图）的异步高度，
@@ -775,6 +783,7 @@ struct ChatView: View {
                     scrollToBottom(proxy: proxy, delay: d, animated: false)
                 }
             }
+            // <<< CHANGE-[2026-08-17 23:41:25]-[新消息不自动显示修复-监听集合而非数量] 结束
             .onChange(of: greetingMessage) { old, new in
                 // 招呼气泡插入/替换 → 重算缓存（displayedMessages 含 greetingMessage）
                 recomputeDisplayed()
