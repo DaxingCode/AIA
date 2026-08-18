@@ -47,35 +47,124 @@ private func reminderTimes(from alerts: [AlertItem], due: Date?) -> [Date] {
 }
 
 // MARK: - 饮食编辑
+// >>> CHANGE-[2026-08-18 17:30:00]-[EditFoodView改持有ID根治失效崩溃] 开始
+// 原因: 对话页识别链路在 @Query 竞争时机传给 EditFoodView 的 FoodEntry 引用可能 backing 已失效
+//       （临时 ID 行被 @Query 重 fetch 替换），直接持有 entry 在 init/onAppear/save 访问 entry.xxx 会
+//       fatal("model instance was invalidated... temporary identifier")，表现为"卡住/动不了"。
+//       改为持有 PersistentIdentifier(entryID)，每次访问都经 resolveEntry() 现取活实例；
+//       init 不再读 backing（@State 初值给空，onAppear 里填充），从根上绕开失效 backing 读取。
+// 回退: 恢复 let entry: FoodEntry 直接持有；init 里读 entry.xxx 回填 @State；所有 resolveEntry() 调用改回 entry。
 struct EditFoodView: View {
-    let entry: FoodEntry
+    let entryID: PersistentIdentifier?
+    /// 草稿模式：待确认卡点"编辑"时传入识别 payload，编辑页保存时才真正落库；
+    /// 取消则什么都不落库（方案 B：先改草稿、保存才入库）。
+    let draftPayload: FoodPayload?
+    let draftImageName: String?
+    var onDraftSaved: ((String) -> Void)?
+
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
 
+    /// 按 entryID 现取活实例；失效/临时行返回 nil（SwiftData 已保证对失效 ID 返回 nil）。
+    /// 所有访问入口统一走本函数，避免持有失效 backing 引用。
+    /// 草稿模式（draftPayload != nil）不依赖 entryID 解析（传 nil）。
+    init(entryID: PersistentIdentifier? = nil, draftPayload: FoodPayload? = nil, draftImageName: String? = nil, onDraftSaved: ((String) -> Void)? = nil) {
+        self.entryID = entryID
+        self.draftPayload = draftPayload
+        self.draftImageName = draftImageName
+        self.onDraftSaved = onDraftSaved
+    }
+
+    private func resolveEntry() -> FoodEntry? {
+        guard let id = entryID else { return nil }
+        let r = context.model(for: id) as? FoodEntry
+        return r
+    }
+
+    /// 草稿模式：把识别 payload 反推成每 100g 营养与日期，回填 @State（与 FoodRowCard.commitEntry 算法一致）。
+    /// 仅在草稿模式（draftPayload != nil）调用；保存时才真正建 FoodEntry 入库。
+    private func loadDraftIntoState(_ p: FoodPayload) {
+        let weight = p.weightGram
+            ?? RecognitionSaver.weightFromPortion(p.portion?.isEmpty == false ? p.portion : nil)
+            ?? RecognitionSaver.weightFromServingUnit(p.portion?.isEmpty == false ? p.portion : nil)
+            ?? 100
+        let ratio = weight / 100
+        let df: (Double?) -> String = { v in
+            guard let v, v > 0, ratio > 0 else { return "" }
+            return String(format: "%.1f", v / ratio)
+        }
+        name = p.name ?? ""
+        meal = p.meal ?? RecognitionSaver.defaultMeal(for: Date())
+        weightText = String(format: "%.0f", weight)
+        baseCaloriesText = df(p.calories)
+        baseProteinText  = df(p.protein)
+        baseCarbsText    = df(p.carbs)
+        baseFatText      = df(p.fat)
+        baseFiberText    = df(p.fiber)
+        baseSugarText    = df(p.sugar)
+        baseSodiumText   = df(p.sodium)
+        // 餐次用已有的 meal(String),infoCard 的 $meal 选择器直接生效,无需枚举
+        entryDate = draftEntryDate(p)
+        sourceImageName = draftImageName
+        didInitialLoad = true
+        // 草稿无 FoodNote（未落库），备注留空
+    }
+
+    /// 草稿日期解析：与 FoodRowCard.commitEntry 的 entryDate 逻辑一致（支持完整 ISO 时刻与纯日期两种）。
+    private func draftEntryDate(_ p: FoodPayload) -> Date {
+        guard let d = p.date else { return Date() }
+        if d.count > 10,
+           let parsed = AppFormat.isoLocal.date(from: d)
+             ?? AppFormat.iso.date(from: d)
+             ?? AppFormat.isoLocalNoFrac.date(from: d)
+             ?? AppFormat.isoNoFrac.date(from: d) {
+            return parsed
+        }
+        if let parsed = AppFormat.isoDate.date(from: d) {
+            let m = p.meal ?? RecognitionSaver.defaultMeal(for: parsed)
+            let hour: Int
+            switch m {
+            case let x where x.contains("早"): hour = 8
+            case let x where x.contains("午") || x.contains("中"): hour = 12
+            case let x where x.contains("晚"): hour = 18
+            case let x where x.contains("夜") || x.contains("宵"): hour = 22
+            default: hour = 12
+            }
+            return Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: parsed) ?? parsed
+        }
+        return Date()
+    }
+
     // 食物库本地缓存（hitCount 倒序，热词靠前）
     @Query(sort: \FoodMeta.hitCount, order: .reverse) private var foodMetas: [FoodMeta]
-    /// 按 entry.syncId 取该饮食记录的来源标记（1:1）
+    /// 来源标记（1:1 关联 FoodEntry.syncId），body 里按 resolveEntry()?.syncId 过滤，避免 init 时访问失效 backing
     @Query private var sources: [FoodSource]
     /// 识别引擎来源标记（1:1 关联 FoodEntry.syncId）
     @Query private var recogSources: [RecogSource]
 
-    @State private var name: String
-    @State private var meal: String
-    @State private var weightText: String
+    @State private var name: String = ""
+    @State private var meal: String = ""
+    @State private var weightText: String = ""
     // 内部保存每100g的营养基准；UI 上显示的是「当前重量下的总量」。
-    @State private var baseCaloriesText: String
-    @State private var baseProteinText: String
-    @State private var baseCarbsText: String
-    @State private var baseFatText: String
-    @State private var baseFiberText: String       // 膳食纤维（每100g克）
-    @State private var baseSugarText: String       // 糖（每100g克）
-    @State private var baseSodiumText: String      // 钠（每100g毫克）
+    @State private var baseCaloriesText: String = "0"
+    @State private var baseProteinText: String = "0"
+    @State private var baseCarbsText: String = "0"
+    @State private var baseFatText: String = "0"
+    @State private var baseFiberText: String = "0"       // 膳食纤维（每100g克）
+    @State private var baseSugarText: String = "0"       // 糖（每100g克）
+    @State private var baseSodiumText: String = "0"      // 钠（每100g毫克）
 
     // 备注栏（文字 + 图片附件，存于 FoodNote，仅本地）
     @State private var noteText: String = ""
     @State private var noteImageNames: [String] = []
     // 来源识别原图（entry.imageName），仅本地；展示但不并入备注图片列表
     @State private var sourceImageName: String?
+    // >>> CHANGE-[2026-08-18 17:53:30]-[草稿日期状态补声明] 开始
+    // 原因: 草稿模式(待确认卡点编辑)新建 FoodEntry 必须传 date,但 EditFoodView 原本没有独立日期状态
+    //       (非草稿路径沿用实例原日期,不在此编辑)。补一个 @State 承接 payload 解析出的日期。
+    // 回退: 删除本行 + loadDraftIntoState 里的 entryDate 赋值 + save 草稿分支的 date: entryDate
+    @State private var entryDate: Date = Date()
+    // <<< CHANGE-[2026-08-18 17:53:30]-[草稿日期状态补声明] 结束
 
     // 图片添加 / 查看
     @State private var showImageSourceDialog = false
@@ -110,35 +199,6 @@ struct EditFoodView: View {
     @State private var cloudErrorMessage: String? = nil
     @State private var searchTask: Task<Void, Never>? = nil
 
-    init(entry: FoodEntry) {
-        self.entry = entry
-        let sid = entry.syncId
-        _sources = Query(filter: #Predicate<FoodSource> { $0.foodSyncId == sid })
-        _recogSources = Query(filter: #Predicate<RecogSource> { $0.syncId == sid })
-        // 重量：weightGram 缺失或为 0 时，回退到 portion 推算；再不行默认 100g。
-        let rawWeight = entry.weightGram ?? 0
-        let weight = rawWeight > 0 ? rawWeight : max(RecognitionSaver.weightFromPortion(entry.portion) ?? 100, 1)
-        let currentWeight = max(weight, 1)
-        _name = State(initialValue: entry.name)
-        _meal = State(initialValue: entry.meal)
-        _weightText = State(initialValue: String(format: "%.0f", weight))
-        // 每100g基准：已存且 >0 直接用；否则用「当前总量 ÷ 重量 ×100」反推
-        // （覆盖 base 为 nil 或 0 的脏数据，避免编辑页营养全显示 0）。
-        func deriveBase(_ base: Double?, _ total: Double) -> Double {
-            if let b = base, b > 0 { return b }
-            if total > 0 { return total / currentWeight * 100 }
-            return 0
-        }
-        _baseCaloriesText = State(initialValue: String(format: "%.1f", deriveBase(entry.baseCalories, entry.calories)))
-        _baseProteinText  = State(initialValue: String(format: "%.1f", deriveBase(entry.baseProtein, entry.protein)))
-        _baseCarbsText    = State(initialValue: String(format: "%.1f", deriveBase(entry.baseCarbs, entry.carbs)))
-        _baseFatText      = State(initialValue: String(format: "%.1f", deriveBase(entry.baseFat, entry.fat)))
-        _baseFiberText    = State(initialValue: String(format: "%.1f", deriveBase(entry.baseFiber, entry.fiber)))
-        _baseSugarText    = State(initialValue: String(format: "%.1f", deriveBase(entry.baseSugar, entry.sugar)))
-        _baseSodiumText   = State(initialValue: String(format: "%.1f", deriveBase(entry.baseSodium, entry.sodium)))
-        _sourceImageName = State(initialValue: entry.imageName)
-    }
-
     /// 当前重量下的总热量（用于标题栏右侧 pill 显示）。
     private var displayedKcalText: String {
         let base = Double(baseCaloriesText) ?? 0
@@ -148,11 +208,13 @@ struct EditFoodView: View {
 
     /// 来源标签：优先取 FoodSource 标记；无标记（老记录）兜底为「图片识别 / 好记AI帮记」
     private var sourceLabel: String {
+        guard let entry = resolveEntry() else { return "" }
         if let o = sources.first?.origin, let label = FoodSource.displayLabel(for: o) { return label }
         return entry.imageName != nil ? NSLocalizedString("food.recognized", comment: "")
                                       : NSLocalizedString("food.by_chat", comment: "")
     }
     private var sourceIcon: String {
+        guard let entry = resolveEntry() else { return "questionmark" }
         if let o = sources.first?.origin { return FoodSource.icon(for: o) }
         return entry.imageName != nil ? "photo" : "message"
     }
@@ -279,33 +341,83 @@ struct EditFoodView: View {
             .alert("删除食物记录", isPresented: $showDeleteConfirm) {
                 Button("取消", role: .cancel) {}
                 Button("删除", role: .destructive) {
-                    pendingDeleteID = entry.persistentModelID
+                    pendingDeleteID = entryID
                     dismiss()
                 }
             } message: {
                 Text("删除后不可恢复，确定要删除吗？")
             }
             .onAppear {
-                // 懒加载备注：首次进入编辑页时按 syncId 取 FoodNote（1:1）
+                // >>> CHANGE-[2026-08-18 17:13:00]-[编辑页第一次点白屏] 开始
+                // 原因: sheet 入场动画 + onAppear 同步写 13 个 @State,触发 NavigationStack 第二次 body diff,
+                //       iOS 26 触发 NavigationRequestObserver 断言 → 白屏。改为先 snapshot backing 字段、再延后到
+                //       下一帧(Task @MainActor)异步回填 @State,让入场动画跑完再设置,单次 body diff 即可。
+                //       第二次点能进是因为状态容器缓存已填好的 @State。
+                // 回退: 删除本 Task 包裹,改回同步写 @State。
+                // 草稿模式：从 payload 填 @State 后即返回，不依赖 entryID 解析；保存时才落库。
+                if let p = draftPayload {
+                    loadDraftIntoState(p)
+                    return
+                }
+                guard let entry = resolveEntry() else {
+                    // 记录已失效/被删 → 直接关掉编辑页，不进崩溃路径
+                    dismiss()
+                    return
+                }
+                // 先把 entry 所有需读 backing 的字段 snapshot 出来(本闭包内完成),后续 Task 不再碰 backing
+                let snapshotWeight = entry.weightGram ?? 100
+                let snapshotName = entry.name
+                let snapshotMeal = entry.meal
+                let snapshotImageName = entry.imageName
+                func deriveBase(_ base: Double?, _ total: Double, _ weight: Double) -> Double {
+                    if let b = base, b > 0 { return b }
+                    if total > 0 { return total / max(weight, 1) * 100 }
+                    return 0
+                }
+                let snapshotBaseCal = deriveBase(entry.baseCalories, entry.calories, snapshotWeight)
+                let snapshotBaseP = deriveBase(entry.baseProtein, entry.protein, snapshotWeight)
+                let snapshotBaseC = deriveBase(entry.baseCarbs, entry.carbs, snapshotWeight)
+                let snapshotBaseF = deriveBase(entry.baseFat, entry.fat, snapshotWeight)
+                let snapshotBaseFi = deriveBase(entry.baseFiber, entry.fiber, snapshotWeight)
+                let snapshotBaseS = deriveBase(entry.baseSugar, entry.sugar, snapshotWeight)
+                let snapshotBaseNa = deriveBase(entry.baseSodium, entry.sodium, snapshotWeight)
                 let targetSyncId = entry.syncId
-                if let existing = try? context.fetch(FetchDescriptor<FoodNote>(
-                    predicate: #Predicate { $0.syncId == targetSyncId })).first {
-                    noteText = existing.note
-                    noteImageNames = existing.imageNames
-                }
-                // >>> CHANGE-[2026-08-17 14:30:00]-[编辑页白屏重弹] 开始
-                // 异步读图：避免首帧同步读文件阻塞 sheet 入场动画
-                let names = ([sourceImageName] + noteImageNames).compactMap { $0 }
-                Task.detached(priority: .userInitiated) {
-                    var dict: [String: UIImage] = [:]
-                    for n in names {
-                        if let img = LocalImageStore.load(n) {
-                            dict[n] = img
-                        }
+                // 延后到下一帧,让 sheet 入场动画先跑完,避免与 @State 首次赋值竞争 NavigationStack 重算
+                Task { @MainActor in
+                    name = snapshotName
+                    meal = snapshotMeal
+                    weightText = String(format: "%.0f", snapshotWeight)
+                    baseCaloriesText = String(format: "%.1f", snapshotBaseCal)
+                    baseProteinText  = String(format: "%.1f", snapshotBaseP)
+                    baseCarbsText    = String(format: "%.1f", snapshotBaseC)
+                    baseFatText      = String(format: "%.1f", snapshotBaseF)
+                    baseFiberText    = String(format: "%.1f", snapshotBaseFi)
+                    baseSugarText    = String(format: "%.1f", snapshotBaseS)
+                    baseSodiumText   = String(format: "%.1f", snapshotBaseNa)
+                    sourceImageName = snapshotImageName
+                    didInitialLoad = true  // 确保 onChange(name) 在首次填值后才触发搜索
+                    // 懒加载备注：首次进入编辑页时按 syncId 取 FoodNote（1:1）
+                    if let existing = try? context.fetch(FetchDescriptor<FoodNote>(
+                        predicate: #Predicate { $0.syncId == targetSyncId })).first {
+                        noteText = existing.note
+                        noteImageNames = existing.imageNames
                     }
-                    await MainActor.run { loadedImages = dict }
+                    // 异步读图：避免主线程同步读文件阻塞
+                    let names = ([snapshotImageName] + noteImageNames).compactMap { $0 }
+                    Task.detached(priority: .userInitiated) {
+                        let localDict: [String: UIImage] = {
+                            var d: [String: UIImage] = [:]
+                            for n in names {
+                                if let img = LocalImageStore.load(n) {
+                                    d[n] = img
+                                }
+                            }
+                            return d
+                        }()
+                        await MainActor.run { loadedImages = localDict }
+                    }
                 }
-                // <<< CHANGE-[2026-08-17 14:30:00]-[编辑页白屏重弹] 结束
+                // <<< CHANGE-[2026-08-18 17:13:00]-[编辑页第一次点白屏] 结束
             }
             .onChange(of: pickedImage) { _, new in
                 guard let img = new else { return }
@@ -876,6 +988,59 @@ struct EditFoodView: View {
     }
 
     private func save() {
+        // 草稿模式：保存时才真正建 FoodEntry 入库（方案 B：先改草稿、保存才落库）
+        if let p = draftPayload {
+            let entry = FoodEntry(
+                name: name.trimmingCharacters(in: .whitespaces).isEmpty ? (p.name ?? "未命名食物") : name.trimmingCharacters(in: .whitespaces),
+                calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, sugar: 0, sodium: 0,
+                portion: "\(Int(max(Double(weightText) ?? 100, 1)))克",
+                meal: meal,
+                date: entryDate,
+                weightGram: max(Double(weightText) ?? 100, 1),
+                baseCalories: nil, baseProtein: nil, baseCarbs: nil, baseFat: nil,
+                baseFiber: nil, baseSugar: nil, baseSodium: nil,
+                imageName: sourceImageName)
+            applyState(to: entry)
+            context.insert(entry)
+            // 备注：草稿首次保存即新建 FoodNote
+            if !(noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || !noteImageNames.isEmpty {
+                context.insert(FoodNote(syncId: entry.syncId, note: noteText, imageNames: noteImageNames))
+            }
+            try? context.save()
+            CloudSyncManager.shared.syncAfterLocalChange(context: context)
+            onDraftSaved?(entry.syncId.uuidString)
+            dismiss()
+            return
+        }
+
+        // 现取活实例；失效/被删直接放弃保存（不崩）
+        guard let entry = resolveEntry() else { return }
+        applyState(to: entry)
+
+        // 备注：按 syncId 关联 FoodNote；无内容则删除（若有）
+        let targetSyncId = entry.syncId
+        let existing = try? context.fetch(FetchDescriptor<FoodNote>(
+            predicate: #Predicate { $0.syncId == targetSyncId })).first
+        let noteEmpty = noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if noteEmpty && noteImageNames.isEmpty {
+            if let existing { context.delete(existing) }
+        } else if let existing {
+            existing.note = noteText
+            existing.imageNames = noteImageNames
+            existing.updatedAt = .now
+        } else {
+            let fn = FoodNote(syncId: entry.syncId, note: noteText, imageNames: noteImageNames)
+            context.insert(fn)
+        }
+
+        try? context.save()
+        // 编辑饮食记录后触发增量同步，让改动尽快推上云端，绑定后小程序可见
+        CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        dismiss()
+    }
+
+    /// 把当前 @State 字段写入给定 FoodEntry（草稿新建 & 已保存实例两种路径复用）。
+    private func applyState(to entry: FoodEntry) {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         entry.name = trimmed.isEmpty ? entry.name : trimmed
         entry.meal = meal
@@ -905,27 +1070,6 @@ struct EditFoodView: View {
         entry.portion = "\(Int(weight))克"
         entry.imageName = sourceImageName
         entry.syncUpdatedAt = .now
-
-        // 备注：按 syncId 关联 FoodNote；无内容则删除（若有）
-        let targetSyncId = entry.syncId
-        let existing = try? context.fetch(FetchDescriptor<FoodNote>(
-            predicate: #Predicate { $0.syncId == targetSyncId })).first
-        let noteEmpty = noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        if noteEmpty && noteImageNames.isEmpty {
-            if let existing { context.delete(existing) }
-        } else if let existing {
-            existing.note = noteText
-            existing.imageNames = noteImageNames
-            existing.updatedAt = .now
-        } else {
-            let fn = FoodNote(syncId: entry.syncId, note: noteText, imageNames: noteImageNames)
-            context.insert(fn)
-        }
-
-        try? context.save()
-        // 编辑饮食记录后触发增量同步，让改动尽快推上云端，绑定后小程序可见
-        CloudSyncManager.shared.syncAfterLocalChange(context: context)
-        dismiss()
     }
 
     // MARK: - 食物库搜索（与 AddFoodManualView 共用 FoodSearcher）
@@ -977,16 +1121,12 @@ struct EditFoodView: View {
         isCloudSearching = false
 
         // >>> CHANGE-[2026-08-17 14:30:00]-[编辑页白屏重弹] 开始
-        // 本地检索涉及 context fetch，丢到后台线程避免主线程阻塞 sheet 入场动画
-        let ctx = context
-        let metas = foodMetas
-        Task.detached(priority: .userInitiated) {
-            let results = FoodSearcher.localSearch(trimmed, foodMetas: metas, in: ctx)
-            Task { @MainActor in
-                searchResults = results
-                isSearching = false
-            }
-        }
+        // 本地检索依赖 ModelContext（Swift 6 下为 main-actor 隔离），必须在主线程执行。
+        // 搜索为内存 NutritionLibrary 命中 + 单次 FoodMeta fetch，耗时极短，不在入场动画期
+        // （onChange 由用户输字触发，已被 didInitialLoad 守卫避开首帧），主线程同步执行可接受。
+        let results = FoodSearcher.localSearch(trimmed, foodMetas: foodMetas, in: context)
+        searchResults = results
+        isSearching = false
         // <<< CHANGE-[2026-08-17 14:30:00]-[编辑页白屏重弹] 结束
         // 联网搜索由 searchResultList 底部的「联网搜索营养」按钮手动触发，不自动发起。
     }
@@ -3548,17 +3688,46 @@ struct EditTodoSheet: View {
 // 原因: 曾只有一个入口(RecordsViews)包 NavigationStack，其余三个(ResultRowCard/AllRecordsView/FoodDetailView)漏包，
 //      导致这些入口进来的编辑页没有导航栏、看不到「取消/保存」按钮。统一为 wrapper 后不再易漏。
 // 回退: 删除本 struct，并把各入口恢复为直接调 EditFoodView(entry:)。
+// >>> CHANGE-[2026-08-18 16:51:31]-[临时实例失效崩溃止血] 开始
+// 原因: 对话页识别链路在 @Query 竞争时机可能拿到 backing 已失效的临时 FoodEntry 实例，
+//       直接持有 entry 传给 EditFoodView.init 后访问 entry.syncId 会 fatal("model instance was invalidated... temporary identifier")。
+//       改为持有 PersistentIdentifier，body 内用 context.model(for:) 取活对象；失效 ID 返回 nil → 显示空视图不崩。
+// 回退: 恢复 init(entry: FoodEntry) 直接持有 entry 的旧实现，各调用点改回 EditFoodSheet(entry: xxx)
 struct EditFoodSheet: View {
-    let entry: FoodEntry
+    let entryID: PersistentIdentifier?
+    // 草稿模式参数（待确认卡点编辑：保存才落库）
+    let draftPayload: FoodPayload?
+    let draftImageName: String?
+    var onDraftSaved: ((String) -> Void)?
 
-    init(entry: FoodEntry) {
-        self.entry = entry
+    @Environment(\.modelContext) private var context
+
+    /// 真实实例入口（已保存卡 / 之前路径）
+    init(entryID: PersistentIdentifier) {
+        self.entryID = entryID
+        self.draftPayload = nil
+        self.draftImageName = nil
+        self.onDraftSaved = nil
+    }
+
+    /// 草稿入口（待确认卡点编辑，保存才落库）
+    init(draftPayload: FoodPayload, imageName: String?, onDraftSaved: @escaping (String) -> Void) {
+        self.entryID = nil // 草稿模式不解析，EditFoodView 走 payload 分支
+        self.draftPayload = draftPayload
+        self.draftImageName = imageName
+        self.onDraftSaved = onDraftSaved
     }
 
     var body: some View {
-        NavigationStack {
-            EditFoodView(entry: entry)
+        return Group {
+            // EditFoodView 现在只持有 entryID，自行 resolveEntry()；本 wrapper 不提前解析，
+            // 让 EditFoodView 在 onAppear 时按最新 backing 取活实例，彻底绕开"init 时持有失效引用"。
+            // 草稿模式传 draftPayload，EditFoodView 内部走草稿分支（保存才落库）。
+            NavigationStack {
+                EditFoodView(entryID: entryID, draftPayload: draftPayload, draftImageName: draftImageName, onDraftSaved: onDraftSaved)
+            }
         }
     }
 }
+// <<< CHANGE-[2026-08-18 16:51:31]-[临时实例失效崩溃止血] 结束
 // <<< CHANGE-[2026-08-17 17:25:00]-[编辑食物统一EditFoodSheet] 结束

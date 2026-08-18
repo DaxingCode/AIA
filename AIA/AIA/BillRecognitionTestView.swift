@@ -61,7 +61,7 @@ struct BillRecognitionTestView: View {
                     }
                     .padding(12)
                 }
-                .onChange(of: rows.count) { _ in
+                .onChange(of: rows.count) { _, _ in
                     if let last = rows.last { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
