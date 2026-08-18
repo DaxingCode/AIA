@@ -285,7 +285,7 @@ struct VoiceRecordView: View {
         Task {
             do {
                 let output = try await RecognizeService.parseText(text)
-                await Task { @MainActor in
+                Task { @MainActor in
                     // 招呼气泡定位锚点：必须打在插入本次第一条新消息（口述气泡）之前，
                     // 否则 ChatView.onAppear 会把这条口述算成历史，招呼气泡排到它后面。
                     NavigationRouter.shared.beginChatSession()

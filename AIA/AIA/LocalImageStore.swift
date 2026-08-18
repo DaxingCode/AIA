@@ -6,7 +6,9 @@ import SwiftUI
 
 enum LocalImageStore {
     /// 附件目录：Documents/attachments
-    static var dir: URL {
+    /// nonisolated：纯文件 I/O，不依赖主线程，可在后台/Task.detached 中调用
+    /// （避免 Swift 6 下被推断为 main-actor 隔离而无法在并发上下文使用）。
+    nonisolated static var dir: URL {
         let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let d = base.appendingPathComponent("attachments", isDirectory: true)
         if !FileManager.default.fileExists(atPath: d.path) {
@@ -16,7 +18,7 @@ enum LocalImageStore {
     }
 
     /// 保存图片，返回文件名（仅文件名，不含路径）。失败返回 nil。
-    static func save(_ image: UIImage?) -> String? {
+    nonisolated static func save(_ image: UIImage?) -> String? {
         guard let image else { return nil }
         // 压缩到合理大小，避免占用过多空间
         guard let data = image.jpegData(compressionQuality: 0.8) else { return nil }
@@ -32,7 +34,7 @@ enum LocalImageStore {
     }
 
     /// 按文件名读取图片。
-    static func load(_ name: String?) -> UIImage? {
+    nonisolated static func load(_ name: String?) -> UIImage? {
         guard let name, !name.isEmpty else { return nil }
         let url = dir.appendingPathComponent(name)
         guard let data = try? Data(contentsOf: url) else { return nil }
@@ -40,7 +42,7 @@ enum LocalImageStore {
     }
 
     /// 删除图片文件（记录被删除时调用，避免残留占空间）。
-    static func delete(_ name: String?) {
+    nonisolated static func delete(_ name: String?) {
         guard let name, !name.isEmpty else { return }
         let url = dir.appendingPathComponent(name)
         try? FileManager.default.removeItem(at: url)

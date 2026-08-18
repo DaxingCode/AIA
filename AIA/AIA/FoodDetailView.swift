@@ -152,7 +152,7 @@ struct FoodDetailView: View {
         // >>> CHANGE-[2026-08-17 17:25:00]-[编辑食物统一EditFoodSheet] 开始
         // 原因: 统一走 EditFoodSheet wrapper，避免此入口编辑页无导航栏（看不到取消/保存按钮）。
         // 回退: 改回 EditFoodView(entry: entry)。
-        .sheet(isPresented: $showEdit) { EditFoodSheet(entry: entry) }
+        .sheet(isPresented: $showEdit) { EditFoodSheet(entryID: entry.persistentModelID) }
         // <<< CHANGE-[2026-08-17 17:25:00]-[编辑食物统一EditFoodSheet] 结束
         .onDisappear {
             // 2026-07-20 实测：onDisappear 仍可能在父页面刚刚显示、pop 动画尚未完全收尾时调用。

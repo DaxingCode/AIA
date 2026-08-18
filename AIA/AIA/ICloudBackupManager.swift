@@ -95,9 +95,10 @@ enum ICloudBackupManager {
     static func backupTotalBytes() -> Int64 {
         #if targetEnvironment(simulator)
         return 0
-        #endif
+        #else
         guard let d = backupDir else { return 0 }
         return directorySize(d)
+        #endif
     }
 
     /// 备份文件数（不含 .meta 与隐藏文件，含 attachments 递归）。
@@ -105,9 +106,10 @@ enum ICloudBackupManager {
     nonisolated static func backupFileCount() -> Int {
         #if targetEnvironment(simulator)
         return 0
-        #endif
+        #else
         guard let d = backupDir else { return 0 }
         return collectUploadFiles(directory: d).count
+        #endif
     }
 
     /// 递归目录大小（字节）。
@@ -266,7 +268,7 @@ enum ICloudBackupManager {
         // 导航转场。直接返回 false，不挂上传监听（模拟器本就无云端可传）。
         #if targetEnvironment(simulator)
         return false
-        #endif
+        #else
         guard let dest = backupDir else { return false }
         let files = collectUploadFiles(directory: dest)
         let total = files.count
@@ -292,6 +294,7 @@ enum ICloudBackupManager {
         // 仍在传：重新挂持久轮询，接回进度
         startUploadMonitor(completion: completion ?? uploadCompletion)
         return true
+        #endif
     }
 
     /// 收集目录内所有需上传的文件（含 attachments 子目录递归），排除 meta/隐藏文件。

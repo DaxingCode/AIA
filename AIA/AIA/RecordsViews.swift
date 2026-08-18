@@ -1239,7 +1239,7 @@ struct FoodListView: View {
             //       替代原先内联 NavigationStack，避免其他入口漏包导致无导航栏。
             // 回退: 恢复为内联 NavigationStack 直出 EditFoodView。
             if let food = context.model(for: id) as? FoodEntry {
-                EditFoodSheet(entry: food)
+                EditFoodSheet(entryID: food.persistentModelID)
             }
             // <<< CHANGE-[2026-08-17 17:25:00]-[编辑食物统一EditFoodSheet] 结束
         }

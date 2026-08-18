@@ -332,7 +332,7 @@ final class HealthManager: ObservableObject {
             for s in samples {
                 // 仅统计睡眠（asleep）状态：含核心/深睡/REM 子状态，排除 inBed/awake
                 let v = s.value
-                let isAsleep = v == HKCategoryValueSleepAnalysis.asleep.rawValue
+                let isAsleep = v == HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue
                     || v == HKCategoryValueSleepAnalysis.asleepCore.rawValue
                     || v == HKCategoryValueSleepAnalysis.asleepDeep.rawValue
                     || v == HKCategoryValueSleepAnalysis.asleepREM.rawValue

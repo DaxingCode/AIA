@@ -181,7 +181,7 @@ struct AllRecordsView: View {
                 // >>> CHANGE-[2026-08-17 17:25:00]-[编辑食物统一EditFoodSheet] 开始
                 // 原因: 统一走 EditFoodSheet wrapper，避免此入口编辑页无导航栏（看不到取消/保存按钮）。
                 // 回退: 改回 EditFoodView(entry: $0)。
-                .sheet(item: $editFood) { EditFoodSheet(entry: $0) }
+                .sheet(item: $editFood) { EditFoodSheet(entryID: $0.persistentModelID) }
                 // <<< CHANGE-[2026-08-17 17:25:00]-[编辑食物统一EditFoodSheet] 结束
                 .sheet(item: $editBill) { EditBillView(bill: $0) }
                 .sheet(item: $editTodo) { EditTodoSheet(reminder: $0) }
