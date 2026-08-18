@@ -114,6 +114,12 @@ struct ContentView: View {
     /// .onAppear 不会再触发；此值每次进入首页 +1，下传给 MiniBar.resetToken，
     /// 强制把 drawn 重置为 0 并重画「从左到右变长」动画。
     @State private var homeEnterToken: Int = 0
+    /// >>> CHANGE-[2026-08-18 09:31:07]-[XS Max进度条无生长动画修复-冷启动兜底守卫] 开始
+    /// 原因：冷启动首播原本只靠 MiniBar 的 .onAppear 自播（见 405-407 行注释），无 homeEnterToken 兜底；
+    /// 而热启动(didBecomeActive)/返回首页(路由下降沿)都有 homeEnterToken &+= 1。XS Max 上 onAppear 自播
+    /// 时序不稳被吞 → 冷启动没动画。此处补冷启动递增，与另外两条路径对齐。coldStarted 守卫保证只递增一次。
+    /// 回退：删本行 + performOnAppear 内 if !coldStarted 段。
+    @State private var coldStarted: Bool = false
     /// 好记AI头像呼吸脉冲动画开关
     @State private var abaoPulse = false
     /// 账单宫格隐私遮罩：@AppStorage 自动持久化到 UserDefaults，重启 App 保持
@@ -402,9 +408,17 @@ struct ContentView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
             HealthManager.shared.requestAuthorization()
         }
-        // 首播交给 MiniBar 自己在 .onAppear 里延迟 ~0.9s 播放（等入场弹簧跑完），
-        // 这里不再补 homeEnterToken —— 否则会和 MiniBar 内置自播撞同一帧窗口。
-        // hot path 现在收敛在 didBecomeActive（回前台）+ 路由下降沿（返回首页）。
+        // >>> CHANGE-[2026-08-18 09:31:07]-[XS Max进度条无生长动画修复-冷启动补homeEnterToken] 开始
+        // 原因：原注释主张「冷启动不再补 homeEnterToken，交给 MiniBar 自己 onAppear 自播」。
+        // 但 XS Max(A12) 上该自播时序不稳常被吞（首帧 body 多轮重算 + 数据异步）→ 冷启动无生长动画。
+        // 现改为冷启动也递增 homeEnterToken，与热启动(didBecomeActive)/返回首页(路由下降沿)完全对齐，
+        // 走 MiniBar.resetToken 监听 → drawn 归零重播，双保险（onAppear 自播 + resetToken 重播，视觉连续生长）。
+        // 回退：删本段 if !coldStarted 块，并恢复上方「不再补 homeEnterToken」注释。
+        if !coldStarted {
+            coldStarted = true
+            homeEnterToken &+= 1
+        }
+        // <<< CHANGE-[2026-08-18 09:31:07]-[XS Max进度条无生长动画修复-冷启动补homeEnterToken] 结束
         // 一次性去重：清理重复记录（仅首次启动执行）
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
             DataDeduplicator.runOnce(context: context)

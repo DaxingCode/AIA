@@ -158,7 +158,14 @@ public enum AIATheme {
         // 改 spring「前后缓冲」：开始稍缓、中段匀速、末段柔和减速，观感更优雅。
         // spring 无固定时长，响应+阻尼控制节奏；iOS17 用 interpolatingSpring 更稳。
         public static let draw     = Animation.interpolatingSpring(stiffness: 60, damping: 15)
-        public static let progress = Animation.interpolatingSpring(stiffness: 80, damping: 17)
+        // >>> CHANGE-[2026-08-18 10:23:44]-[冷启动进度条无生长动画-A路验证] 开始
+        // 原因：interpolatingSpring(stiffness:80,damping:17) 在冷启动首帧（ContentView.body 多轮重算 +
+        // 数据异步 + 卡片弹簧入场同时跑）密集渲染场景下，SwiftUI 动画事务被吞，进度条直接落位无生长动画。
+        // 饮食页/热启动路径有动画是因为那时重活已结束、系统有余力渲染弹簧。
+        // 现换成固定时长 easeOut 验证「动画是否可见」——若可见则确认是弹簧在密集场景被吞，B 路再换 TimelineView 手动插值彻底解耦。
+        // 回退：恢复 public static let progress = Animation.interpolatingSpring(stiffness: 80, damping: 17)
+        public static let progress = Animation.easeOut(duration: 0.6)
+        // <<< CHANGE-[2026-08-18 10:23:44]-[冷启动进度条无生长动画-A路验证] 结束
         public static let progressFade = Animation.easeOut(duration: 0.16)
         // 圆环专属：固定 1.5 秒缓出，比弹簧从容，长弧不被冲量放大。
         public static let ring      = Animation.easeOut(duration: 1.5)

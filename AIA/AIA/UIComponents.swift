@@ -419,6 +419,21 @@ struct MiniBar: View {
     @State private var drawn: Double = 0   // 进度条生长动画的当前进度（0→value）
     @State private var over: Bool = false  // 是否处于超额态（value>1）
     @State private var pulse: Double = 1   // 超额态末端小脉冲（仅生长期间触发一次，不循环）
+    // >>> CHANGE-[2026-08-18 09:31:07]-[XS Max进度条无生长动画修复-hasAnimated守卫] 开始
+    // 原因：XS Max(A12老芯片)上，onAppear 自播时序不稳定（首帧 body 多轮重算 + 数据异步），
+    // 一旦被吞且 value 之后不再变化（onChange(value) 不触发），进度条永远没动画。
+    // 对齐 RingView/MacroCard 已验证可用的「hasAnimated 守卫 + onChange(value) 首播」范式：
+    // 只要 value 最终就绪(>0)就补播一次生长，不依赖 onAppear 时序。
+    // 回退：删除本行 + onChange(value) 内 hasAnimated 守卫分支。
+    @State private var hasAnimated: Bool = false
+    // >>> CHANGE-[2026-08-18 09:43:45]-[冷启动进度条无生长动画修复-needsReplay解耦] 开始
+    // 原因：上一版(09:31:07)只补了冷启动 homeEnterToken，但冷启动首帧数据(value=0)尚未异步到位，
+    // resetToken.onChange 触发时 animateMini 跑的是 value=0→drawn=0 无动画；随后数据到位触发
+    // onChange(value) 时，onAppear.Task 已在 0.3s 后把 hasAnimated 置 true，首播分支被跳过 → 冷启动没动画。
+    // 现引入 needsReplay：resetToken 触发只「清零 + 标记等播」，待 value 首次就绪(>0)时由 onChange(value)
+    // 的 needsReplay 分支补播。needsReplay 优先级高于 hasAnimated，彻底解耦「清零」与「播放」。
+    // 回退：删本行 + resetToken.onChange 内 needsReplay 段 + onChange(value) 内 needsReplay 分支。
+    @State private var needsReplay: Bool = false
 
     var body: some View {
         GeometryReader { geo in
@@ -465,41 +480,116 @@ struct MiniBar: View {
             // 2026-08-13 缩短：0.9s 太久，用户视觉上以为「页面加载完就该看到进度条」，结果还干等 → XS Max 上错过动画。
             // 改 0.3s：卡片已基本可见、首帧压力已释放，进度条随即开始生长，老芯片也能捕捉到完整过程。
             // 2026-08-14：叠加 delay 实现错峰（方向②），asyncAfter 容纳各卡不同延迟。
-            Task {
-                try? await Task.sleep(nanoseconds: UInt64((0.3 + delay) * 1_000_000_000))
-                animateMini()
+            // >>> CHANGE-[2026-08-18 09:31:07]-[XS Max进度条无生长动画修复-onAppear设守卫] 开始
+            // 原因：onAppear 自播覆盖「数据同步就绪、value 在 onAppear 已是最终值」场景；
+            // 此处先置 hasAnimated，避免与下方 onChange(value) 首播分支重复触发。
+            // 回退：删本 onAppear 内 hasAnimated 赋值（保留 Task + animateMini）。
+            // >>> CHANGE-[2026-08-18 10:23:44]-[冷启动进度条无生长动画-A路换同步归零+main.async] 开始
+            // 原因：09:31:07 的 Task 睡眠 0.3s 自播，在冷启动首帧（父级重活密集 + ContentView.body 多轮重算）
+            // 时序不稳：日志显示 Task 醒来 drawn 仍=0 但 withAnimation 弹簧被吞。改为「onAppear 同步归零 +
+            // DispatchQueue.main.async 下一 runloop 播」，保证 drawn=0 真实落到 View tree 后再触发动画事务，
+            // 彻底避开 Task 睡眠期间父级重算把 drawn 提前盖掉/把动画事务吞掉的窗口。
+            // 诊断：animateMini 内已加 print，验证 withAnimation 是否真的改了 drawn。
+            // 回退：恢复为 Task { sleep 0.3+delay; hasAnimated=true; animateMini() } 旧写法。
+            drawn = 0
+            over = value > 1
+            DispatchQueue.main.async {
+                #if DEBUG
+                print("[MiniBar] onAppear.async play, value=\(value), drawn_before=\(drawn)")
+                #endif
+                guard !AIATheme.motionReduce else { drawn = value; return }
+                hasAnimated = true
+                withAnimation(AIATheme.Motion.progress) { drawn = value }
             }
+            // <<< CHANGE-[2026-08-18 10:23:44]-[冷启动进度条无生长动画-A路换同步归零+main.async] 结束
+            // <<< CHANGE-[2026-08-18 09:31:07]-[XS Max进度条无生长动画修复-onAppear设守卫] 结束
         }
         // 2026-08-14 简化（对齐 GrowthBars）：去掉对 value 的每帧 onChange 重启动画，
         // 也去掉 replayMini 的 fadeOut→归零→fadeIn 链式。数据 300ms 一跳时不再反复插值重算，
         // 进度条安静停在末值；只在进入/回前台（resetToken 递增）播一次单段生长。老芯片更稳。
         // 2026-08-15 修复（饮食页切换日期）：补回 value 变化的响应——切换日期是「换了一天的数据」，
         // 需支持变长+变短两个方向，故直接用新值覆盖（不走 max 只增不减），淡入淡出更顺。
+        // >>> CHANGE-[2026-08-18 09:31:07]-[XS Max进度条无生长动画修复-onChange首播] 开始
+        // 原因/对齐 RingView 范式：XS Max 上 onAppear 自播时序不稳会被吞，故首播改走此处——
+        // 只要 value 首次就绪(>0)且尚未播放过，就归零补播一次生长（不依赖 onAppear 时序）。
+        // 回退：恢复为纯 .onChange(of: value){ ... withAnimation(progressFade){ drawn = newVal } }。
+        // >>> CHANGE-[2026-08-18 09:43:45]-[冷启动进度条无生长动画修复-value分支优先needsReplay] 开始
+        // 原因：needsReplay 优先级高于 hasAnimated。冷启动 resetToken 已清零并标记 needsReplay，
+        // 即便 onAppear.Task 提前把 hasAnimated 置 true，数据到位时仍应补播生长（否则冷启动无动画）。
+        // 回退：恢复为 if !hasAnimated 单分支。
         .onChange(of: value) { _, newVal in
+            #if DEBUG
+            print("[MiniBar] onChange(value): \(drawn) -> \(newVal), hasAnimated=\(hasAnimated), needsReplay=\(needsReplay), over=\(newVal > 1)")
+            #endif
             over = newVal > 1
             guard !AIATheme.motionReduce else { drawn = newVal; return }
-            withAnimation(AIATheme.Motion.progressFade) { drawn = newVal }
+            if needsReplay, newVal > 0 {
+                needsReplay = false
+                hasAnimated = true
+                drawn = 0
+                withAnimation(AIATheme.Motion.progress) { drawn = newVal }
+            } else if !hasAnimated, newVal > 0 {
+                hasAnimated = true
+                drawn = 0
+                withAnimation(AIATheme.Motion.progress) { drawn = newVal }   // 首播生长
+            } else if newVal != drawn {
+                withAnimation(AIATheme.Motion.progressFade) { drawn = newVal } // 数据后续刷新补位
+            }
         }
+        // <<< CHANGE-[2026-08-18 09:43:45]-[冷启动进度条无生长动画修复-value分支优先needsReplay] 结束
+        // <<< CHANGE-[2026-08-18 09:31:07]-[XS Max进度条无生长动画修复-onChange首播] 结束
+        // >>> CHANGE-[2026-08-18 09:43:45]-[冷启动进度条无生长动画修复-resetToken解耦] 开始
+        // 原因：原逻辑 resetToken 变更即 animateMini()，但冷启动首帧 value=0（数据异步未到位），
+        // 跑的是 0→0 无动画；随后数据到位被 hasAnimated 吞首播。现改为只清零+标记 needsReplay，
+        // 等 value 就绪再播；热启动/返回首页 value 已就绪则直接此处播放，观感不变。
+        // 回退：恢复为 drawn=0; over=false; animateMini()。
         .onChange(of: resetToken) { _, _ in
+            #if DEBUG
+            print("[MiniBar] onChange(resetToken): value=\(value), drawn=\(drawn), hasAnimated=\(hasAnimated) -> drawn=0,needsReplay=true")
+            #endif
             drawn = 0
             over = false
-            animateMini()
+            needsReplay = true
+            if value > 0, !AIATheme.motionReduce {
+                needsReplay = false
+                hasAnimated = true
+                animateMini()
+            }
         }
+        // <<< CHANGE-[2026-08-18 09:43:45]-[冷启动进度条无生长动画修复-resetToken解耦] 结束
     }
 
     /// 从 0 播一次单段生长到当前 value；「减弱动态效果」下直接落位。
     /// 进度条只单调增长（max 防 value 瞬态回 0 时动画缩短），数据刷新不打扰。
     /// 方向③：value>1 标记超额态并触发末端一次脉冲。
+    // >>> CHANGE-[2026-08-18 09:31:07]-[XS Max进度条无生长动画修复-消除max无动画陷阱] 开始
+    // 原因：resetToken 触发时先 drawn=0 再调本函数，若仍用 max(drawn,value)，drawn 已被外部归零故无碍；
+    // 但 onAppear 自播若之前 drawn 已被落位成 value，max(value,value)=value 无变化 → withAnimation 不生成动画。
+    // 改直接 drawn=value，保证每次都是 0→value 的真实生长（调用方已先归零或将 drawn 置 0）。
+    // 回退：恢复 drawn = max(drawn, value) 两处。
     private func animateMini() {
+        #if DEBUG
+        print("[MiniBar] animateMini called: drawn_before=\(drawn) -> target=\(value), motionReduce=\(AIATheme.motionReduce)")
+        #endif
         over = value > 1
-        guard !AIATheme.motionReduce else { drawn = max(drawn, value); return }
-        withAnimation(AIATheme.Motion.progress) { drawn = max(drawn, value) }
+        guard !AIATheme.motionReduce else {
+            drawn = value
+            #if DEBUG
+            print("[MiniBar] animateMini motionReduce path: drawn set to \(value)")
+            #endif
+            return
+        }
+        withAnimation(AIATheme.Motion.progress) { drawn = value }
+        #if DEBUG
+        print("[MiniBar] animateMini withAnimation: drawn set to \(value)")
+        #endif
         if over {
             // 末端脉冲：从略大回弹到正常尺寸一次，纯缩放不循环。
             pulse = 1.8
             withAnimation(AIATheme.Motion.progressFade) { pulse = 1 }
         }
     }
+    // <<< CHANGE-[2026-08-18 09:31:07]-[XS Max进度条无生长动画修复-消除max无动画陷阱] 结束
 }
 
 // MARK: - 统计卡（体重/身高/心率/BMI）
