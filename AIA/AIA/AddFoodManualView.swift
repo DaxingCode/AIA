@@ -106,14 +106,14 @@ private struct FoodDraft: Identifiable {
     var searchText: String = ""
     var cloudError: String? = nil          // 该卡独立联网搜索错误，避免多卡串扰
     var savedEntry: FoodEntry? = nil
-    // >>> CHANGE-[2026-08-18 15:43:18]-[营养元素按重量缩放+区分来源只读] 开始
+    // >>> CHANGE-[2026-08-18 16:38:05]-[营养元素按重量缩放+区分来源只读] 开始
     // 原因: 用 searchText 非空判断"来自搜索"会误伤"打名字但不选结果"的手动填场景(名称框绑的就是 searchText)。
     //       改用独立标志: 仅 applySearchResult 真正选取搜索结果时置 true。
     // 回退: 改为 var isFromSearch: Bool { !searchText.trimmingCharacters(in: .whitespaces).isEmpty } 并删本行。
     var pickedFromSearch: Bool = false
-    // <<< CHANGE-[2026-08-18 15:43:18]-[营养元素按重量缩放+区分来源只读] 结束
+    // <<< CHANGE-[2026-08-18 16:38:05]-[营养元素按重量缩放+区分来源只读] 结束
 
-    // >>> CHANGE-[2026-08-18 16:45:00]-isValid兼容手动填卡 开始
+    // >>> CHANGE-[2026-08-18 16:38:05]-isValid兼容手动填卡 开始
     // 原因: 手动填路径 baseKcalText 永远为空(界面无此输入框),原 !baseKcalText.isEmpty 会让保存按钮永远点不动。
     //       改为: 有食物名 + 重量非空 + (热量非空 或 三大宏量营养素任一非空) 即可保存。
     // 回退: 恢复 3 行原版(把 hasMacro 那段换回 !baseKcalText.isEmpty)即可
@@ -126,9 +126,9 @@ private struct FoodDraft: Identifiable {
                        (Double(baseFatText) ?? 0) > 0
         return hasName && hasWeight && (hasKcal || hasMacro)
     }
-    // <<< CHANGE-[2026-08-18 16:45:00]-isValid兼容手动填卡 结束
+    // <<< CHANGE-[2026-08-18 16:38:05]-isValid兼容手动填卡 结束
     var weight: Double { max(Double(weightText) ?? 100, 1) }
-    // >>> CHANGE-[2026-08-18 16:42:00]-手动填卡自动算热量 开始
+    // >>> CHANGE-[2026-08-18 16:38:05]-手动填卡自动算热量 开始
     // 原因: 手动添加界面没有 baseKcalText 输入框(只有 6 大营养素 TextField)，原公式 baseKcalText*weight/100 永远为 0
     //       导致用户填完蛋白/碳水/脂肪后热量胶囊不显示。补 4+4+9 自动推算作为兜底。
     // 回退: 恢复 3 行原版(去掉 pro/car/fat 兜底)即可
@@ -141,8 +141,8 @@ private struct FoodDraft: Identifiable {
         let fat = Double(baseFatText) ?? 0
         return (pro * 4 + car * 4 + fat * 9) * weight / 100
     }
-    // <<< CHANGE-[2026-08-18 16:42:00]-手动填卡自动算热量 结束
-    // >>> CHANGE-[2026-08-18 15:43:18]-[营养元素按重量缩放+区分来源只读] 开始
+    // <<< CHANGE-[2026-08-18 16:38:05]-手动填卡自动算热量 结束
+    // >>> CHANGE-[2026-08-18 16:38:05]-[营养元素按重量缩放+区分来源只读] 开始
     // 原因: 营养元素(蛋白/碳水/脂肪/纤维/糖/钠)此前只展示 base*Text 原始值(按100g)，切重量不变；
     //       热量因有 totalKcal 才跟着缩放。现补齐 6 个按重量缩放的 total* 计算属性，供"来自搜索"的食物只读展示。
     // 回退: 删本段 + nutritionSection 调用处改回 nutritionCell(binding: $drafts[idx].base*Text) + 删 nutritionReadOnlyCell。
@@ -154,7 +154,7 @@ private struct FoodDraft: Identifiable {
     var totalSodium:  Double { (Double(baseSodiumText)  ?? 0) * weight / 100 }
     /// 是否来自内置库/联网搜索选取：仅真正点选过搜索结果 → 营养只读(按当前重量算)；否则(打名字不选/纯手动) → 可编辑 TextField
     var isFromSearch: Bool { pickedFromSearch }
-    // <<< CHANGE-[2026-08-18 15:43:18]-[营养元素按重量缩放+区分来源只读] 结束
+    // <<< CHANGE-[2026-08-18 16:38:05]-[营养元素按重量缩放+区分来源只读] 结束
     /// 已收起（入库）的展示快照字段
     var savedCalories: Double = 0
     var savedWeight: Double = 0
@@ -234,9 +234,7 @@ struct AddFoodManualView: View {
                     .padding(.vertical, 12)
                 }
                 .scrollDismissesKeyboard(.immediately)
-                .onChange(of: drafts[editingIndex ?? 0].searchText) { _, newValue in
-                    performSearch(newValue)
-                }
+                // CHANGE-[2026-08-18 16:43:00] 删重复全局 onChange(of: searchText)：合并输入框后 name 的 onChange 已联动触发 performSearch，避免二次触发。回退: 恢复 .onChange(of: drafts[editingIndex ?? 0].searchText) { performSearch($1) }
                 .onDisappear {
                     // 页面消失时取消未完成的联网任务，避免野指针
                     searchTask?.cancel()
@@ -272,30 +270,15 @@ struct AddFoodManualView: View {
 
     private var searchCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // >>> CHANGE-[2026-08-18 16:34:12]-手动填食物名称输入框 开始
-            // 原因: 第一张手动填卡没有"食物名称"输入框，name 只能靠点搜索结果赋值，导致手动填保存时 isValid 失败被静默丢弃
-            // 回退: 删除本段(回到只有搜索框)即可
-            HStack(spacing: 6) {
-                Image(systemName: "pencil")
-                    .font(AIATheme.Font.subhead)
-                    .foregroundStyle(AIATheme.food)
-                Text("食物名称")
-                    .font(AIATheme.Font.micro)
-                    .foregroundStyle(AIATheme.muted)
-                Spacer()
-            }
-            TextField("如 自制沙拉、鸡胸肉（不选搜索也可直接保存）", text: $drafts[editingIndex ?? 0].name)
-                .font(AIATheme.Font.body)
-                .foregroundStyle(.primary)
-                .autocorrectionDisabled()
-            Divider()
-                .padding(.vertical, 4)
-            // <<< CHANGE-[2026-08-18 16:34:12]-手动填食物名称输入框 结束
+            // >>> CHANGE-[2026-08-18 16:41:38]-合并食物名称与搜索输入框 开始
+            // 原因: 用户反馈"食物名称"与"搜索食物库"两个输入框重复，要求合并成一个。
+            //       合并后：单框绑定 name（手动填可直接保存），输入时联动 searchText 触发搜索，点搜索结果仍走 applySearchResult 覆盖 name。
+            // 回退: 恢复为 16:34:12 版（"食物名称"框 + Divider + "搜索食物库"框 两个输入框）
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
                     .font(AIATheme.Font.subhead)
-                    .foregroundStyle(AIATheme.muted)
-                Text("搜索食物库")
+                    .foregroundStyle(AIATheme.food)
+                Text("食物名称")
                     .font(AIATheme.Font.micro)
                     .foregroundStyle(AIATheme.muted)
                 Spacer()
@@ -304,10 +287,16 @@ struct AddFoodManualView: View {
                         .scaleEffect(0.7)
                 }
             }
-            TextField("输入食物名称快速搜索营养数据（如 牛肉、苹果）", text: $drafts[editingIndex ?? 0].searchText)
+            TextField("输入食物名称（如 牛肉、苹果），可点搜索结果自动填营养", text: $drafts[editingIndex ?? 0].name)
                 .font(AIATheme.Font.body)
                 .foregroundStyle(.primary)
                 .autocorrectionDisabled()
+                .onChange(of: drafts[editingIndex ?? 0].name) { _, newValue in
+                    // 名称即搜索词：同步 searchText 触发 performSearch
+                    drafts[editingIndex ?? 0].searchText = newValue
+                    performSearch(newValue)
+                }
+            // <<< CHANGE-[2026-08-18 16:41:38]-合并食物名称与搜索输入框 结束
 
             if !drafts[editingIndex ?? 0].searchText.trimmingCharacters(in: .whitespaces).isEmpty && showSearchResults {
                 // 搜索词非空就展示列表（即使本地 0 命中，也展示「联网搜索」按钮供用户主动查询）
@@ -436,12 +425,12 @@ struct AddFoodManualView: View {
                 Image(systemName: "fork.knife")
                     .font(AIATheme.Font.subhead)
                     .foregroundStyle(AIATheme.food)
-                // >>> CHANGE-[2026-08-18 16:30:00]-手动添加食物标题 开始
+                // >>> CHANGE-[2026-08-18 16:38:05]-手动添加食物标题 开始
                 // 原因: 用户要求手动填数据的草稿卡标题加「（需手动输入）」提示，来自搜索的保持干净
                 // 回退: 恢复本行 Text 为原 "食物信息" 即可
                 Text(drafts.count > 1 ? "第 \(idx + 1) 份" : (drafts[idx].pickedFromSearch ? "食物信息" : "食物信息（需手动输入）"))
                     .font(AIATheme.Font.callout.weight(.medium))
-                // <<< CHANGE-[2026-08-18 16:30:00]-手动添加食物标题 结束
+                // <<< CHANGE-[2026-08-18 16:38:05]-手动添加食物标题 结束
                     .foregroundStyle(.primary)
                 Spacer()
                 // 空卡右上角删除按钮（多张时才可点，最后一张空卡不允许删）
@@ -663,13 +652,13 @@ struct AddFoodManualView: View {
                 Image(systemName: "chart.bar.fill")
                     .font(AIATheme.Font.micro)
                     .foregroundStyle(AIATheme.muted)
-                // >>> CHANGE-[2026-08-18 16:38:00]-营养区标题提示 开始
+                // >>> CHANGE-[2026-08-18 16:38:05]-营养区标题提示 开始
                 // 原因: 用户要求手动添加食物界面把"按当前重量"改成"录入营养成分，自动算出热量"，让用户知道热量是自动推算
                 // 回退: 恢复本 Text 为 "营养成分（按当前重量）" 即可
                 Text("录入营养成分，自动算出热量")
                     .font(AIATheme.Font.micro)
                     .foregroundStyle(AIATheme.muted)
-                // <<< CHANGE-[2026-08-18 16:38:00]-营养区标题提示 结束
+                // <<< CHANGE-[2026-08-18 16:38:05]-营养区标题提示 结束
                 Spacer()
                 if drafts[idx].totalKcal > 0 {
                     HStack(spacing: 3) {
@@ -693,7 +682,7 @@ struct AddFoodManualView: View {
             // 2×3 营养网格：6 大营养素；热量已在标题 pill 展示
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
                       spacing: 8) {
-                // >>> CHANGE-[2026-08-18 15:43:18]-[营养元素按重量缩放+区分来源只读] 开始
+                // >>> CHANGE-[2026-08-18 16:38:05]-[营养元素按重量缩放+区分来源只读] 开始
                 // 来自搜索(内置库/联网): 营养按当前重量自动缩放且只读; 用户手动填: 保留 TextField 手填基础值(按100g)。
                 if drafts[idx].isFromSearch {
                     nutritionReadOnlyCell(label: "蛋白质", unit: "g", value: drafts[idx].totalProtein)
@@ -716,7 +705,7 @@ struct AddFoodManualView: View {
                     nutritionCell(label: "钠", unit: "mg",
                               binding: $drafts[idx].baseSodiumText)
                 }
-                // <<< CHANGE-[2026-08-18 15:43:18]-[营养元素按重量缩放+区分来源只读] 结束
+                // <<< CHANGE-[2026-08-18 16:38:05]-[营养元素按重量缩放+区分来源只读] 结束
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 14)
@@ -783,7 +772,7 @@ struct AddFoodManualView: View {
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rXS))
     }
 
-    // >>> CHANGE-[2026-08-18 15:43:18]-[营养元素按重量缩放+区分来源只读] 开始
+    // >>> CHANGE-[2026-08-18 16:38:05]-[营养元素按重量缩放+区分来源只读] 开始
     /// 营养网格只读单元：来自搜索的食物按当前重量自动算，展示数值不可编辑。复用 nutritionCell 视觉。
     private func nutritionReadOnlyCell(label: String, unit: String, value: Double) -> some View {
         VStack(alignment: .center, spacing: 6) {
@@ -811,7 +800,7 @@ struct AddFoodManualView: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rXS))
     }
-    // <<< CHANGE-[2026-08-18 15:43:18]-[营养元素按重量缩放+区分来源只读] 结束
+    // <<< CHANGE-[2026-08-18 16:38:05]-[营养元素按重量缩放+区分来源只读] 结束
 
     // MARK: - 搜索
 
@@ -1075,7 +1064,7 @@ struct AddFoodManualView: View {
             meal: meal,
             date: date,
             weightGram: w,
-            // >>> CHANGE-[2026-08-18 16:48:00]-手动填卡baseCalories兜底 开始
+            // >>> CHANGE-[2026-08-18 16:38:05]-手动填卡baseCalories兜底 开始
             // 原因: 手动填卡 baseKcalText 为空,baseCal=0 会让 baseCalories 落 0,后续按其他重量重算热量出错。
             //       改为: 有 baseKcalText 用 baseKcalText,否则用 4+4+9 推算法(与 totalKcal 一致)。
             // 回退: 恢复 baseCalories: baseCal
@@ -1094,7 +1083,7 @@ struct AddFoodManualView: View {
         let entry = buildEntry(from: draft)
         context.insert(entry)
         context.insert(FoodSource(foodSyncId: entry.syncId, origin: "manual"))
-        // >>> CHANGE-[2026-08-18 17:05:00]-persist保存日志 开始
+        // >>> CHANGE-[2026-08-18 16:38:05]-persist保存日志 开始
         // 原因: 手动填卡保存后列表不显示，怀疑 save 静默失败。try? 吞掉错误，改为 do-try-catch 打印定位。
         // 回退: 恢复 try? context.save() 单行即可
         do {
@@ -1103,7 +1092,7 @@ struct AddFoodManualView: View {
         } catch {
             print("[AddFoodManual] save FAILED: \(error)")
         }
-        // <<< CHANGE-[2026-08-18 17:05:00]-persist保存日志 结束
+        // <<< CHANGE-[2026-08-18 16:38:05]-persist保存日志 结束
         UsageAnalytics.logAdd("food", source: "manual")
         WidgetSnapshot.refreshAfterWrite()
 
