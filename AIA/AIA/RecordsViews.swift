@@ -936,17 +936,28 @@ struct FoodListView: View {
                                     .fill(AIATheme.hairline)
                                     .frame(width: 0.5, height: 32)
 
+                                // >>> CHANGE-[2026-08-19 13:54:25]-饮食页今日消耗跳健康管理(修正) 开始
+                                // 原因: 上一版误用 .bodyData(身体数据页), 用户实际要跳首页"健康"宫格进去的"健康管理页" HealthListView, 路由 .health
+                                // 回退: 改回 .bodyData 即错版; 当前 .health 正确版
                                 // 今日消耗（与首页健康卡片 / 今日预览 / TDEE 圆环同源：resting+active，无 HealthKit 时走手动活动热量）
                                 // 数字用 .primary 而非 ink：见 TDEE 列注释，ink 在深色卡片底上对比度过低。
-                                VStack(spacing: 2) {
-                                    Text("\(Int(tdeeCurrentValue))")
-                                        .font(AIATheme.Font.title3.weight(.semibold))
-                                        .foregroundStyle(.primary)
-                                    Text(String(format: "%@ kcal", NSLocalizedString("food.burned", comment: "")))
-                                        .font(AIATheme.Font.micro)
-                                        .foregroundStyle(AIATheme.sub)
+                                Button {
+                                    // 跳"健康管理页" HealthListView（首页 4 宫格"健康"卡进去的全屏页），不是 .bodyData(身体数据页)
+                                    NavigationRouter.shared.navigate(.health)
+                                } label: {
+                                    VStack(spacing: 2) {
+                                        Text("\(Int(tdeeCurrentValue))")
+                                            .font(AIATheme.Font.title3.weight(.semibold))
+                                            .foregroundStyle(.primary)
+                                        Text(String(format: "%@ kcal", NSLocalizedString("food.burned", comment: "")))
+                                            .font(AIATheme.Font.micro)
+                                            .foregroundStyle(AIATheme.sub)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .contentShape(Rectangle())
                                 }
-                                .frame(maxWidth: .infinity)
+                                .buttonStyle(.plain)
+                                // <<< CHANGE-[2026-08-19 13:54:25]-饮食页今日消耗跳健康管理(修正) 结束
                             }
 
                             waterCard
