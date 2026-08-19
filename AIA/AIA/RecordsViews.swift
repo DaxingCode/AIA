@@ -4733,20 +4733,28 @@ private struct DietAnalysisView: View {
     }
 
     /// 周期日均摄入（热量 kcal / 蛋白 g / 纤维·糖·钠），与 nutritionCards 同口径
-    private var periodAvg: (cal: Double, protein: Double, fiber: Double, sugar: Double, sodium: Double) {
+    // >>> CHANGE-[2026-08-19 10:44:39]-目标达成补碳水脂肪 开始
+    // 原因: 饮食分析页"目标达成"模块原只展示热量/蛋白/纤维/糖/钠 5 行,缺碳水/脂肪两行。
+    // 修法: periodAvg 补算 carb/fat 周均,供 GoalCheckCard 新增两行使用。
+    // 回退: 删本段,恢复原判(5 元组 periodAvg 无 carb/fat)。
+    private var periodAvg: (cal: Double, protein: Double, carb: Double, fat: Double, fiber: Double, sugar: Double, sodium: Double) {
         let (s, e) = period.range()
         let dayCount = max(1, Calendar.current.dateComponents([.day], from: s, to: e).day ?? 1)
-        var calSum = 0.0, proteinSum = 0.0, fiberSum = 0.0, sugarSum = 0.0, sodiumSum = 0.0
+        var calSum = 0.0, proteinSum = 0.0, carbSum = 0.0, fatSum = 0.0, fiberSum = 0.0, sugarSum = 0.0, sodiumSum = 0.0
         for f in periodFoods {
             calSum += f.calories
             proteinSum += f.protein
+            carbSum += f.carbs
+            fatSum += f.fat
             fiberSum += f.fiber
             sugarSum += f.sugar
             sodiumSum += f.sodium
         }
         let dc = Double(dayCount)
-        return (cal: calSum / dc, protein: proteinSum / dc, fiber: fiberSum / dc, sugar: sugarSum / dc, sodium: sodiumSum / dc)
+        return (cal: calSum / dc, protein: proteinSum / dc, carb: carbSum / dc, fat: fatSum / dc,
+                fiber: fiberSum / dc, sugar: sugarSum / dc, sodium: sodiumSum / dc)
     }
+    // <<< CHANGE-[2026-08-19 10:44:39]-目标达成补碳水脂肪 结束
 
     /// 当前周期内的食物（半开区间 [start, end)）
     private var periodFoods: [FoodEntry] {
@@ -4848,12 +4856,19 @@ private struct DietAnalysisView: View {
                         proteinTarget: proteinTarget,
                         avgCal: periodAvg.cal,
                         avgProtein: periodAvg.protein,
+                        avgCarb: periodAvg.carb,
+                        avgFat: periodAvg.fat,
                         fiberTarget: cal * 14 / 1000,
                         sugarTarget: cal * 0.10 / 4,
                         // 钠按目标热量线性缩放：2000kcal 标准人对应 2000mg 钠，即 钠(mg) = 目标热量(kcal)。
                         // 用户原公式「建议热量 × 1000 ÷ 2000 × 2000」字面化简 = 目标热量 × 1000（2000kcal→2,000,000mg，不符合实际），
                         // 此处按营养学合理口径实现（如需严格按字面请改为 `cal * 1000`）。
                         sodiumTarget: cal,
+                        // >>> CHANGE-[2026-08-19 10:44:39]-目标达成补碳水脂肪 开始
+                        // 碳水 = 目标热量 × 50% ÷ 4;脂肪 = 目标热量 × 25% ÷ 9（与饮食记录页 nutritionTargets 同源）。
+                        carbTarget: cal * 0.50 / 4,
+                        fatTarget: cal * 0.25 / 9,
+                        // <<< CHANGE-[2026-08-19 10:44:39]-目标达成补碳水脂肪 结束
                         avgFiber: periodAvg.fiber,
                         avgSugar: periodAvg.sugar,
                         avgSodium: periodAvg.sodium,
@@ -4902,16 +4917,24 @@ private struct GoalCheckCard: View {
     let goal: FitnessGoal
     let calorieTarget: Double?      // 热量目标（TDEE × 系数），无 TDEE 时为 nil
     let proteinTarget: Double?      // 蛋白目标（体重 × g/kg），无体重时为 nil
+    // >>> CHANGE-[2026-08-19 10:44:39]-目标达成补碳水脂肪 开始
+    // 原因: GoalCheckCard 原缺碳水/脂肪两行的目标值与周均,这里补 4 个字段。
+    // 回退: 删本段 4 行字段(avgCarb/avgFat/carbTarget/fatTarget)。
     let avgCal: Double
     let avgProtein: Double
-    // 以下三项目标按「建议热量」线性缩放（与体重/TDEE 无关，goal > 0 即可用）
+    let avgCarb: Double
+    let avgFat: Double
+    // 以下五项目标按「建议热量」线性缩放（与体重/TDEE 无关，goal > 0 即可用）
     let fiberTarget: Double
     let sugarTarget: Double
     let sodiumTarget: Double
+    let carbTarget: Double          // 碳水 = 目标热量 × 0.50 ÷ 4（与饮食记录页 carb 公式同源）
+    let fatTarget: Double           // 脂肪 = 目标热量 × 0.25 ÷ 9（与饮食记录页 fat 公式同源）
     let avgFiber: Double
     let avgSugar: Double
     let avgSodium: Double
     let headerCalorie: Double       // 顶部「目标热量」显示用（calorieTarget ?? 建议热量）
+    // <<< CHANGE-[2026-08-19 10:44:39]-目标达成补碳水脂肪 结束
 
     private var calState: (label: String, color: Color) {
         guard let ct = calorieTarget, ct > 0 else { return (NSLocalizedString("diet.analysis.goalLow", comment: ""), AIATheme.warn) }
@@ -4976,6 +4999,27 @@ private struct GoalCheckCard: View {
                     color: proteinState.color
                 )
             }
+            // >>> CHANGE-[2026-08-19 10:44:39]-目标达成补碳水脂肪 开始
+            // 原因: 补碳水/脂肪两行,与饮食记录页 6 元组顺序(蛋白→碳水→脂肪→纤维→糖→钠)一致;
+            //       碳水/脂肪属「越高越好」,lowerIsBetter=false;目标与记录页同源(cal×0.5/4、cal×0.25/9)。
+            // 回退: 删本段两 goalRow。
+            let carbSt = macroState(actual: avgCarb, target: carbTarget, lowerIsBetter: false)
+            goalRow(
+                label: NSLocalizedString("food.macro.carb", comment: ""),
+                detail: String(format: "%.1f / %.1f g", avgCarb, carbTarget),
+                ratio: carbTarget > 0 ? min(avgCarb / carbTarget, 1) : 0,
+                badge: carbSt.label,
+                color: carbSt.color
+            )
+            let fatSt = macroState(actual: avgFat, target: fatTarget, lowerIsBetter: false)
+            goalRow(
+                label: NSLocalizedString("food.macro.fat", comment: ""),
+                detail: String(format: "%.1f / %.1f g", avgFat, fatTarget),
+                ratio: fatTarget > 0 ? min(avgFat / fatTarget, 1) : 0,
+                badge: fatSt.label,
+                color: fatSt.color
+            )
+            // <<< CHANGE-[2026-08-19 10:44:39]-目标达成补碳水脂肪 结束
             // 按建议热量线性缩放的三项微量营养素目标
             let fiberSt = macroState(actual: avgFiber, target: fiberTarget, lowerIsBetter: false)
             goalRow(
