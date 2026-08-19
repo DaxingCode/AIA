@@ -265,16 +265,25 @@ struct FoodListView: View {
     /// 注意：本页「TDEE」列（tdee）显示的是目标值（actual 为 0 时回落到目标），
     /// 而「今日消耗」列应显示实际达成，故用 tdeeCurrentValue 与那三处对齐。
     @AppStorage(HealthMetricKind.tdee.sourceKey) private var tdeeSource: HealthSourceMode = .auto
+    // >>> CHANGE-[2026-08-19 08:23:19]-对齐TDEE消耗口径 开始
+    // 原因: 原自动模式读 ManualHealthStore 的 .hk 落库槽位, 与首页宫格(492)/管理页TDEE圆环口径不一致。
+    //       改为读 HealthManager 的按日期 HealthKit 字典(activeEnergyForDay/restingEnergyForDay, 近30天),
+    //       与首页/管理页同源; 命中即用, 超30天或字典为空时退回 .hk 落库值兜底(不破坏历史回看)。
+    // 回退: 删除本段, 恢复原判(直接读 healthKitValue("activeCalories")+healthKitValue("restingCalories")) 即可。
     private var tdeeCurrentValue: Double {
         let day = Calendar.current.startOfDay(for: selectedDate)
         if tdeeSource == .auto && health.authorized && health.isAvailable && health.hasHealthKitData {
-            // HealthKit 路径：按选中日期取当天活动+静息能量（.hk 落库值，持久化，含更早历史）。
-            return ManualHealthStore.shared.healthKitValue("activeCalories", for: day)
-                + ManualHealthStore.shared.healthKitValue("restingCalories", for: day)
+            // HealthKit 路径：按选中日期取当天活动+静息能量（同源首页/管理页）。
+            let active = HealthManager.shared.activeEnergyForDay[day]
+                ?? ManualHealthStore.shared.healthKitValue("activeCalories", for: day)
+            let resting = HealthManager.shared.restingEnergyForDay[day]
+                ?? ManualHealthStore.shared.healthKitValue("restingCalories", for: day)
+            return active + resting
         }
         // 手动补录路径：按选中日期查（ManualHealthStore 内部按 startOfDay 存）。
         return Double(ManualHealthStore.shared.activeCalories(for: day))
     }
+    // <<< CHANGE-[2026-08-19 08:23:19]-对齐TDEE消耗口径 结束
     private var goal: Double { goalIsCustom ? goalOverride : tdee }
 
     // MARK: 营养构成建议值（随健身目标/体重/TDEE 联动，与饮食分析「目标达成」卡同源）
@@ -1466,15 +1475,19 @@ struct HealthListView: View {
             ? ManualHealthStore.shared.healthKitValue("exercise", for: Date())
             : health.exerciseTimeToday + Double(ManualHealthStore.shared.exerciseMinutes(for: Date()))
     }
+    // >>> CHANGE-[2026-08-19 08:19:21]-对齐TDEE消耗口径 开始
     /// TDEE 实际达成 = 静息能量 + 活动能量。
-    /// 已接入 HealthKit 且读到数据 → 自动同步（读落库值，持久化一致）；
+    /// 自动模式：直接读 HealthManager 内存单例的 resting+active（与首页宫格 homeEnergyBurned 同源），
+    /// 由 @StateObject health = HealthManager.shared 订阅自动实时刷新；
+    /// 原写法读 ManualHealthStore 的 .hk 落库槽位，与定时刷新强耦合且易读到不完整累计（显示8），与首页（492）口径不一致。
     /// 未接入 → 回退到手动录入的活动热量（点击圆环 +100 kcal）。
+    /// 回退：删除本段、恢复原判（读 healthKitValue("activeCalories")+healthKitValue("restingCalories")）即可。
     private var tdeeCurrentValue: Double {
         isAuto(.tdee)
-            ? ManualHealthStore.shared.healthKitValue("activeCalories", for: Date())
-                + ManualHealthStore.shared.healthKitValue("restingCalories", for: Date())
+            ? HealthManager.shared.restingEnergyToday + HealthManager.shared.activeEnergyToday
             : Double(ManualHealthStore.shared.activeCalories(for: Date()))
     }
+    // <<< CHANGE-[2026-08-19 08:19:21]-对齐TDEE消耗口径 结束
 
     /// 能量圆环目标 = 每日总消耗 TDEE（BMR × 活动系数），与健康目标页 TDEE 数值同步。
     private var tdeeGoal: Double {
