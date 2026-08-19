@@ -4487,7 +4487,7 @@ private struct DietPreferencesView: View {
         .map { idx, kv in DietFoodRank(rank: idx + 1, name: kv.key, count: kv.value) }
     }
 
-    /// 记录来源：imageName 非空 = AI 识别；空 = 手动输入（含文字/语音/编辑）
+    /// 记录来源：imageName 非空 = 图片识别记录；空 = 语音、文字记录（含手动编辑）
     private var sourceBreakdown: DietSourceBreakdown {
         let ai = foods.filter { ($0.imageName?.isEmpty == false) }.count
         return DietSourceBreakdown(aiCount: ai, manualCount: foods.count - ai)
@@ -4533,14 +4533,18 @@ private struct DietPreferencesView: View {
                 // 3. 记录来源
                 SectionTitle(text: "记录来源", trailing: nil)
                 HStack(spacing: 8) {
+                    // >>> CHANGE-[2026-08-19 11:08:37]-[饮食偏好文案] 开始
+                    // 原因: 用户要求"AI 识别"改"图片识别记录"，"手动输入"改"语音、文字记录"
+                    // 回退: 恢复 title 为原 "AI 识别" / "手动输入" 即可
                     DietTintedCard(
-                        icon: "camera.fill", title: "AI 识别", count: sourceBreakdown.aiCount,
+                        icon: "camera.fill", title: "图片自动记录", count: sourceBreakdown.aiCount,
                         color: AIATheme.food, bg: AIATheme.surface
                     )
                     DietTintedCard(
-                        icon: "pencil", title: "手动输入", count: sourceBreakdown.manualCount,
+                        icon: "pencil", title: "语音/文字自动记录", count: sourceBreakdown.manualCount,
                         color: AIATheme.health, bg: AIATheme.surface
                     )
+                    // <<< CHANGE-[2026-08-19 11:08:37]-[饮食偏好文案] 结束
                 }
 
                 // 4. 各餐次记录
