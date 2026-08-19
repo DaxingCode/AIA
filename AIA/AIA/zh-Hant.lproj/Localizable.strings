@@ -92,6 +92,10 @@
 "food.navTitle" = "飲食記錄";
 "food.today" = "今天 · %@ %@";
 "food.netLabel" = "淨熱量 kcal";
+"food.energy30d.title" = "近30日能量";
+"food.energy30d.netSum" = "淨熱量彙總";
+"food.energy30d.inSum" = "攝入彙總";
+"food.energy30d.outSum" = "消耗彙總";
 "food.intakeTdee" = "攝入 %d · TDEE %d";
 "food.belowGoal" = "低於目標，可加餐 🍎";
 "food.overGoal" = "已超目標，注意控制";

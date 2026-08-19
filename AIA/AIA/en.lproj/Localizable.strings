@@ -92,6 +92,10 @@
 "food.navTitle" = "Diet Log";
 "food.today" = "Today · %@ %@";
 "food.netLabel" = "Net kcal";
+"food.energy30d.title" = "Last 30 Days Energy";
+"food.energy30d.netSum" = "Net Total";
+"food.energy30d.inSum" = "Intake Total";
+"food.energy30d.outSum" = "Burn Total";
 "food.intakeTdee" = "Intake %d · TDEE %d";
 "food.belowGoal" = "Under goal, have a snack 🍎";
 "food.overGoal" = "Over goal, watch your intake";

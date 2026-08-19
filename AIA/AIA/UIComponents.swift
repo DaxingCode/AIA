@@ -598,12 +598,18 @@ struct MiniBar: View {
 struct StatCard: View {
     let value: String
     let caption: String
+    // >>> CHANGE-[2026-08-19 12:36:16]-[健康目标页净热量方块] 开始
+    // 原因: 净热量需按正/负染不同色(正红负绿),StatCard 原写死 AIATheme.ink;加可选 valueColor 默认保持原观感
+    // 回退: 删除本参数 + 调用处 valueColor 传参即可还原
+    var valueColor: Color = AIATheme.ink
+    // <<< CHANGE-[2026-08-19 12:36:16]-[健康目标页净热量方块] 结束
     var body: some View {
         VStack(spacing: 2) {
             // 2026-07-30：身高 / 体重这类数字在 4 列窄卡片里"165.0cm"会被推到第二行只留个"m"。
             // 单行 + 自动缩字号兜底：保证数字一行内显示，宁可变小也不换行。
             Text(value)
                 .font(AIATheme.Font.body.weight(.medium))
+                .foregroundStyle(valueColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
                 .frame(maxWidth: .infinity)

@@ -897,11 +897,14 @@ struct FoodListView: View {
                         // 3 列热量指标：净热量 / TDEE / 今日消耗（等宽 + 细竖线分隔）
                         HStack(spacing: 8) {
                             HStack(spacing: 0) {
+                                // >>> CHANGE-[2026-08-19 14:06:49]-净热量格跳近30日能量页 开始
+                                // 原因: 用户要求点饮食页净热量格跳到近30日能量页(.energy30DaysRecords)
+                                // 回退: 删 Button 包裹、恢复裸 VStack + 原整数减标记即可
+                                Button {
+                                    NavigationRouter.shared.navigate(.energy30DaysRecords)
+                                } label: {
                                 // 净热量（英雄数字，食物色突出）
-                                // >>> CHANGE-[2026-08-19 12:54:42]-净热量整数减 开始
-                                // 原因: 原 Int(net)=Int(摄入-消耗) 先减后截断小数, 与中间两列 Int(摄入)/Int(消耗) 整数相减差1;
-                                //       改为整数减 Int(摄入)-Int(消耗), 与心算/列显示完全一致(方案B)
-                                // 回退: 改回 Text("\(Int(net))") 即可
+                                // 整数减口径(方案B): Int(摄入)-Int(消耗)
                                 VStack(spacing: 2) {
                                     Text("\(Int(selectedCalories) - Int(tdeeCurrentValue))")
                                         .font(AIATheme.Font.title3.weight(.semibold))
@@ -911,6 +914,9 @@ struct FoodListView: View {
                                         .foregroundStyle(AIATheme.sub)
                                 }
                                 .frame(maxWidth: .infinity)
+                                .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
 
                                 Rectangle()
                                     .fill(AIATheme.hairline)

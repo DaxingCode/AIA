@@ -51,6 +51,8 @@ enum HomeRoute: Hashable {
     case triggerTutorial(TriggerType)
     // 2026-08-19：静息心率每天记录页（点健康管理页静息心率方块跳转，最近90天，支持手动覆盖）
     case restingHeartRateRecords
+    // 2026-08-19：近30日能量记录页（点饮食记录页净热量格跳转，顶部三汇总+下方每天三列）
+    case energy30DaysRecords
 }
 
 struct ContentView: View {
@@ -402,6 +404,8 @@ struct ContentView: View {
             TriggerTutorialView(trigger: trigger)
         case .restingHeartRateRecords:
             RestingHeartRateRecordsView()
+        case .energy30DaysRecords:
+            Energy30DaysRecordsView()
         }
     }
 
