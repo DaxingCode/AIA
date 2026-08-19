@@ -77,7 +77,7 @@ final class BroadcastHistoryStore: ObservableObject {
         do {
             let resp = try await postAdsJSON([
                 "action": "listBroadcastJobs",
-                "passcode": DeveloperGate.passcode
+                "devToken": DeveloperGate.devToken ?? ""
             ])
             guard resp["ok"] as? Bool == true else {
                 errorText = resp["error"] as? String ?? "云端返回错误"

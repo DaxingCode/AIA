@@ -151,7 +151,7 @@ struct APNsPushEditorView: View {
         do {
             let resp = try await postAdsJSON([
                 "action": "listDevices",
-                "passcode": DeveloperGate.passcode,
+                "devToken": DeveloperGate.devToken ?? "",
             ])
             guard resp["ok"] as? Bool == true else {
                 NSLog("[APNsPush] listDevices 返回失败: \(resp)")

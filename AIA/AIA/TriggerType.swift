@@ -161,10 +161,18 @@ func openTriggerSystemSettings(_ trigger: TriggerType, fallbackToast: @escaping 
 /// 第二层（兜底）：打开本 App 在「设置」里的页面（即设置 → 好记）。
 @MainActor
 private func openTriggerAppSettingsFallback(_ fallbackToast: @escaping (_ message: String) -> Void) {
-    let url = URL(string: UIApplication.openSettingsURLString)
-    UIApplication.shared.open(url ?? URL(string: "prefs:root")!) { opened in
+    // >>> CHANGE-[2026-08-19 15:57:12]-删除prefs:root兜底 开始
+    // 原因: 上架审核风险排查 - prefs: 为系统私有 scheme, 苹果不推荐(2.5.4 质疑), 且 iOS 13+ 已大多失效;
+    //       统一改用官方 UIApplication.openSettingsURLString(即 app-settings: scheme), 无需白名单
+    // 回退: 恢复 url ?? URL(string: "prefs:root")! 两行
+    guard let url = URL(string: UIApplication.openSettingsURLString) else {
+        fallbackToast("无法打开系统设置，请在「设置」中手动进入")
+        return
+    }
+    UIApplication.shared.open(url) { opened in
         if !opened {
             fallbackToast("无法打开系统设置，请在「设置」中手动进入")
         }
     }
+    // <<< CHANGE-[2026-08-19 15:57:12]-删除prefs:root兜底 结束
 }

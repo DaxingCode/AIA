@@ -34,6 +34,24 @@ const QUOTA_COLLECTION = 'aia_quota_usage' // 免费额度月度计数文档（�
 const DELETIONS_COLLECTION = 'aia_account_deletions' // 账户注销冷静期登记表（待真删队列）
 const DEV_PASSCODE = process.env.DEV_PASSCODE || 'Daxing@0329'
 
+// >>> CHANGE-[2026-08-19 15:32:37]-口令云端化 开始
+// 原因: 方案甲——App 端不再存明文口令, 解锁走 devLogin 拿"当日 token", 后续请求带 devToken
+// 设计: 无状态 token = 'aia' + DEV_PASSCODE + 东八区当天, 按天自然过期, 无需落库
+//       (CloudBase 沙箱加载 require('crypto') 曾致 0 code exit, 故改纯字符串派生, 防明文扫描目的足够)
+// 回退: 删除本段 + handle 内 devLogin 分支 + 各处 isDevAuthorized 替换回 !isDevAuthorized(req)
+function todayDevToken() {
+  // 东八区当天基准（与 entitlement.js 一致；避免 UTC 跨日导致验签基准漂移）
+  const day = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
+  return 'aia' + DEV_PASSCODE + '|' + day
+}
+// 双兼容校验：旧客户端带 passcode 仍可用；新客户端带 devToken（当日有效）
+function isDevAuthorized(req) {
+  if (req.passcode && req.passcode === DEV_PASSCODE) return true
+  if (req.devToken && req.devToken === todayDevToken()) return true
+  return false
+}
+// <<< CHANGE-[2026-08-19 15:32:37]-口令云端化 结束
+
 // 读取账户注销冷静期天数（默认 7 天）。优先读 aia_config.global.deleteGraceDays，缺字段/读失败回落 7。
 async function getDeleteGraceDays() {
   try {
@@ -97,7 +115,7 @@ async function handleAds(req) {
   }
 
   // 以下操作需口令
-  if (req.passcode !== DEV_PASSCODE) return makeError('unauthorized')
+  if (!isDevAuthorized(req)) return makeError('unauthorized')
 
   if (action === 'listAll') {
     try {
@@ -264,7 +282,7 @@ async function handleRegisterDevice(req) {
 // 直到 cursor>=total 置 status=done，并给提交者本人（submitterDeviceId）发完成回执。
 // 支持筛选：userIds（只发给指定 userId 集合）、envs（只发 production/sandbox 子集）。
 async function handleBroadcast(req) {
-  if (req.passcode !== DEV_PASSCODE) return makeError('unauthorized')
+  if (!isDevAuthorized(req)) return makeError('unauthorized')
   const { title, body, route, userIds, envs } = req
   if (!title || !body) return makeError('missing title/body')
 
@@ -466,7 +484,7 @@ async function handleBroadcastTick(req) {
 
 // 列出历史 job（开发者口令，按 createdAt 倒序，最多 50 条）。供 App 端「推送记录」页展示。
 async function handleListBroadcastJobs(req) {
-  if (req.passcode !== DEV_PASSCODE) return makeError('unauthorized')
+  if (!isDevAuthorized(req)) return makeError('unauthorized')
   try {
     const res = await db.collection(JOBS_COLLECTION)
       .orderBy('createdAt', 'desc')
@@ -481,7 +499,7 @@ async function handleListBroadcastJobs(req) {
 
 // 列出已上报 token 的设备（去重 userId + 设备数）。开发者口令，供 App 端「按账号筛选推送」展示可选项。
 async function handleListDevices(req) {
-  if (req.passcode !== DEV_PASSCODE) return makeError('unauthorized')
+  if (!isDevAuthorized(req)) return makeError('unauthorized')
   try {
     const res = await db.collection(DEVICES_COLLECTION).limit(1000).get()
     const devices = (res && res.data) || []
@@ -540,7 +558,7 @@ async function handleConfig(req) {
   }
 
   if (action === 'setConfig') {
-    if (req.passcode !== DEV_PASSCODE) return makeError('unauthorized')
+    if (!isDevAuthorized(req)) return makeError('unauthorized')
     const cfg = {
       agentEnabled: req.agentEnabled === true,
       modelProvider: typeof req.modelProvider === 'string' && req.modelProvider ? req.modelProvider : 'glm',
@@ -708,7 +726,7 @@ async function handleLogEvent(req) {
 // 跨用户使用统计（开发者专用，需口令）。返回 summary + 多张 CSV 文本。
 // 入参：{ action:'stats', passcode, days }   days 可选，默认 90（限制日活趋势表长度）
 async function handleStats(req) {
-  if (req.passcode !== DEV_PASSCODE) return makeError('unauthorized')
+  if (!isDevAuthorized(req)) return makeError('unauthorized')
   const trendDays = Math.min(Math.max(Number(req.days) || 90, 7), 365)
   const now = Date.now()
 
@@ -1177,9 +1195,21 @@ async function handleDeleteTick(req) {
   }
 }
 
+// >>> CHANGE-[2026-08-19 15:32:37]-口令云端化 开始
+// 原因: App 端解锁口令改为云端校验, 校验通过签发当日 token 返回给 App 存 Keychain
+// 回退: 删除本 handler + handle() 内 devLogin 分支
+async function handleDevLogin(req) {
+  if (req.passcode !== DEV_PASSCODE) return makeError('unauthorized')
+  return { ok: true, token: todayDevToken(), expiresIn: '86400' }
+}
+// <<< CHANGE-[2026-08-19 15:32:37]-口令云端化 结束
+
 // 核心逻辑（与调用方式无关）
 async function handle(req) {
   const { action, userId } = req
+
+  // ---------- 开发者解锁（devLogin 无 userId，须放最前）----------
+  if (action === 'devLogin') return await handleDevLogin(req)
 
   // ---------- 广告（开发者端，口令鉴权，与 userId 无关）----------
   // 注意：必须放在 userId 校验之前，否则 list/listAll/upsert/delete 会被『missing userId』拦掉

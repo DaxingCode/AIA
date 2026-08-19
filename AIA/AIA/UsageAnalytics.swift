@@ -250,7 +250,7 @@ extension UsageAnalytics {
     static func fetchStats(days: Int = 90) async throws -> UsageStatsResult {
         let body: [String: Any] = [
             "action": "stats",
-            "passcode": DeveloperGate.passcode,
+            "devToken": DeveloperGate.devToken ?? "",
             "days": days
         ]
         let json = try await postAdsJSON(body)

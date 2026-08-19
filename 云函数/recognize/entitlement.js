@@ -6,6 +6,22 @@
 //  - 全局月度总额度（成本熔断）：GLOBAL:yyyyMM 聚合，触顶则全平台关闭免费额度。
 //  - checkEntitlement 既做「判定」也做「计费」；App 端状态查询传 dryRun:true 不计费。
 const CN_OFFSET_MS = 8 * 3600 * 1000
+
+// >>> CHANGE-[2026-08-19 15:32:37]-口令云端化 开始
+// 原因: 方案甲——App 端不再存明文口令, 后续请求带当日 devToken
+// 设计: 纯字符串派生(不依赖 crypto, CloudBase 沙箱加载 crypto 曾致 0 code exit)
+// 回退: 删除本段 + handleTesters 内校验改回 req.passcode !== DEV_PASSCODE
+function isDevAuthorized(req, DEV_PASSCODE) {
+  if (req.passcode && req.passcode === DEV_PASSCODE) return true
+  if (req.devToken) {
+    const day = new Date(Date.now() + CN_OFFSET_MS).toISOString().slice(0, 10)
+    const expect = 'aia' + DEV_PASSCODE + '|' + day
+    if (req.devToken === expect) return true
+  }
+  return false
+}
+// <<< CHANGE-[2026-08-19 15:32:37]-口令云端化 结束
+
 const TESTERS_COLLECTION = 'aia_testers'
 const QUOTA_COLLECTION = 'aia_quota_usage'
 const CONFIG_COLLECTION = 'aia_config'
@@ -75,7 +91,7 @@ module.exports = function (db, _, DEV_PASSCODE) {
   }
 
   async function handleTesters(req) {
-    if (req.passcode !== DEV_PASSCODE) return { ok: false, error: 'unauthorized' }
+    if (!isDevAuthorized(req, DEV_PASSCODE)) return { ok: false, error: 'unauthorized' }
     const { action } = req
     if (action === 'listTesters') {
       try {

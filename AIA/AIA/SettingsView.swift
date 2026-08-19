@@ -236,20 +236,27 @@ struct SettingsView: View {
             SecureField("输入口令", text: $passcodeText)
             Button("取消", role: .cancel) { passcodeText = "" }
             Button("确认") {
-                if passcodeText == DeveloperGate.passcode {
-                    DeveloperGate.isUnlocked = true
-                    devUnlocked = true
-                    // 等 alert -dismiss 动画结束后再 push，避免与 NavigationStack 转场冲突
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                        devNavigate = true
-                    }
-                } else {
-                    // 等 passcode alert 完全 dismiss 后再弹错误提示，避免两个 .alert 冲突导致提示不出现
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        showPasscodeError = true
+                // >>> CHANGE-[2026-08-19 15:32:37]-口令云端化 开始
+                // 原因: 明文口令不再本地比对, 改为云端 devLogin 校验+签发 token
+                // 回退: 恢复 if passcodeText == DeveloperGate.passcode 本地比对
+                let input = passcodeText
+                passcodeText = ""
+                Task { @MainActor in
+                    if await DeveloperGate.verify(input) {
+                        DeveloperGate.isUnlocked = true
+                        devUnlocked = true
+                        // 等 alert -dismiss 动画结束后再 push，避免与 NavigationStack 转场冲突
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            devNavigate = true
+                        }
+                    } else {
+                        // 等 passcode alert 完全 dismiss 后再弹错误提示，避免两个 .alert 冲突导致提示不出现
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            showPasscodeError = true
+                        }
                     }
                 }
-                passcodeText = ""
+                // <<< CHANGE-[2026-08-19 15:32:37]-口令云端化 结束
             }
         } message: {
             Text("长按版本号可解锁广告管理与开发者工具。")

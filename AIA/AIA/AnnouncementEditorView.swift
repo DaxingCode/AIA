@@ -170,7 +170,7 @@ func broadcastPush(title: String, body: String, route: String?, userIds: [String
     do {
         var payload: [String: Any] = [
             "action": "broadcast",
-            "passcode": DeveloperGate.passcode,
+            "devToken": DeveloperGate.devToken ?? "",
             "title": title,
             "body": body,
             "route": route ?? NSNull(),

@@ -123,7 +123,7 @@ final class GlobalConfigStore: ObservableObject {
         do {
             let resp = try await postAdsJSON([
                 "action": "setConfig",
-                "passcode": DeveloperGate.passcode,
+                "devToken": DeveloperGate.devToken ?? "",
                 "agentEnabled": agentEnabled,
                 "modelProvider": modelProvider,
                 "visionModelProvider": visionModelProvider
@@ -145,7 +145,7 @@ final class GlobalConfigStore: ObservableObject {
         do {
             let resp = try await postAdsJSON([
                 "action": "setConfig",
-                "passcode": DeveloperGate.passcode,
+                "devToken": DeveloperGate.devToken ?? "",
                 "freeQuotaEnabled": freeQuotaEnabled,
                 "freeQuotaPerMonth": freeQuotaPerMonth,
                 "freeQuotaWeights": freeQuotaWeights,
@@ -173,7 +173,7 @@ final class GlobalConfigStore: ObservableObject {
         do {
             var payload: [String: Any] = [
                 "action": "setConfig",
-                "passcode": DeveloperGate.passcode,
+                "devToken": DeveloperGate.devToken ?? "",
             ]
             if let a = announcement {
                 payload["announcement"] = a.toCloudDict()
@@ -204,7 +204,7 @@ final class GlobalConfigStore: ObservableObject {
         do {
             let resp = try await postAdsJSON([
                 "action": "setConfig",
-                "passcode": DeveloperGate.passcode,
+                "devToken": DeveloperGate.devToken ?? "",
                 "privacyPolicyUrl": privacyPolicyUrl,
                 "userAgreementUrl": userAgreementUrl
             ])
@@ -233,7 +233,7 @@ final class GlobalConfigStore: ObservableObject {
         do {
             let resp = try await postAdsJSON([
                 "action": "setConfig",
-                "passcode": DeveloperGate.passcode,
+                "devToken": DeveloperGate.devToken ?? "",
                 "featureIntroUrl": url
             ])
             guard resp["ok"] as? Bool == true else {

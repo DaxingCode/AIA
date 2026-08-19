@@ -17,5 +17,15 @@
 			</array>
 		</dict>
 	</array>
+	<!-- >>> CHANGE-[2026-08-19 15:57:12]-补LSApplicationQueriesSchemes白名单 开始
+	    原因: 上架审核风险排查 - 代码用 canOpenURL 检查 shortcuts:// 与 App-Prefs: scheme,
+	          iOS 9+ 无白名单则 canOpenURL 恒 false(跳转失效), 且审核可能质疑 Guideline 2.5.4
+	    回退: 删除本 LSApplicationQueriesSchemes 整段即可 -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>shortcuts</string>
+		<string>App-Prefs</string>
+	</array>
+	<!-- <<< CHANGE-[2026-08-19 15:57:12]-补LSApplicationQueriesSchemes白名单 结束 -->
 </dict>
 </plist>

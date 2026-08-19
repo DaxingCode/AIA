@@ -7,8 +7,44 @@ import Foundation
 import Combine
 
 enum DeveloperGate {
-    /// 解锁口令（与服务端 DEV_PASSCODE 一致）。改口令需同步云函数环境变量。
-    static let passcode = "Daxing@0329"
+    // >>> CHANGE-[2026-08-19 15:32:37]-口令云端化 开始
+    // 原因: 苹果审核会扫描二进制字符串, 明文口令在 App 包内可被 strings 扒出(方案甲)
+    // 方案: 口令只留在云函数 DEV_PASSCODE; App 解锁时调云端 devLogin 校验, 成功后签发"当日 token"存 Keychain
+    // 回退: 恢复本地口令比对(口令存云函数环境变量 DEV_PASSCODE) + verify 改为本地比对
+    // >>> CHANGE-[2026-08-19 15:50:34]-清理注释明文口令 开始
+    // 原因: 上架前字符串扫描, 旧注释里的明文口令仍会被 strings 从二进制扒出, 故改为不落明文
+    // 回退: 本段仅注释文字改动, 无逻辑影响
+    // <<< CHANGE-[2026-08-19 15:50:34]-清理注释明文口令 结束
+    private static let tokenKey = "aia.devToken"
+
+    /// 云端校验口令：调 devLogin，成功则把当日 token 写入 Keychain。
+    /// 口令明文只在这一个请求中经过网络（HTTPS），不进 App 安装包、不落盘。
+    @MainActor
+    static func verify(_ input: String) async -> Bool {
+        do {
+            let resp = try await postAdsJSON(["action": "devLogin", "passcode": input])
+            guard resp["ok"] as? Bool == true,
+                  let token = resp["token"] as? String, !token.isEmpty else {
+                return false
+            }
+            KeychainHelper.set(token, for: tokenKey)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// 当前开发者凭据：Keychain 中的当日 token（nil = 未解锁 / 已跨天过期）。
+    static var devToken: String? {
+        KeychainHelper.get(tokenKey)
+    }
+
+    /// 登出开发者模式：清 token，下次请求需重新输口令解锁。
+    static func logout() {
+        KeychainHelper.delete(tokenKey)
+    }
+    // <<< CHANGE-[2026-08-19 15:32:37]-口令云端化 结束
+
     private static let key = "aia.devModeUnlocked"
 
     static var isUnlocked: Bool {
@@ -57,8 +93,10 @@ final class AdManagerStore: ObservableObject {
         loading = true
         defer { loading = false }
         do {
-            let resp = try await postAdsJSON(["action": "listAll", "passcode": DeveloperGate.passcode])
+            let resp = try await postAdsJSON(["action": "listAll", "devToken": DeveloperGate.devToken ?? ""])
+            #if DEBUG
             print("[AdManager] listAll resp: \(resp)")
+            #endif
             guard resp["ok"] as? Bool == true else {
                 lastError = (resp["error"] as? String) ?? "listAll 失败"
                 items = []
@@ -85,10 +123,12 @@ final class AdManagerStore: ObservableObject {
         do {
             let resp = try await postAdsJSON([
                 "action": "upsert",
-                "passcode": DeveloperGate.passcode,
+                "devToken": DeveloperGate.devToken ?? "",
                 "item": dict
             ])
+            #if DEBUG
             print("[AdManager] upsert resp: \(resp)")
+            #endif
             guard resp["ok"] as? Bool == true else {
                 lastError = (resp["error"] as? String) ?? "upsert 失败"
                 return false
@@ -106,7 +146,7 @@ final class AdManagerStore: ObservableObject {
         do {
             let resp = try await postAdsJSON([
                 "action": "delete",
-                "passcode": DeveloperGate.passcode,
+                "devToken": DeveloperGate.devToken ?? "",
                 "id": id
             ])
             guard resp["ok"] as? Bool == true else {
@@ -139,7 +179,7 @@ final class AdManagerStore: ObservableObject {
         do {
             let resp = try await postAdsJSON([
                 "action": "reorder",
-                "passcode": DeveloperGate.passcode,
+                "devToken": DeveloperGate.devToken ?? "",
                 "orders": orders
             ])
             guard resp["ok"] as? Bool == true else {

@@ -75,7 +75,7 @@ struct TesterManagerView: View {
     private func list() async {
         loading = true; lastError = nil
         do {
-            let resp = try await postAdsJSON(["action": "listTesters", "passcode": DeveloperGate.passcode])
+            let resp = try await postAdsJSON(["action": "listTesters", "devToken": DeveloperGate.devToken ?? ""])
             guard resp["ok"] as? Bool == true else {
                 let msg = resp["error"] as? String ?? "未知错误"
                 lastError = "拉取失败: \(msg)"
@@ -90,7 +90,7 @@ struct TesterManagerView: View {
     private func upsert(_ it: TesterItem) async {
         do {
             let resp = try await postAdsJSON([
-                "action": "upsertTester", "passcode": DeveloperGate.passcode,
+                "action": "upsertTester", "devToken": DeveloperGate.devToken ?? "",
                 "idType": it.idType, "idValue": it.idValue, "note": it.note,
                 "kind": it.kind, "enabled": it.enabled, "expireAt": it.expireAt
             ])
@@ -99,7 +99,7 @@ struct TesterManagerView: View {
     }
     private func delete(_ it: TesterItem) async {
         do {
-            let resp = try await postAdsJSON(["action": "deleteTester", "passcode": DeveloperGate.passcode, "id": it.id])
+            let resp = try await postAdsJSON(["action": "deleteTester", "devToken": DeveloperGate.devToken ?? "", "id": it.id])
             if resp["ok"] as? Bool != true { lastError = "删除失败" }
             else { items.removeAll { $0.id == it.id } }
         } catch { lastError = "删除失败: \(error)" }

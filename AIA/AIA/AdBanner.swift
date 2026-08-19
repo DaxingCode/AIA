@@ -85,19 +85,27 @@ enum AIAAdEndpoint {
 
 /// 向 /sync 端点 POST JSON（广告逻辑已并入 /sync，action 用 list/listAll/upsert/delete）。失败抛出。
 func postAdsJSON(_ payload: [String: Any]) async throws -> [String: Any] {
+    // >>> CHANGE-[2026-08-19 15:50:34]-调试日志 DEBUG 化 开始
+    // 原因: 上架前字符串扫描, NSLog 打印的 action/响应体字符串会进二进制暴露内部结构
+    // 回退: 删除 #if DEBUG 段恢复全量日志
+    #if DEBUG
     let action = payload["action"] as? String ?? "?"
     NSLog("🧪 [DEBUG] postAdsJSON 发出 → action=\(action)")
+    #endif
     var req = URLRequest(url: AIAAdEndpoint.url)
     req.httpMethod = "POST"
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.httpBody = try JSONSerialization.data(withJSONObject: payload)
     let (data, resp) = try await URLSession.shared.data(for: req)
+    #if DEBUG
     let raw = String(data: data, encoding: .utf8) ?? ""
     if let http = resp as? HTTPURLResponse {
         NSLog("🧪 [DEBUG] postAdsJSON 收到 ← HTTP \(http.statusCode) body=\(raw.prefix(300))")
     } else {
         NSLog("🧪 [DEBUG] postAdsJSON 收到 ← body=\(raw.prefix(300))")
     }
+    #endif
+    // <<< CHANGE-[2026-08-19 15:50:34]-调试日志 DEBUG 化 结束
     guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
         throw NSError(domain: "ads", code: -2, userInfo: [NSLocalizedDescriptionKey: "返回非 JSON"])
     }

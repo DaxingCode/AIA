@@ -17,6 +17,26 @@ const COLLECTION = 'aia_ads'
 // 服务端口令：优先读环境变量，fallback 硬编码常量（防抓包伪造）。
 const DEV_PASSCODE = process.env.DEV_PASSCODE || 'Daxing@0329'
 
+// >>> CHANGE-[2026-08-19 15:32:37]-口令云端化 开始
+// 原因: 方案甲——App 端不再存明文口令, 解锁走 devLogin 拿"当日 token", 后续请求带 devToken
+// 设计: 纯字符串派生(不依赖 crypto, CloudBase 沙箱加载 crypto 曾致 0 code exit)
+// 回退: 删除本段 + devLogin 分支 + isDevAuthorized 替换回 req.passcode !== DEV_PASSCODE
+function todayDevToken() {
+  // 东八区当天基准（与 aia-sync/entitlement.js 一致；避免 UTC 跨日导致验签基准漂移）
+  const day = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
+  return 'aia' + DEV_PASSCODE + '|' + day
+}
+function isDevAuthorized(req) {
+  if (req.passcode && req.passcode === DEV_PASSCODE) return true
+  if (req.devToken && req.devToken === todayDevToken()) return true
+  return false
+}
+async function handleDevLogin(req) {
+  if (req.passcode !== DEV_PASSCODE) return makeError('unauthorized')
+  return { ok: true, token: todayDevToken(), expiresIn: '86400' }
+}
+// <<< CHANGE-[2026-08-19 15:32:37]-口令云端化 结束
+
 function parseEvent(event) {
   if (event && (event.httpMethod || event.body !== undefined)) {
     let body = event.body
@@ -41,6 +61,9 @@ function inWindow(item, now) {
 async function handle(req) {
   const { action } = req
 
+  // 开发者解锁：校验口令签发当日 token（无 userId，须放最前）
+  if (action === 'devLogin') return await handleDevLogin(req)
+
   // 公开：仅返回已启用且在时间窗内的广告（首页展示用）
   if (action === 'list') {
     try {
@@ -53,8 +76,8 @@ async function handle(req) {
     }
   }
 
-  // 以下操作需口令
-  if (req.passcode !== DEV_PASSCODE) return makeError('unauthorized')
+  // 以下操作需口令（passcode 或当日 devToken 皆可）
+  if (!isDevAuthorized(req)) return makeError('unauthorized')
 
   if (action === 'listAll') {
     try {
