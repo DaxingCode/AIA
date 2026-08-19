@@ -4710,14 +4710,17 @@ private struct DietAnalysisView: View {
             .flatMap { Double($0.value) }
     }
 
-    /// TDEE：与饮食记录页同源（HealthKit 真实静息+活动能量，无则回落到 BMR × 活动系数）。
+    /// TDEE：与饮食记录页同源（RecordsViews.tdee / tdeeGoalFallback = BMR × 活动系数，目标值）。
+    // >>> CHANGE-[2026-08-19 09:44:01]-分析页目标对齐记录页 开始
+    // 原因: 原写法用「今日 activeCalories+restingCalories」当 TDEE,早晨 actual≈34 时
+    //       calorieTarget=34×系数=34,饮食分析页"目标热量"错成 34 kcal,与饮食记录页 1731 不齐平。
+    // 修法: 改用 BMR × 活动系数(目标值),与 RecordsViews.tdee 同源,两页目标口径一致。
+    // 回退: 删本段,恢复原判(读 healthKitValue("activeCalories")+healthKitValue("restingCalories")) 即可。
     private var tdeeValue: Double {
-        let actual = ManualHealthStore.shared.healthKitValue("activeCalories", for: Date())
-            + ManualHealthStore.shared.healthKitValue("restingCalories", for: Date())
-        if actual > 0 { return actual }
-        return (mifflinBMR(weightKg: weightKg, heightCm: heightCm, age: age, isMale: bioSex == 1) ?? 0)
+        (mifflinBMR(weightKg: weightKg, heightCm: heightCm, age: age, isMale: bioSex == 1) ?? 0)
             * activityMultiplier(activityLevel)
     }
+    // <<< CHANGE-[2026-08-19 09:44:01]-分析页目标对齐记录页 结束
 
     /// 目标热量 = TDEE × 目标系数（TDEE 为 0 视为不可用）
     private var calorieTarget: Double? {
