@@ -14,9 +14,14 @@ struct DeveloperCenterView: View {
     @State private var showFreeQuota = false
     @State private var showBillTest = false
 
-    // 免费体验 30 天调试
+    // 免费体验调试
     @ObservedObject private var ent = EntitlementManager.shared
     @State private var customTrialDate: Date = Date()
+    // >>> CHANGE-[2026-08-19 20:55:27]-试用天数云端化 开始
+    // 原因: 开发者中心新增"试用天数配置"(云端全局下发), 编辑值初始取当前全局天数
+    // 回退: 删除本行 + trialDaysConfigCard + body 插入行
+    @State private var trialDaysEdit: Int = GlobalConfigStore.shared.trialDays
+    // <<< CHANGE-[2026-08-19 20:55:27]-试用天数云端化 结束
 
     // 群发公告（方案 B 云端公告 + 方案 A APNs 远程推送）
     @State private var showAnnouncement = false
@@ -73,6 +78,7 @@ struct DeveloperCenterView: View {
                 freeQuotaEntry
                 liveActivityDemoCard
                 screenshotPaywallDemoCard
+                trialDaysConfigCard
                 trialTestCard
                 freeSimulateCard
                 resetNewUserCard
@@ -712,12 +718,67 @@ struct DeveloperCenterView: View {
         ToastCenter.shared.show("已写入付费墙标记，进入对话页查看升级引导")
     }
 
-    // MARK: - 免费体验 30 天调试
-    /// 集中操控试用起点（Keychain trial_start_at），方便在「试用中 / 临界 / 已过期」间随时切换，无需真实等 30 天或重装。
+    // >>> CHANGE-[2026-08-19 20:55:27]-试用天数云端化 开始
+    // 原因: 全局试用天数云端配置卡——写入后所有用户下次拉取跟随(方案X)
+    // 回退: 删除本卡片 + body 里的 trialDaysConfigCard 行
+    // MARK: - 试用天数配置（云端全局下发，所有用户跟随）
+    private var trialDaysConfigCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("试用天数配置")
+                    .font(AIATheme.Font.subhead.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text("全局 \(global.trialDays) 天")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.blue)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(AIATheme.blue.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+            Text("写入云端后，所有用户下次启动/回前台拉取生效。已开始体验的用户按 max(开始锁定天数, 当前全局天数) 计算：只延长不缩短。")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+                .lineSpacing(2)
+            HStack {
+                Stepper(value: $trialDaysEdit, in: 1...365) {
+                    Text("\(trialDaysEdit) 天")
+                        .font(AIATheme.Font.callout.weight(.medium))
+                        .foregroundStyle(.primary)
+                }
+            }
+            .padding(10)
+            .background(AIATheme.fillSoft)
+            .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+            demoRow(icon: "icloud.and.arrow.up", title: "写入云端（所有用户生效）") {
+                Task {
+                    if await global.saveTrialDays(trialDaysEdit) {
+                        ToastCenter.shared.show("已写入云端：免费体验 \(trialDaysEdit) 天")
+                    } else {
+                        ToastCenter.shared.show("写入失败：请检查口令/网络")
+                    }
+                }
+            }
+            demoRow(icon: "arrow.counterclockwise", title: "重置为默认 7 天") {
+                trialDaysEdit = 7
+                Task {
+                    if await global.saveTrialDays(7) {
+                        ToastCenter.shared.show("已重置：免费体验 7 天")
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .card()
+    }
+    // <<< CHANGE-[2026-08-19 20:55:27]-试用天数云端化 结束
+
+    // MARK: - 免费体验调试
+    /// 集中操控试用起点（Keychain trial_start_at），方便在「试用中 / 临界 / 已过期」间随时切换，无需真实等 N 天或重装。
     private var trialTestCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("免费体验 30 天调试")
+                Text("免费体验 \(ent.trialDaysLimit) 天调试")
                     .font(AIATheme.Font.subhead.weight(.medium))
                     .foregroundStyle(.primary)
                 Spacer()
@@ -740,22 +801,22 @@ struct DeveloperCenterView: View {
                 .font(AIATheme.Font.micro)
                 .foregroundStyle(AIATheme.muted)
             } else {
-                Text("当前起点：未设置（卸载重装后首次启动会自动记入 30 天）")
+                Text("当前起点：未设置（首次登录并同步后会自动记入 \(EntitlementManager.trialDays) 天）")
                     .font(AIATheme.Font.micro)
                     .foregroundStyle(AIATheme.muted)
             }
             // 一键预设
             demoRow(icon: "clock.arrow.circlepath", title: "重置为现在（进入试用）") {
                 ent.setTrialStart()
-                ToastCenter.shared.show("试用起点已设为现在，进入 30 天试用")
+                ToastCenter.shared.show("试用起点已设为现在，进入 \(ent.trialDaysLimit) 天试用")
             }
-            demoRow(icon: "clock.badge.xmark", title: "设为 31 天前（模拟过期）") {
-                ent.setTrialStart(Date().addingTimeInterval(-31 * 86400))
+            demoRow(icon: "clock.badge.xmark", title: "设为 \(ent.trialDaysLimit + 1) 天前（模拟过期）") {
+                ent.setTrialStart(Date().addingTimeInterval(-Double(ent.trialDaysLimit + 1) * 86400))
                 ToastCenter.shared.show("已模拟过期：试用窗口已结束")
             }
-            demoRow(icon: "clock.badge.checkmark", title: "设为 29 天前（临界验证）") {
-                ent.setTrialStart(Date().addingTimeInterval(-29 * 86400))
-                ToastCenter.shared.show("已设为临界：仍在 30 天窗口内")
+            demoRow(icon: "clock.badge.checkmark", title: "设为 \(max(1, ent.trialDaysLimit - 1)) 天前（临界验证）") {
+                ent.setTrialStart(Date().addingTimeInterval(-Double(max(1, ent.trialDaysLimit - 1)) * 86400))
+                ToastCenter.shared.show("已设为临界：仍在 \(ent.trialDaysLimit) 天窗口内")
             }
             // 自定义起点
             HStack(spacing: 8) {
@@ -782,7 +843,7 @@ struct DeveloperCenterView: View {
             // 清除（模拟卸载重装）
             demoRow(icon: "trash", title: "清除试用起点（卸载式重计）") {
                 ent.clearTrialStart()
-                ToastCenter.shared.show("已清除；下次冷启会重新记入 30 天")
+                ToastCenter.shared.show("已清除；下次冷启会重新记入 \(EntitlementManager.trialDays) 天")
             }
             Text("操作后权益快照会自动刷新，可配合「会员对比页」查看档位（trial / 过期），或触发云识别观察付费墙本地降级；过期后即使有免费额度，云同步 push 也会被挡。")
                 .font(AIATheme.Font.micro)

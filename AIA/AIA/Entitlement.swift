@@ -79,8 +79,47 @@ final class EntitlementManager: ObservableObject {
         return serverFreeQuotaRemaining
     }
 
-    /// 免费体验时长（天）
-    static let trialDays: Int = 30
+    // >>> CHANGE-[2026-08-19 20:55:27]-试用天数云端化 开始
+    // 原因: 全局试用天数改为云端下发(GlobalConfigStore), 本地无值时默认 7; 方案X 上限=max(锁定,当前全局)
+    // 回退: 恢复 static let trialDays: Int = 30 + 删除 trialDaysLimit/trialStartDays 相关
+    /// 当前全局免费体验天数（云端下发，本地缓存兜底；未配置默认 7）。
+    static var trialDays: Int {
+        let v = GlobalConfigStore.shared.trialDays
+        return v > 0 ? v : 7
+    }
+
+    /// 方案X：当前用户可用试用上限天数 = max(开始时锁定的天数, 当前全局天数)。
+    /// 只延长不缩短：全局调大 → 已体验用户也延长；全局调小 → 已开始用户不受影响。
+    var trialDaysLimit: Int {
+        max(trialStartDays, Self.trialDays)
+    }
+
+    /// 用户开始体验时锁定的全局试用天数（Keychain 跨重装保留 + 云端备份换设备恢复）。
+    var trialStartDays: Int {
+        guard let s = KeychainHelper.get(KeychainHelper.kTrialStartDays), let d = Int(s), d > 0 else { return 0 }
+        return d
+    }
+
+    private func setTrialStartDays(_ days: Int) {
+        KeychainHelper.set(String(max(1, days)), for: KeychainHelper.kTrialStartDays)
+    }
+
+    /// 试用数据本地变更锚点（秒）：用于云同步增量上传 + pull 后写胜出判断。
+    /// ensureTrialStart/setTrialStart/clearTrialStart 修改起点时刷新。
+    private static let kTrialDirtyAt = "aia.trialDirtyAt"
+    private func markTrialDirty() {
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.kTrialDirtyAt)
+    }
+
+    /// 本次安装内是否已完成首轮云端试用数据拉取（sync pull 成功后置 true）。
+    /// 换设备恢复关键：已登录但未拉取前，ensureTrialStart 不写本地 now，避免覆盖云端旧起点。
+    private static let kTrialCloudRestored = "aia.trialCloudRestored"
+    /// nonisolated：供 CloudSyncManager(static nonisolated) 在 pull 完成后置位。
+    nonisolated static var trialCloudRestored: Bool {
+        get { UserDefaults.standard.bool(forKey: kTrialCloudRestored) }
+        set { UserDefaults.standard.set(newValue, forKey: kTrialCloudRestored) }
+    }
+    // <<< CHANGE-[2026-08-19 20:55:27]-试用天数云端化 结束
 
     /// 付费墙拒绝原因（服务端 code）：在云请求出口统一识别为 AIAEntitlementError。
     static let entitlementDenialCodes: Set<String> = [
@@ -269,11 +308,11 @@ final class EntitlementManager: ObservableObject {
     /// 已订阅（占位：StoreKit 落地前恒为 false；客户端断言，真实验证由 App Store 负责）。
     var isPaid: Bool { ud.bool(forKey: kIsPaid) }
 
-    /// 试用中：首次启动起算 30 天（Keychain 跨重装保留）。
+    /// 试用中：首次启动起算 N 天（Keychain 跨重装保留），上限 = max(锁定天数, 当前全局天数)。
     var trialActive: Bool {
         guard let start = trialStartAt else { return false }
         let elapsed = Date().timeIntervalSince1970 - start
-        return elapsed >= 0 && elapsed <= Double(Self.trialDays) * 86400
+        return elapsed >= 0 && elapsed <= Double(trialDaysLimit) * 86400
     }
 
     var trialStartAt: TimeInterval? {
@@ -283,22 +322,31 @@ final class EntitlementManager: ObservableObject {
 
     /// 试用剩余天数（仅展示用）
     var trialRemainingDays: Int {
-        guard let start = trialStartAt else { return Self.trialDays }
-        let left = Double(Self.trialDays) * 86400 - (Date().timeIntervalSince1970 - start)
+        guard let start = trialStartAt else { return trialDaysLimit }
+        let left = Double(trialDaysLimit) * 86400 - (Date().timeIntervalSince1970 - start)
         return max(0, Int(ceil(left / 86400)))
     }
 
-    // MARK: - 首次启动记录试用起点（跨重装保留）
+    // MARK: - 首次启动记录试用起点（跨重装保留 + 云端恢复 + 锁定开始天数）
     func ensureTrialStart() {
-        if KeychainHelper.get(KeychainHelper.kTrialStartAt) == nil {
-            KeychainHelper.set(String(Int(Date().timeIntervalSince1970)), for: KeychainHelper.kTrialStartAt)
-        }
+        // 已有起点：不重写（跨重装保留）。
+        if KeychainHelper.get(KeychainHelper.kTrialStartAt) != nil { return }
+        // 换设备恢复窗口：已登录但尚未完成首轮云端试用数据拉取时，等待 sync pull 回填云端旧起点，
+        // 避免本机写入 now 覆盖云端值导致"换设备重算"。
+        let isLoggedIn = UserDefaults.standard.bool(forKey: "aia.isLoggedIn")
+        if isLoggedIn && !Self.trialCloudRestored { return }
+        // 未登录 / 已确认云端无试用记录（真正的新用户）：本地起算，并锁定当前全局天数（方案X）。
+        KeychainHelper.set(String(Int(Date().timeIntervalSince1970)), for: KeychainHelper.kTrialStartAt)
+        setTrialStartDays(Self.trialDays)
+        markTrialDirty()
     }
 
     // MARK: - 调试用：显式设置 / 清除试用起点（开发者中心专属，正常用户路径不调用）
     /// 把试用起点写为指定日期（默认「现在」），立即进入试用窗口；写完刷新权益快照。
     func setTrialStart(_ date: Date = Date()) {
         KeychainHelper.set(String(Int(date.timeIntervalSince1970)), for: KeychainHelper.kTrialStartAt)
+        setTrialStartDays(Self.trialDays)
+        markTrialDirty()
         Task { await refresh() }
     }
 
@@ -308,6 +356,8 @@ final class EntitlementManager: ObservableObject {
     /// 用户下次冷启时 `ensureTrialStart` 才会重计 30 天。
     func clearTrialStart() {
         KeychainHelper.delete(KeychainHelper.kTrialStartAt)
+        KeychainHelper.delete(KeychainHelper.kTrialStartDays)
+        markTrialDirty()
         self.plan = .unknown
         self.objectWillChange.send()
     }

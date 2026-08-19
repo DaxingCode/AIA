@@ -543,6 +543,8 @@ async function handleConfig(req) {
         freeQuotaWeights: (cfg.freeQuotaWeights && typeof cfg.freeQuotaWeights === 'object') ? cfg.freeQuotaWeights : {},
         freeQuotaDailyCap: Number(cfg.freeQuotaDailyCap) || 0,
         freeQuotaGlobalMonthly: Number(cfg.freeQuotaGlobalMonthly) || 0,
+        // —— 免费试用天数（全局下发，所有用户跟随；缺省默认 7）——
+        trialDays: Number(cfg.trialDays) > 0 ? Number(cfg.trialDays) : 7,
         // 公告：缺字段时返回 null（无公告）
         announcement: (cfg.announcement && typeof cfg.announcement === 'object') ? cfg.announcement : null,
         // —— 协议链接（云端下发，App 端带本地兜底，缺字段时返回空串）——
@@ -553,7 +555,7 @@ async function handleConfig(req) {
       }
     } catch (e) {
       // 文档不存在时返回默认配置（不视为错误，保证首次启动 App 不崩）
-      return { ok: true, agentEnabled: false, modelProvider: 'glm', visionModelProvider: 'glm', freeQuotaEnabled: false, freeQuotaPerMonth: 0, freeQuotaWeights: {}, freeQuotaDailyCap: 0, freeQuotaGlobalMonthly: 0, announcement: null, privacyPolicyUrl: '', userAgreementUrl: '', featureIntroUrl: '' }
+      return { ok: true, agentEnabled: false, modelProvider: 'glm', visionModelProvider: 'glm', freeQuotaEnabled: false, freeQuotaPerMonth: 0, freeQuotaWeights: {}, freeQuotaDailyCap: 0, freeQuotaGlobalMonthly: 0, trialDays: 7, announcement: null, privacyPolicyUrl: '', userAgreementUrl: '', featureIntroUrl: '' }
     }
   }
 
@@ -569,6 +571,8 @@ async function handleConfig(req) {
       freeQuotaWeights: (req.freeQuotaWeights && typeof req.freeQuotaWeights === 'object') ? req.freeQuotaWeights : {},
       freeQuotaDailyCap: Number(req.freeQuotaDailyCap) || 0,
       freeQuotaGlobalMonthly: Number(req.freeQuotaGlobalMonthly) || 0,
+      // —— 免费试用天数（全局下发；>0 才写入，否则默认 7）——
+      trialDays: Number(req.trialDays) > 0 ? Number(req.trialDays) : 7,
       // 公告：null 表示撤销（删除字段），Object 表示写入
       announcement: (req.announcement === null || req.announcement === undefined)
         ? null

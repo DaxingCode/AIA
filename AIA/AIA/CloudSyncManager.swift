@@ -221,6 +221,18 @@ final class CloudSyncManager: ObservableObject {
                            b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]))
     }
 
+    // >>> CHANGE-[2026-08-19 20:55:27]-试用天数云端化 开始
+    // 原因: 试用起点/锁定天数上云(方案X完整版), 换设备恢复; 同账号跨设备落同一 doc, 不同账号互不冲突
+    // 回退: 删除本函数 + push 里 trial 记录段 + applyProfile 里 trial 回填段
+    private nonisolated static func trialRecordId(for userId: String) -> UUID {
+        let input = Data((userId + ":trial").utf8)
+        let digest = Insecure.MD5.hash(data: input)
+        let b = Array(digest)
+        return UUID(uuid: (b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+                           b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]))
+    }
+    // <<< CHANGE-[2026-08-19 20:55:27]-试用天数云端化 结束
+
     // MARK: - 自动同步触发（登录后 / 前后台 / 数据变更）
     private var changeSyncWorkItem: DispatchWorkItem?
 
@@ -668,6 +680,25 @@ final class CloudSyncManager: ObservableObject {
                               payload: payload))
         }
 
+        // >>> CHANGE-[2026-08-19 20:55:27]-试用天数云端化 开始
+        // 原因: 试用起点/锁定天数上云(方案X完整版), 换设备恢复; 锚点 trialDirtyAt 仅本地变更后增量上传
+        // 回退: 删除本段
+        let trialDirty = UserDefaults.standard.double(forKey: "aia.trialDirtyAt")
+        if trialDirty > sinceTime,
+           let trialStartStr = KeychainHelper.get(KeychainHelper.kTrialStartAt),
+           let trialStart = Double(trialStartStr), trialStart > 0 {
+            let lockedDays = Int(KeychainHelper.get(KeychainHelper.kTrialStartDays) ?? "") ?? 0
+            items.append(item(id: Self.trialRecordId(for: Self.userId),
+                              type: "profile",
+                              updatedAt: Date(timeIntervalSince1970: trialDirty),
+                              deleted: false,
+                              payload: [
+                                "trialStartAt": trialStart,
+                                "trialStartDays": lockedDays
+                              ]))
+        }
+        // <<< CHANGE-[2026-08-19 20:55:27]-试用天数云端化 结束
+
         print("[sync] push 本地共 \(totalFetched) 条，增量筛选后上传 \(items.count) 条（跳过未变更 \(totalFetched - items.count) 条）")
         return (items: items, localTotal: totalFetched)
     }
@@ -737,6 +768,11 @@ final class CloudSyncManager: ObservableObject {
                 break
             }
         }
+        // >>> CHANGE-[2026-08-19 20:55:27]-试用天数云端化 开始
+        // 原因: 本轮云端试用数据拉取完成标记——换设备时序: ensureTrialStart 等该标记后才写本地 now
+        // 回退: 删除本行
+        EntitlementManager.trialCloudRestored = true
+        // <<< CHANGE-[2026-08-19 20:55:27]-试用天数云端化 结束
         return merged
     }
 
@@ -1154,6 +1190,22 @@ final class CloudSyncManager: ObservableObject {
             UserDefaults.standard.set(remoteDate.timeIntervalSince1970, forKey: "userProfileUpdatedAt")
             merged += 1
         }
+        // >>> CHANGE-[2026-08-19 20:55:27]-试用天数云端化 开始
+        // 原因: 换设备恢复试用起点/锁定天数; 云端更新时间晚于本地 dirty 才覆盖(后写胜出),
+        //       避免本地调试 setTrialStart 被旧云端值覆盖、以及新设备本地 now 覆盖云端旧起点
+        // 回退: 删除本段
+        if let t = payload["trialStartAt"] as? Double, t > 0 {
+            let localDirty = UserDefaults.standard.double(forKey: "aia.trialDirtyAt")
+            if remoteDate.timeIntervalSince1970 > localDirty {
+                KeychainHelper.set(String(Int(t)), for: KeychainHelper.kTrialStartAt)
+                if let d = payload["trialStartDays"] as? Int, d > 0 {
+                    KeychainHelper.set(String(d), for: KeychainHelper.kTrialStartDays)
+                }
+                UserDefaults.standard.set(remoteDate.timeIntervalSince1970, forKey: "aia.trialDirtyAt")
+                merged += 1
+            }
+        }
+        // <<< CHANGE-[2026-08-19 20:55:27]-试用天数云端化 结束
         return merged
     }
 

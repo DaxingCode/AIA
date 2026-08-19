@@ -29,6 +29,9 @@ final class GlobalConfigStore: ObservableObject {
     /// 全平台本月剩余次数；-1 表示未设全局上限。
     @Published var freeQuotaGlobalRemaining: Int
 
+    // —— 免费试用天数（全局下发，所有用户跟随；开发者中心读写）——
+    @Published var trialDays: Int
+
     // —— 应用内公告（开发者中心群发，所有用户打开 App 时拉取并展示）——
     @Published var announcement: AnnouncementPayload?
 
@@ -48,6 +51,7 @@ final class GlobalConfigStore: ObservableObject {
     private let fqGlobalKey = "aia.freeQuotaGlobalMonthly"
     private let fqGlobalUsedKey = "aia.freeQuotaGlobalUsed"
     private let fqGlobalRemainKey = "aia.freeQuotaGlobalRemaining"
+    private let trialDaysKey = "aia.trialDays"
     private let announcementKey = "aia.announcement"
     private let privacyKey = "aia.privacyPolicyUrl"
     private let agreementKey = "aia.userAgreementUrl"
@@ -65,6 +69,8 @@ final class GlobalConfigStore: ObservableObject {
         self.freeQuotaGlobalMonthly = ud.integer(forKey: fqGlobalKey)
         self.freeQuotaGlobalUsed = ud.integer(forKey: fqGlobalUsedKey)
         self.freeQuotaGlobalRemaining = ud.object(forKey: fqGlobalRemainKey) == nil ? -1 : ud.integer(forKey: fqGlobalRemainKey)
+        // 试用天数：本地缓存优先；未设置过时默认 7（云端未下发前 7 天体验生效）
+        self.trialDays = ud.object(forKey: trialDaysKey) == nil ? 7 : ud.integer(forKey: trialDaysKey)
         self.announcement = AnnouncementPayload.load(from: ud, key: announcementKey)
         self.privacyPolicyUrl = ud.string(forKey: privacyKey).flatMap { URL(string: $0) }
         self.userAgreementUrl = ud.string(forKey: agreementKey).flatMap { URL(string: $0) }
@@ -90,6 +96,8 @@ final class GlobalConfigStore: ObservableObject {
             let fqGlobal = resp.keys.contains("freeQuotaGlobalMonthly") ? (resp["freeQuotaGlobalMonthly"] as? Int ?? 0) : self.freeQuotaGlobalMonthly
             let fqGlobalUsed = resp.keys.contains("freeQuotaGlobalUsed") ? (resp["freeQuotaGlobalUsed"] as? Int ?? 0) : self.freeQuotaGlobalUsed
             let fqGlobalRemain = resp.keys.contains("freeQuotaGlobalRemaining") ? (resp["freeQuotaGlobalRemaining"] as? Int ?? -1) : self.freeQuotaGlobalRemaining
+            // 试用天数：云端缺字段时保持本地现有值（防清零）。
+            let trialDays = resp.keys.contains("trialDays") ? (resp["trialDays"] as? Int ?? 7) : self.trialDays
             // 公告：云端缺字段时保持本地现有值（防清零）。announcement 可为 null（已撤销）。
             let ann: AnnouncementPayload? = resp.keys.contains("announcement")
                 ? AnnouncementPayload.parse(resp["announcement"]) : self.announcement
@@ -109,9 +117,10 @@ final class GlobalConfigStore: ObservableObject {
                             freeQuotaEnabled: fqEnabled, freeQuotaPerMonth: fqPerMonth, freeQuotaWeights: fqWeights,
                             freeQuotaDailyCap: fqDailyCap, freeQuotaGlobalMonthly: fqGlobal,
                             freeQuotaGlobalUsed: fqGlobalUsed, freeQuotaGlobalRemaining: fqGlobalRemain,
+                            trialDays: trialDays,
                             announcement: ann, privacyPolicyUrl: privacy, userAgreementUrl: agreement,
                             featureIntroUrl: featureIntro) {
-                print("[GlobalConfig] 已同步云端配置 agent=\(agent) model=\(model) vision=\(vision) freeQuota=\(fqEnabled)/\(fqPerMonth)")
+                print("[GlobalConfig] 已同步云端配置 agent=\(agent) model=\(model) vision=\(vision) freeQuota=\(fqEnabled)/\(fqPerMonth) trialDays=\(trialDays)")
             }
         } catch {
             print("[GlobalConfig] fetchConfig 失败: \(error)")
@@ -167,6 +176,37 @@ final class GlobalConfigStore: ObservableObject {
             return false
         }
     }
+
+    // >>> CHANGE-[2026-08-19 20:55:27]-试用天数云端化 开始
+    // 原因: 开发者中心可云端改全局试用天数, 所有用户下次拉取跟随(方案X)
+    // 回退: 删除本方法 + fetchConfig 里 trialDays 分支
+    /// 开发者写入全局试用天数（需口令）。写入成功后所有用户下次拉取 getConfig 生效。返回是否成功。
+    func saveTrialDays(_ days: Int) async -> Bool {
+        let clamped = max(1, min(days, 365))
+        do {
+            let resp = try await postAdsJSON([
+                "action": "setConfig",
+                "devToken": DeveloperGate.devToken ?? "",
+                "trialDays": clamped
+            ])
+            guard resp["ok"] as? Bool == true else {
+                NSLog("[GlobalConfig] saveTrialDays 云端返回失败: \(resp)")
+                return false
+            }
+            _ = applyToLocal(agentEnabled: self.agentEnabled, modelProvider: self.modelProvider, visionModelProvider: self.visionModelProvider,
+                             freeQuotaEnabled: self.freeQuotaEnabled, freeQuotaPerMonth: self.freeQuotaPerMonth,
+                             freeQuotaWeights: self.freeQuotaWeights, freeQuotaDailyCap: self.freeQuotaDailyCap,
+                             freeQuotaGlobalMonthly: self.freeQuotaGlobalMonthly,
+                             freeQuotaGlobalUsed: self.freeQuotaGlobalUsed, freeQuotaGlobalRemaining: self.freeQuotaGlobalRemaining,
+                             trialDays: clamped)
+            NSLog("[GlobalConfig] 已写入全局试用天数: \(clamped)")
+            return true
+        } catch {
+            NSLog("[GlobalConfig] saveTrialDays 失败: \(error)")
+            return false
+        }
+    }
+    // <<< CHANGE-[2026-08-19 20:55:27]-试用天数云端化 结束
 
     /// 开发者写入应用内公告（需口令）。announcement=nil 表示撤销当前公告。返回是否成功。
     func saveAnnouncement(_ announcement: AnnouncementPayload?) async -> Bool {
@@ -263,6 +303,7 @@ final class GlobalConfigStore: ObservableObject {
                               freeQuotaWeights: [String: Int] = [:], freeQuotaDailyCap: Int = 0,
                               freeQuotaGlobalMonthly: Int = 0,
                               freeQuotaGlobalUsed: Int = 0, freeQuotaGlobalRemaining: Int = -1,
+                              trialDays: Int? = nil,
                               announcement: AnnouncementPayload? = nil,
                               privacyPolicyUrl: URL? = nil, userAgreementUrl: URL? = nil,
                               featureIntroUrl: URL? = nil) -> Bool {
@@ -275,6 +316,7 @@ final class GlobalConfigStore: ObservableObject {
                     || freeQuotaGlobalMonthly != self.freeQuotaGlobalMonthly
                     || freeQuotaGlobalUsed != self.freeQuotaGlobalUsed
                     || freeQuotaGlobalRemaining != self.freeQuotaGlobalRemaining
+                    || (trialDays != nil && trialDays != self.trialDays)
                     || announcement?.id != self.announcement?.id
                     || privacyPolicyUrl != self.privacyPolicyUrl
                     || userAgreementUrl != self.userAgreementUrl
@@ -300,6 +342,10 @@ final class GlobalConfigStore: ObservableObject {
         self.freeQuotaGlobalMonthly = freeQuotaGlobalMonthly
         self.freeQuotaGlobalUsed = freeQuotaGlobalUsed
         self.freeQuotaGlobalRemaining = freeQuotaGlobalRemaining
+        if let td = trialDays {
+            ud.set(td, forKey: trialDaysKey)
+            self.trialDays = td
+        }
         announcement?.save(to: ud, key: announcementKey) ?? ud.removeObject(forKey: announcementKey)
         self.announcement = announcement
         ud.set(privacyPolicyUrl?.absoluteString, forKey: privacyKey)

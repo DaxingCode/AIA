@@ -19,8 +19,14 @@ enum KeychainHelper {
     static let kName     = "name"
     /// 微信稳定匿名 id：首次微信登录生成，之后复用（真实环境应改为后端 unionid）。
     static let kWxStable = "wx_stable_id"
-    /// 试用起点（首次启动时间戳，秒）：跨重装保留，作为「免费体验 30 天」的时间锚点。
+    /// 试用起点（首次启动时间戳，秒）：跨重装保留，作为「免费体验 N 天」的时间锚点。
     static let kTrialStartAt = "trial_start_at"
+    // >>> CHANGE-[2026-08-19 20:55:27]-试用天数云端化 开始
+    // 原因: 方案X完整版——用户开始体验时锁定的全局试用天数(上限=max(锁定,当前全局),只延长不缩短), 需本地缓存+上云
+    // 回退: 删除本行即可
+    /// 用户开始体验时锁定的全局试用天数（Keychain 跨重装保留）。
+    static let kTrialStartDays = "trial_start_days"
+    // <<< CHANGE-[2026-08-19 20:55:27]-试用天数云端化 结束
 
     /// 设备稳定匿名 id（跨重装一致）：用作付费墙设备锚点 / 测试白名单匹配。
     /// 复用微信稳定 id 槽位；若不存在则生成一个并持久化。
