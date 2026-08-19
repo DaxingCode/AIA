@@ -427,6 +427,9 @@ struct MiniBar: View {
     /// 是否为冷启动首播：true 用 growDelay(1.5s) 躲风暴；false 用 warmDelay(0.3s) 即时播。
     /// 由 ContentView 经 coldPlayPending 传入，冷启动首次为 true、后续热启动/返回首页为 false。
     var coldStart: Bool = false
+    /// 2026-08-19 切历史日期重播开关：true 时 value 每次变化都从 0 重播一次生长（饮食页热量条切日期场景）；
+    /// false 时沿用一次性守卫 hasGrownWithData（首页步数等实时数据场景，避免反复重播闪动）。
+    var repeatOnValueChange: Bool = false
     @State private var over: Bool = false  // 是否处于超额态（value>1）
     @State private var pulse: Double = 1   // 超额态末端小脉冲（仅生长期间触发一次，不循环）
     // >>> CHANGE-[2026-08-18 14:38:40]-[冷启动进度条无生长动画-延迟触发+growDelay1.5+防抖] 开始
@@ -540,12 +543,18 @@ struct MiniBar: View {
             pendingGrow = item
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
         }
+        // >>> CHANGE-[2026-08-19 09:25:18]-MiniBar切历史日期重播 开始
+        // 原因: 饮食页热量进度条(value=selectedCalories/goal)切历史日期时长度不刷新,
+        //       根因是 hasGrownWithData 一次性守卫: 首进页置 true 后,之后切任何日期 .onChange(value) 直接 return,
+        //       displayed 卡在首进页的 value,导致不同摄入量的进度条长度一样。
+        // 修法: 新增 repeatOnValueChange 开关。true(饮食页热量条)时 value 每次变化都从 0 重播一次,
+        //       切日期即重新生长到新比例; false(首页步数等实时数据)保留原一次性守卫避免反复闪动。
+        // 回退: 删 repeatOnValueChange 属性 + 本 onChange 改回原版(仅 hasGrownWithData 守卫那段)。
         .onChange(of: value) { _, newVal in
             over = newVal > 1
-            // 数据异步到位（value 从 0→真实值）兜底补播一次；仅首次，避免步数实时涨反复重播闪动。
-            guard !hasGrownWithData, !AIATheme.motionReduce else { return }
-            if newVal > 0.001 {
-                hasGrownWithData = true
+            guard !AIATheme.motionReduce else { displayed = newVal; return }
+            if repeatOnValueChange {
+                // 每次 value 变都从 0 重播一次（饮食页切历史日期场景）
                 displayed = 0
                 pendingGrow?.cancel()
                 let delay = coldStart ? growDelay : warmDelay
@@ -554,8 +563,23 @@ struct MiniBar: View {
                 }
                 pendingGrow = item
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+            } else {
+                // 旧逻辑：仅首次兜底补播一次（首页步数等实时数据场景，避免反复重播闪动）
+                guard !hasGrownWithData else { return }
+                if newVal > 0.001 {
+                    hasGrownWithData = true
+                    displayed = 0
+                    pendingGrow?.cancel()
+                    let delay = coldStart ? growDelay : warmDelay
+                    let item = DispatchWorkItem {
+                        withAnimation(.easeOut(duration: duration)) { displayed = value }
+                    }
+                    pendingGrow = item
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+                }
             }
         }
+        // <<< CHANGE-[2026-08-19 09:25:18]-MiniBar切历史日期重播 结束
         // <<< CHANGE-[2026-08-18 14:38:40]-[冷启动进度条无生长动画-延迟触发+growDelay1.5+防抖] 结束
         // >>> CHANGE-[2026-08-18 14:38:40]-[冷启动进度条无生长动画-延迟触发+growDelay1.5+防抖] 开始
         .onDisappear { pendingGrow?.cancel(); pendingGrow = nil }

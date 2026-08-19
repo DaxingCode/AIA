@@ -892,7 +892,7 @@ struct FoodListView: View {
                             .buttonStyle(.plain)
                         }
 
-                        MiniBar(value: goal > 0 ? selectedCalories / goal : 0, color: AIATheme.food, delay: 0.15)
+                        MiniBar(value: goal > 0 ? selectedCalories / goal : 0, color: AIATheme.food, delay: 0.15, repeatOnValueChange: true)
 
                         // 3 列热量指标：净热量 / TDEE / 今日消耗（等宽 + 细竖线分隔）
                         HStack(spacing: 8) {
