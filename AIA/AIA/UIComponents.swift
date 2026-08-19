@@ -448,39 +448,67 @@ struct MiniBar: View {
 
     var body: some View {
         GeometryReader { geo in
-            RoundedRectangle(cornerRadius: height / 2).fill(AIATheme.fillSoft)
-                .overlay(alignment: .leading) {
-                    let fill: AnyShapeStyle = over
-                        ? AnyShapeStyle(overColor ?? AIATheme.over)
-                        : AnyShapeStyle(LinearGradient(colors: [color, color.opacity(0.55)],
-                                                       startPoint: .leading, endPoint: .trailing))
-                    let dp = displayed  // >>> CHANGE-[2026-08-18 14:49:45]-[MiniBar色块比例平方bug] 开始
-                    // 根因：原 `let dp = value * displayed` 让 displayed(动画终点=value，已是0~1比例)再乘 value → value²，
-                    // 色块终点被平方压扁（1000/10000→画1%而非10%；752/1600→22%而非47%）。
-                    // displayed 本身即从0→value的填充比例，直接用作 mask 比例即可，勿再乘 value。
-                    // 回退：改回 `let dp = value * displayed`（即 14:38:40 标记版）。
-                    // <<< CHANGE-[2026-08-18 14:49:45]-[MiniBar色块比例平方bug] 结束
-                    RoundedRectangle(cornerRadius: height / 2).fill(fill)
+            if over {
+                // >>> CHANGE-[2026-08-19 09:15:14]-MiniBar超额整条同深红 开始
+                // 原因: 用户要求"摄入超目标后整个进度条变成同一个颜色的深红"(2026-08-19 截图 1821/1731 坐实)。
+                // 旧版底层 overColor.opacity(0.18) 与前景实色色差过大,动画中段/数据截断时"前实色+后浅色"像两种颜色。
+                // 策略: 底层铺 overColor 实色(不再 0.18 透明),前景 mask 同色覆盖(动画仍从左往右生长,颜色不变),
+                //       末端高光用 Color.white.opacity(0.35) blend 提亮,非 overColor 实色,避免出现第二种红。
+                // 回退: 删除本 if over 分支,恢复原单条 RoundedRectangle(over ? overColor.opacity(0.18) : fillSoft)
+                //       + 渐变前景 + 末端 overColor 脉冲结构(即 09:05:07 标记版)。
+                let dp = displayed  // mask 比例: displayed 即 0→value,超额 value>1 会被 safeFraction 钳到 1.0
+                ZStack(alignment: .leading) {
+                    // 底层铺满 overColor 实色
+                    RoundedRectangle(cornerRadius: height / 2)
+                        .fill(overColor ?? AIATheme.over)
                         .frame(width: geo.size.width, height: height)
-                        .overlay(alignment: .trailing) {
-                            Capsule().fill(Color.white.opacity(0.55))
-                                .frame(width: height * 1.6, height: height)
-                                .blur(radius: 1)
-                                .opacity(over ? 0 : (displayed >= 1 ? 0 : 0.9))  // >>> CHANGE-[2026-08-18 14:49:45] 高光判断同步用 displayed
-                                .allowsHitTesting(false)
-                        }
+                    // 前景 mask 同色: 动画仍从左往右生长,但颜色不变,整条始终同一深红
+                    RoundedRectangle(cornerRadius: height / 2)
+                        .fill(overColor ?? AIATheme.over)
+                        .frame(width: geo.size.width, height: height)
                         .mask(alignment: .leading) {
                             Rectangle().scale(x: safeFraction(dp), anchor: .leading)
                         }
-                        .overlay(alignment: .trailing) {
-                            if over {
-                                Capsule().fill(overColor ?? AIATheme.over)
-                                    .frame(width: height * 1.4 * pulse, height: height)
-                                    .opacity(0.6)
+                    // 末端高光: 白 35% blend 提亮(非 overColor 实色),避免出现第二种红
+                    if displayed >= 0.999 {
+                        Capsule()
+                            .fill(Color.white.opacity(0.35))
+                            .frame(width: height * 1.4 * pulse, height: height)
+                            .blur(radius: 0.5)
+                            .offset(x: -height * 1.4)
+                            .opacity(0.9)
+                            .allowsHitTesting(false)
+                    }
+                }
+                // <<< CHANGE-[2026-08-19 09:15:14]-MiniBar超额整条同深红 结束
+            } else {
+                // 非超额分支(保持原样): 首次/未超目标时的琥珀渐变 + 白点高光
+                RoundedRectangle(cornerRadius: height / 2)
+                    .fill(AIATheme.fillSoft)
+                    .overlay(alignment: .leading) {
+                        let fill: AnyShapeStyle = AnyShapeStyle(
+                            LinearGradient(colors: [color, color.opacity(0.55)],
+                                           startPoint: .leading, endPoint: .trailing))
+                        let dp = displayed  // >>> CHANGE-[2026-08-18 14:49:45]-[MiniBar色块比例平方bug] 开始
+                        // 根因：原 `let dp = value * displayed` 让 displayed(动画终点=value，已是0~1比例)再乘 value → value²，
+                        // 色块终点被平方压扁（1000/10000→画1%而非10%；752/1600→22%而非47%）。
+                        // displayed 本身即从0→value的填充比例，直接用作 mask 比例即可，勿再乘 value。
+                        // 回退：改回 `let dp = value * displayed`（即 14:38:40 标记版）。
+                        // <<< CHANGE-[2026-08-18 14:49:45]-[MiniBar色块比例平方bug] 结束
+                        RoundedRectangle(cornerRadius: height / 2).fill(fill)
+                            .frame(width: geo.size.width, height: height)
+                            .overlay(alignment: .trailing) {
+                                Capsule().fill(Color.white.opacity(0.55))
+                                    .frame(width: height * 1.6, height: height)
+                                    .blur(radius: 1)
+                                    .opacity(displayed >= 1 ? 0 : 0.9)  // >>> CHANGE-[2026-08-18 14:49:45] 高光判断同步用 displayed
                                     .allowsHitTesting(false)
                             }
-                        }
-                }
+                            .mask(alignment: .leading) {
+                                Rectangle().scale(x: safeFraction(dp), anchor: .leading)
+                            }
+                    }
+            }
         }
         .frame(height: height)
         // >>> CHANGE-[2026-08-18 14:38:40]-[冷启动进度条无生长动画-延迟触发+growDelay1.5+防抖] 开始
