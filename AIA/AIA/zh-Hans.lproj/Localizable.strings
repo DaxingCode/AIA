@@ -97,6 +97,7 @@
 "food.overGoal" = "已超目标，注意控制";
 "food.burned" = "今日消耗";
 "food.tdeeLabel" = "TDEE kcal";
+"food.intakeLabel" = "今日摄入 kcal";
 "food.water" = "今日饮水";
 "food.waterUnit" = "ml";
 "food.waterTapHint" = "点击 +100ml";

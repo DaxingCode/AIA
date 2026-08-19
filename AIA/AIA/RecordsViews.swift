@@ -912,19 +912,21 @@ struct FoodListView: View {
                                     .fill(AIATheme.hairline)
                                     .frame(width: 0.5, height: 32)
 
-                                // TDEE（基础能量消耗）
-                                // 用 .primary 而非 AIATheme.ink：ink 在 dark 模式值为 0x2c2c2e（设计用途是深色按钮背景），
-                                // 在 0x2a2a2c 卡片底上几乎同色，TDEE/今日消耗数字会"消失"。
-                                // .primary 自动深浅适配（light→黑 / dark→白），始终保持最高对比度。
+                                // >>> CHANGE-[2026-08-19 08:46:49]-饮食页TDEE列改今日摄入 开始
+                                // 原因: 用户要求热量概览卡中间列由"TDEE目标"改为"今日摄入"(选中日期食物卡路里总和 selectedCalories)
+                                // 回退: 删除本段、恢复原判(显示 tdee + food.tdeeLabel) 即可
+                                // 今日摄入（选中日期食物卡路里总和，与净热量/今日消耗同口径跟随 selectedDate）
+                                // 数字用 .primary 而非 ink：见右侧今日消耗列注释，ink 在深色卡片底上对比度过低。
                                 VStack(spacing: 2) {
-                                    Text("\(Int(tdee))")
+                                    Text("\(Int(selectedCalories))")
                                         .font(AIATheme.Font.title3.weight(.semibold))
                                         .foregroundStyle(.primary)
-                                    Text(NSLocalizedString("food.tdeeLabel", comment: ""))
+                                    Text(NSLocalizedString("food.intakeLabel", comment: ""))
                                         .font(AIATheme.Font.micro)
                                         .foregroundStyle(AIATheme.sub)
                                 }
                                 .frame(maxWidth: .infinity)
+                                // <<< CHANGE-[2026-08-19 08:46:49]-饮食页TDEE列改今日摄入 结束
 
                                 Rectangle()
                                     .fill(AIATheme.hairline)
