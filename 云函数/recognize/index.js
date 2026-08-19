@@ -37,10 +37,14 @@ function httpsPostJSON(url, payload) {
 
 // 由请求体推断「被管控的云功能」
 function deriveFeature(body) {
+  // >>> CHANGE-[2026-08-19 23:14:15]-打招呼不扣费 开始
+  // 原因: 打招呼(greeting)是本地数据生成的轻量开场白, 非用户主动 AI 提问, 不应消耗免费额度
+  // 回退: 恢复 if (body.mode === 'greeting') return 'cloudChat';
+  if (body.mode === 'greeting') return null;
+  // <<< CHANGE-[2026-08-19 23:14:15]-打招呼不扣费 结束
   if (body.mode === 'queryFood') return 'cloudFoodQuery';
   if (body.mode === 'agent') return 'cloudAgent';
   if (body.mode === 'chat') return 'cloudChat';
-  if (body.mode === 'greeting') return 'cloudChat';
   if (body.imageBase64) return 'cloudVision';
   if (body.text) return 'cloudTextParse';
   return null;
@@ -706,9 +710,15 @@ exports.main = async (event, context) => {
     // 付费/试用由客户端断言（App Store/Keychain 负责真实验证），直接放行省一次远程往返；
     // 免费额度/白名单/过期用户必须远程查询 aia-sync 权威状态并计费。校验失败一律拒绝（保护成本）。
     const entFeature = deriveFeature(body);
+    // >>> CHANGE-[2026-08-19 22:54:43]-付费墙日志+remaining回传 开始
+    // 原因: 排查免费额度不扣费——日志明确走没走付费墙/entRes 返回; 修 BugB(return 丢 _entitlement)
+    // 回退: 删除 console.log 段 + return 合并 _entitlement 那行
+    console.log('[entcheck] entFeature=', entFeature, 'mode=', body.mode, 'hasImg=', !!body.imageBase64, 'hasText=', !!body.text,
+      'isPaid=', body.isPaid, 'trialActive=', body.trialActive, 'userId=', (body.userId || '').slice(0, 12));
     if (entFeature) {
       if (body.isPaid || body.trialActive) {
         // 付费/试用：本地放行，不查远程
+        console.log('[entcheck] 客户端 isPaid/trialActive 放行，不查远程');
       } else {
         try {
           const entRes = await httpsPostJSON(SYNC_URL, {
@@ -720,6 +730,7 @@ exports.main = async (event, context) => {
             isPaid: false,
             trialActive: false
           });
+          console.log('[entcheck] 远程校验结果:', JSON.stringify(entRes));
           if (!entRes || entRes.allowed === false) {
             return { ok: false, error: 'entitlement_denied', code: (entRes && entRes.reason) || 'denied', plan: (entRes && entRes.plan), feature: entFeature, ver: FN_VERSION };
           }
@@ -730,6 +741,7 @@ exports.main = async (event, context) => {
         }
       }
     }
+    // <<< CHANGE-[2026-08-19 22:54:43]-付费墙日志+remaining回传 结束
     // 图片识别（默认/聊天分支）必须有 imageBase64 或 text；但 queryFood（食物营养查询，只带 foodName）
     // 与 greeting（招呼，只带 context/userId）是纯文本/上下文模式，不需要图片或 text，须在此门禁前放行，
     // 否则会先于各自 handler 被"缺少 imageBase64 或 text"拦截（此前联网搜索/云端招呼一直静默失效的根因）。
@@ -787,7 +799,13 @@ exports.main = async (event, context) => {
       if (Array.isArray(result.foods)) result.foods.forEach(normalizeFoodResult);
       enrichFoodMicro(result);   // 补全 LLM 漏填的 fiber/sugar/sodium
     }
-    return { ok: true, result, ver: FN_VERSION };
+    // >>> CHANGE-[2026-08-19 22:54:43]-付费墙日志+remaining回传 开始
+    // 原因: BugB——body._entitlement 赋值后从未带进返回, App 端读不到 remaining
+    // 回退: 删除下面 4 行, 恢复 return { ok: true, result, ver: FN_VERSION }
+    const ret = { ok: true, result, ver: FN_VERSION };
+    if (body._entitlement) ret._entitlement = body._entitlement;
+    return ret;
+    // <<< CHANGE-[2026-08-19 22:54:43]-付费墙日志+remaining回传 结束
   } catch (e) {
     return { ok: false, error: String(e && e.message ? e.message : e), ver: FN_VERSION };
   }

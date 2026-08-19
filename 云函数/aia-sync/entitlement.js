@@ -7,6 +7,15 @@
 //  - checkEntitlement 既做「判定」也做「计费」；App 端状态查询传 dryRun:true 不计费。
 const CN_OFFSET_MS = 8 * 3600 * 1000
 
+// >>> CHANGE-[2026-08-19 22:54:43]-quota docId 编码 开始
+// 原因: 免费额度不扣费——userId 含 . 等字符拼进文档 ID 导致 CloudBase 读写抛异常 → consumeQuota fail-open(remaining:-1)
+// 回退: 删除本函数 + peekUsed/consumeQuota 里改回 userId + ':' + mk
+function quotaDocId(userId, mk) {
+  const safe = Buffer.from(String(userId), 'utf8').toString('hex')
+  return safe + ':' + mk
+}
+// <<< CHANGE-[2026-08-19 22:54:43]-quota docId 编码 结束
+
 // >>> CHANGE-[2026-08-19 15:32:37]-口令云端化 开始
 // 原因: 方案甲——App 端不再存明文口令, 后续请求带当日 devToken
 // 设计: 纯字符串派生(不依赖 crypto, CloudBase 沙箱加载 crypto 曾致 0 code exit)
@@ -158,7 +167,11 @@ module.exports = function (db, _, DEV_PASSCODE) {
 
   async function peekUsed(userId) {
     try {
-      const res = await db.collection(QUOTA_COLLECTION).doc(userId + ':' + monthKeyCN()).get()
+      // >>> CHANGE-[2026-08-19 23:05:12]-consumeQuota get兜底 开始
+      // 原因: 文档不存在时 doc(id).get() 抛异常(document does not exist) → 走 catch fail-open → 永远不扣费
+      // 回退: 恢复 await db.collection(...).doc(...).get() 无 catch
+      let res = null
+      try { res = await db.collection(QUOTA_COLLECTION).doc(quotaDocId(userId, monthKeyCN())).get() } catch (_) { res = null }
       const d = (res && res.data) ? res.data : {}
       return Number(d.used) || 0
     } catch (e) { return 0 }
@@ -167,10 +180,14 @@ module.exports = function (db, _, DEV_PASSCODE) {
   // 计费（服务端强计数 + 权重 + 单日/月度上限 + 全局熔断累加）
   async function consumeQuota(userId, feature, weight, cfg) {
     const mk = monthKeyCN()
-    const docId = userId + ':' + mk
+    const docId = quotaDocId(userId, mk)
     const dailyKey = 'd' + dayKeyCN()
     try {
-      const res = await db.collection(QUOTA_COLLECTION).doc(docId).get()
+      // >>> CHANGE-[2026-08-19 23:05:12]-consumeQuota get兜底 开始
+      // 原因: 文档不存在时 doc(id).get() 抛异常 → 走 catch fail-open → 永远不扣费; try/catch 兜底按"不存在"处理
+      // 回退: 恢复 await db.collection(...).doc(docId).get() 无 catch
+      let res = null
+      try { res = await db.collection(QUOTA_COLLECTION).doc(docId).get() } catch (_) { res = null }
       const exists = res && res.data
       const d = exists ? res.data : { used: 0, byFeature: {}, byDay: {} }
       const used = Number(d.used) || 0

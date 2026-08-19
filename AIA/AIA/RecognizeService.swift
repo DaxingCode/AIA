@@ -3151,12 +3151,17 @@ struct RecognizeService {
            EntitlementManager.entitlementDenialCodes.contains(code) {
             throw AIAEntitlementError(code: code)
         }
-        // 消费成功：服务端已在响应里算好剩余额度，即时刷新本地快照（无需冷启）。
-        // 服务端 checkEntitlement 返回体带 remaining（entitlement.js）。
+        // >>> CHANGE-[2026-08-19 22:54:43]-读remaining路径修复 开始
+        // 原因: 云端 recognize 把 remaining 放在 _entitlement 里(recognize/index.js body._entitlement),
+        //       旧代码读 obj["remaining"] 顶层永远拿不到 → 识别后本地剩余额度不刷新(UI 恒显示100)
+        // 回退: 恢复读 obj["remaining"] as? Int
+        // 消费成功：服务端已在 _entitlement 里算好剩余额度，即时刷新本地快照（无需冷启）。
         if let obj = try? JSONSerialization.jsonObject(with: respData) as? [String: Any],
-           let rem = obj["remaining"] as? Int {
+           let entObj = obj["_entitlement"] as? [String: Any],
+           let rem = entObj["remaining"] as? Int {
             EntitlementManager.shared.setQuotaRemaining(rem)
         }
+        // <<< CHANGE-[2026-08-19 22:54:43]-读remaining路径修复 结束
         return (respData, status)
     }
 }
