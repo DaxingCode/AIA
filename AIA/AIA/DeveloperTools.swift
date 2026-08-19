@@ -43,6 +43,27 @@ enum DeveloperGate {
     static func logout() {
         KeychainHelper.delete(tokenKey)
     }
+
+    // >>> CHANGE-[2026-08-19 16:30:13]-进开发者中心前校验token 开始
+    // 原因: 改口令后本地 isUnlocked 仍为 true, 用户不重新输口令也能进开发者中心;
+    //       进中心前用 devToken 调云端鉴权, 失效则自动登出要求重新解锁
+    // 回退: 删除本函数 + DeveloperCenterCard 内校验逻辑
+    /// 校验当前 devToken 是否仍有效（云端鉴权）。
+    /// 复用 listAll 接口（需 devToken 鉴权），成功返回 true；unauthorized/异常返回 false。
+    @MainActor
+    static func validateToken() async -> Bool {
+        guard let token = devToken, !token.isEmpty else { return false }
+        do {
+            let resp = try await postAdsJSON(["action": "listAll", "devToken": token])
+            let ok = resp["ok"] as? Bool ?? false
+            // 仅明确 unauthorized 视为失效；其它接口级错误(如网络)保守放行，避免误登出
+            if !ok && (resp["error"] as? String) == "unauthorized" { return false }
+            return true
+        } catch {
+            return false
+        }
+    }
+    // <<< CHANGE-[2026-08-19 16:30:13]-进开发者中心前校验token 结束
     // <<< CHANGE-[2026-08-19 15:32:37]-口令云端化 结束
 
     private static let key = "aia.devModeUnlocked"
@@ -55,9 +76,17 @@ enum DeveloperGate {
 
 /// 设置页解锁后展示的「开发者中心」入口卡片。
 struct DeveloperCenterCard: View {
+    // >>> CHANGE-[2026-08-19 16:35:17]-每次进开发者中心都要输口令 开始
+    // 原因: 用户要求每次进入开发者中心都必须重新输入口令(不记住解锁态)
+    // 回退: 恢复旧逻辑(直接 navigate 或 validateToken 校验)
+    @State private var showPasscode = false
+    @State private var passcodeText = ""
+    @State private var showPasscodeError = false
+
     var body: some View {
         Button {
-            NavigationRouter.shared.navigate(.developerCenter)
+            // 每次点击都弹口令框，输对才进入
+            showPasscode = true
         } label: {
             HStack {
                 Image(systemName: "wrench.and.screwdriver")
@@ -76,7 +105,33 @@ struct DeveloperCenterCard: View {
         }
         .buttonStyle(.plain)
         .card()
+        .alert("解锁开发者模式", isPresented: $showPasscode) {
+            SecureField("输入口令", text: $passcodeText)
+            Button("取消", role: .cancel) { passcodeText = "" }
+            Button("确认") {
+                let input = passcodeText
+                passcodeText = ""
+                Task { @MainActor in
+                    if await DeveloperGate.verify(input) {
+                        // 每次进入都重新校验通过，直接进入；不设置 isUnlocked（保持"每次都要输"）
+                        NavigationRouter.shared.navigate(.developerCenter)
+                    } else {
+                        // 等 alert dismiss 后再弹错误提示，避免两个 .alert 冲突
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            showPasscodeError = true
+                        }
+                    }
+                }
+            }
+        } message: {
+            Text("请输入开发者口令。")
+        }
+        .centeredAlert(isPresented: $showPasscodeError,
+                       title: "口令错误",
+                       message: "请输入正确口令后重试。",
+                       dismissTitle: "知道了")
     }
+    // <<< CHANGE-[2026-08-19 16:35:17]-每次进开发者中心都要输口令 结束
 }
 
 // MARK: - 广告管理 Store
