@@ -130,7 +130,11 @@
 "health.stat.weight" = "體重";
 "health.stat.height" = "身高";
 "health.stat.restingHR" = "靜息心率";
+"health.restingHR.records.title" = "靜息心率記錄";
+"health.restingHR.tag.auto" = "自動";
+"health.restingHR.tag.manual" = "手動";
 "health.stat.bmi" = "BMI";
+"health.stat.netCalorie" = "淨熱量";
 "health.weightTrend" = "體重趨勢";
 "health.noWeight" = "暫無體重記錄，去首頁截一張體重截圖";
 "health.sleepStages" = "睡眠分期 · 昨晚";

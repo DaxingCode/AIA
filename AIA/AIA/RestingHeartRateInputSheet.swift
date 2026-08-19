@@ -1,25 +1,37 @@
 import SwiftUI
 
-/// 静息心率录入 sheet：整数 bpm，±1 步进（手动记录模式方案 A）。
-/// 自动模式由调用方负责写 HealthKit；本 sheet 只负责数值选择，不关心存储落点。
+/// 静息心率录入 sheet：整数 bpm，±1 步进。
+/// 支持指定 date，可录入/覆盖任意一天（手动模式方案 A；自动模式亦可覆盖写 manual 行）。
 struct RestingHeartRateInputSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var bpm: Int
     let initial: Int
+    let date: Date
     let onSave: (Int) -> Void
 
-    init(initial: Int, onSave: @escaping (Int) -> Void) {
+    init(initial: Int, date: Date = Date(), onSave: @escaping (Int) -> Void) {
         _bpm = State(initialValue: initial > 0 ? initial : 60)
         self.initial = initial
+        self.date = date
         self.onSave = onSave
+    }
+
+    private var dateLabel: String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "M月d日"
+        return f.string(from: date)
     }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 24) {
-                Text("静息心率")
+                Text("录入静息心率")
                     .font(AIATheme.Font.title3.weight(.semibold))
                     .foregroundStyle(.primary)
+                Text(dateLabel)
+                    .font(AIATheme.Font.subhead)
+                    .foregroundStyle(AIATheme.sub)
                 HStack(spacing: 24) {
                     Button {
                         if bpm > 30 { bpm -= 1 }

@@ -49,6 +49,8 @@ enum HomeRoute: Hashable {
     case monthlyReport
     case monthlyBillList(year: Int, month: Int)
     case triggerTutorial(TriggerType)
+    // 2026-08-19：静息心率每天记录页（点健康管理页静息心率方块跳转，最近90天，支持手动覆盖）
+    case restingHeartRateRecords
 }
 
 struct ContentView: View {
@@ -398,6 +400,8 @@ struct ContentView: View {
                 .environment(\.modelContext, context)
         case .triggerTutorial(let trigger):
             TriggerTutorialView(trigger: trigger)
+        case .restingHeartRateRecords:
+            RestingHeartRateRecordsView()
         }
     }
 
@@ -2692,11 +2696,21 @@ struct ContentView: View {
                 ? HealthManager.shared.exerciseTimeToday
                 : HealthManager.shared.exerciseTimeToday + Double(ManualHealthStore.shared.exerciseMinutes(for: Date()))
         }
+        // >>> CHANGE-[2026-08-19 12:55:00]-对齐全App今日消耗口径 开始
+        // 原因: 与饮食页/管理页同源, 按 Date() 查 activeEnergyForDay/restingEnergyForDay 字典, 避免实时 fetch 与字典口径差几十卡
+        // 回退: 恢复原判(HealthManager.shared.restingEnergyToday + activeEnergyToday) 即可
         var homeEnergyBurned: Double {
-            isAuto(.tdee)
-                ? HealthManager.shared.restingEnergyToday + HealthManager.shared.activeEnergyToday
-                : Double(ManualHealthStore.shared.activeCalories(for: Date()))
+            let day = Calendar.current.startOfDay(for: Date())
+            if isAuto(.tdee) && HealthManager.shared.isAvailable && HealthManager.shared.hasHealthKitData {
+                let active = HealthManager.shared.activeEnergyForDay[day]
+                    ?? ManualHealthStore.shared.healthKitValue("activeCalories", for: day)
+                let resting = HealthManager.shared.restingEnergyForDay[day]
+                    ?? ManualHealthStore.shared.healthKitValue("restingCalories", for: day)
+                return active + resting
+            }
+            return Double(ManualHealthStore.shared.activeCalories(for: day))
         }
+        // <<< CHANGE-[2026-08-19 12:55:00]-对齐全App今日消耗口径 结束
         /// 静息心率（自动模式才取 HealthKit；手动模式走 ManualHealthStore）。
         var restingHeartRate: Double {
             isAuto(.heartRate) ? HealthManager.shared.restingHeartRate : 0
@@ -2713,12 +2727,24 @@ struct ContentView: View {
             }
             return 2000   // 通用成人 TDEE 估算保底（kg/cm 缺失时）
         }
+        // >>> CHANGE-[2026-08-19 12:55:00]-对齐全App今日消耗口径 开始
+        // 原因: 与 homeEnergyBurned/饮食页/管理页同源, 按 Date() 查字典当日值
+        // 回退: 恢复原判(HealthManager.shared.restingEnergyToday + activeEnergyToday) 即可
         var tdee: Double {
-            let actual = isAuto(.tdee)
-                ? HealthManager.shared.restingEnergyToday + HealthManager.shared.activeEnergyToday
-                : Double(ManualHealthStore.shared.activeCalories(for: Date()))
+            let day = Calendar.current.startOfDay(for: Date())
+            let actual: Double
+            if isAuto(.tdee) && HealthManager.shared.isAvailable && HealthManager.shared.hasHealthKitData {
+                let active = HealthManager.shared.activeEnergyForDay[day]
+                    ?? ManualHealthStore.shared.healthKitValue("activeCalories", for: day)
+                let resting = HealthManager.shared.restingEnergyForDay[day]
+                    ?? ManualHealthStore.shared.healthKitValue("restingCalories", for: day)
+                actual = active + resting
+            } else {
+                actual = Double(ManualHealthStore.shared.activeCalories(for: day))
+            }
             return actual > 0 ? actual : tdeeGoalFallback
         }
+        // <<< CHANGE-[2026-08-19 12:55:00]-对齐全App今日消耗口径 结束
         var calorieGoal: Double {
             if calorieGoalIsCustom, calorieGoalOverride > 0 { return calorieGoalOverride }
             return tdeeGoalFallback

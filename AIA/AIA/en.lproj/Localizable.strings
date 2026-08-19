@@ -129,7 +129,11 @@
 "health.stat.weight" = "Weight";
 "health.stat.height" = "Height";
 "health.stat.restingHR" = "Resting HR";
+"health.restingHR.records.title" = "Resting Heart Rate";
+"health.restingHR.tag.auto" = "Auto";
+"health.restingHR.tag.manual" = "Manual";
 "health.stat.bmi" = "BMI";
+"health.stat.netCalorie" = "Net Calories";
 "health.weightTrend" = "Weight Trend";
 "health.noWeight" = "No weight records yet. Capture a weight screenshot on Home";
 "health.sleepStages" = "Sleep Stages · Last Night";

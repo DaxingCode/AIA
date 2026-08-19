@@ -898,8 +898,12 @@ struct FoodListView: View {
                         HStack(spacing: 8) {
                             HStack(spacing: 0) {
                                 // 净热量（英雄数字，食物色突出）
+                                // >>> CHANGE-[2026-08-19 12:54:42]-净热量整数减 开始
+                                // 原因: 原 Int(net)=Int(摄入-消耗) 先减后截断小数, 与中间两列 Int(摄入)/Int(消耗) 整数相减差1;
+                                //       改为整数减 Int(摄入)-Int(消耗), 与心算/列显示完全一致(方案B)
+                                // 回退: 改回 Text("\(Int(net))") 即可
                                 VStack(spacing: 2) {
-                                    Text("\(Int(net))")
+                                    Text("\(Int(selectedCalories) - Int(tdeeCurrentValue))")
                                         .font(AIATheme.Font.title3.weight(.semibold))
                                         .foregroundStyle(AIATheme.food)
                                     Text(NSLocalizedString("food.netLabel", comment: ""))
@@ -1318,6 +1322,30 @@ struct HealthListView: View {
     private var recogSourceBySyncId: [UUID: String] {
         Dictionary(uniqueKeysWithValues: recogSources.map { ($0.syncId, $0.recogSourceRaw) })
     }
+    // >>> CHANGE-[2026-08-19 12:36:16]-[健康目标页净热量方块] 开始
+    // 原因: 健康管理页下方4小方块需新增"净热量"(今日摄入-今日消耗),替代原"身高"方块;与饮食页 net 同源口径
+    // 回退: 删除本段 + statGrid 内净热量 StatCard 即可还原为"身高"方块
+    @Query(filter: #Predicate<FoodEntry> { !$0.syncDeleted }) private var foods: [FoodEntry]
+    /// 今日摄入热量 = 今日 FoodEntry.calories 求和（按日历日过滤，与饮食页 selectedFoods 同源）
+    private var todayCalories: Double {
+        foods.filter { Calendar.current.isDate($0.date, inSameDayAs: Date()) }
+             .reduce(0) { $0 + $1.calories }
+    }
+    /// 净热量 = 整数(今日摄入) − 整数(今日消耗)（与饮食页净热量英雄数字同源，方案B整数减口径一致）
+    private var netCalorie: Int { Int(todayCalories) - Int(tdeeCurrentValue) }
+    /// 净热量展示：正数带"+"、负数"-"、零"0"，单位 kcal；无数据(0且未记录)回落"—"
+    private var netCalorieDisplay: String {
+        guard !todayCalories.isZero else { return "—" }
+        let v = netCalorie
+        return (v > 0 ? "+" : "") + "\(v) kcal"
+    }
+    /// 净热量颜色：医学营养界习惯——盈余(正)红、缺口(负)绿；无数据中性
+    private var netCalorieColor: Color {
+        if todayCalories.isZero { return AIATheme.ink }
+        return netCalorie >= 0 ? AIATheme.over : AIATheme.income
+    }
+    // <<< CHANGE-[2026-08-19 12:36:16]-[健康目标页净热量方块] 结束
+
     @StateObject private var health = HealthManager.shared
 
     /// 当前正在进行的睡眠会话 = 仅当「最近一条」会话还在睡（wakeAt == nil）时存在。
@@ -1477,19 +1505,23 @@ struct HealthListView: View {
             ? ManualHealthStore.shared.healthKitValue("exercise", for: Date())
             : health.exerciseTimeToday + Double(ManualHealthStore.shared.exerciseMinutes(for: Date()))
     }
-    // >>> CHANGE-[2026-08-19 08:19:21]-对齐TDEE消耗口径 开始
-    /// TDEE 实际达成 = 静息能量 + 活动能量。
-    /// 自动模式：直接读 HealthManager 内存单例的 resting+active（与首页宫格 homeEnergyBurned 同源），
-    /// 由 @StateObject health = HealthManager.shared 订阅自动实时刷新；
-    /// 原写法读 ManualHealthStore 的 .hk 落库槽位，与定时刷新强耦合且易读到不完整累计（显示8），与首页（492）口径不一致。
-    /// 未接入 → 回退到手动录入的活动热量（点击圆环 +100 kcal）。
-    /// 回退：删除本段、恢复原判（读 healthKitValue("activeCalories")+healthKitValue("restingCalories")）即可。
+    // >>> CHANGE-[2026-08-19 12:55:00]-对齐全App今日消耗口径 开始
+    // 原因: 原写法读 HealthManager 实时 restingEnergyToday+activeEnergyToday, 与饮食页(按 selectedDate 查字典)口径差 55kcal → 净热量两页不一致
+    //       改与饮食页 RecordsViews:273 完全同源: 自动模式按 Date() 查 activeEnergyForDay/restingEnergyForDay 字典, 空时回退 .hk 落库值;
+    //       手动模式按 Date() 查 ManualHealthStore。
+    // 回退: 删除本段, 恢复原判(HealthManager.shared.restingEnergyToday + activeEnergyToday) 即可。
     private var tdeeCurrentValue: Double {
-        isAuto(.tdee)
-            ? HealthManager.shared.restingEnergyToday + HealthManager.shared.activeEnergyToday
-            : Double(ManualHealthStore.shared.activeCalories(for: Date()))
+        let day = Calendar.current.startOfDay(for: Date())
+        if isAuto(.tdee) && HealthManager.shared.isAvailable && HealthManager.shared.hasHealthKitData {
+            let active = HealthManager.shared.activeEnergyForDay[day]
+                ?? ManualHealthStore.shared.healthKitValue("activeCalories", for: day)
+            let resting = HealthManager.shared.restingEnergyForDay[day]
+                ?? ManualHealthStore.shared.healthKitValue("restingCalories", for: day)
+            return active + resting
+        }
+        return Double(ManualHealthStore.shared.activeCalories(for: day))
     }
-    // <<< CHANGE-[2026-08-19 08:19:21]-对齐TDEE消耗口径 结束
+    // <<< CHANGE-[2026-08-19 12:55:00]-对齐全App今日消耗口径 结束
 
     /// 能量圆环目标 = 每日总消耗 TDEE（BMR × 活动系数），与健康目标页 TDEE 数值同步。
     private var tdeeGoal: Double {
@@ -1517,7 +1549,7 @@ struct HealthListView: View {
         case .sleep: ManualHealthStore.shared.addSleepHours(1, for: Date())
         case .exercise: ManualHealthStore.shared.addExerciseMinutes(10, for: Date())
         case .tdee: ManualHealthStore.shared.addActiveCalories(100, for: Date())
-        case .heartRate: showRestingHRInput = true   // 手动模式点静息心率 → 弹录入 sheet
+        case .heartRate: break   // 2026-08-19：静息心率方块已改为跳记录页, 不再此处弹 sheet
         }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
@@ -1866,12 +1898,10 @@ struct HealthListView: View {
                         }
 
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                            // >>> CHANGE-[2026-08-19 12:36:16]-[健康目标页净热量方块] 开始
+                            // 顺序调整: 体重 → BMI → 静息心率 → 净热量(替代身高);净热量跳饮食页
                             Button { NavigationRouter.shared.navigate(.bodyData) } label: {
                                 StatCard(value: weightDisplay, caption: NSLocalizedString("health.stat.weight", comment: ""))
-                            }
-                            .buttonStyle(.plain)
-                            Button { NavigationRouter.shared.navigate(.bodyData) } label: {
-                                StatCard(value: heightDisplay, caption: NSLocalizedString("health.stat.height", comment: ""))
                             }
                             .buttonStyle(.plain)
                             Button { NavigationRouter.shared.navigate(.bodyData) } label: {
@@ -1879,21 +1909,19 @@ struct HealthListView: View {
                             }
                             .buttonStyle(.plain)
                             Button {
-                                // 复用与圆环一致的点击逻辑：自动模式弹「切换手动/保持自动」，手动模式弹录入 sheet
-                                incrementMetric(.heartRate)
+                                // 跳转到静息心率每天记录页（最近90天，自动/手动均可点进去录入或覆盖）
+                                NavigationRouter.shared.navigate(.restingHeartRateRecords)
                             } label: {
                                 StatCard(value: stat("心率"), caption: NSLocalizedString("health.stat.restingHR", comment: ""))
                             }
                             .buttonStyle(.plain)
-                            .sheet(isPresented: $showRestingHRInput) {
-                                RestingHeartRateInputSheet(
-                                    initial: ManualHealthStore.shared.restingHeartRate(for: Date()),
-                                    onSave: { bpm in
-                                        // 仅手动模式可改；自动模式按钮已禁用弹窗（数据来自 HealthKit，不回写）。
-                                        ManualHealthStore.shared.setRestingHeartRate(bpm, for: Date())
-                                    }
-                                )
+                            Button { NavigationRouter.shared.navigate(.diet) } label: {
+                                StatCard(value: netCalorieDisplay,
+                                         caption: NSLocalizedString("health.stat.netCalorie", comment: ""),
+                                         valueColor: netCalorieColor)
                             }
+                            .buttonStyle(.plain)
+                            // <<< CHANGE-[2026-08-19 12:36:16]-[健康目标页净热量方块] 结束
                         }
                     }
                     .padding(12)
