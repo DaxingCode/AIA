@@ -5096,8 +5096,12 @@ private struct DietNutritionCard: View {
     let label: String
     let value: String
     let color: Color
+    // >>> CHANGE-[2026-08-19 10:09:11]-营养宫格居中 开始
+    // 原因: 平均每日营养摄入模块 8 个宫格内容原左对齐,用户要求改居中对齐。
+    // 修法: VStack alignment 与 frame alignment 由 .leading 改 .center。
+    // 回退: 两处 .center 改回 .leading 即可。
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .center, spacing: 4) {
             Text(value)
                 .font(AIATheme.Font.subhead.weight(.semibold))
                 .foregroundStyle(value == "—" ? AIATheme.muted : color)
@@ -5105,7 +5109,8 @@ private struct DietNutritionCard: View {
                 .font(AIATheme.Font.micro)
                 .foregroundStyle(AIATheme.sub)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
+        // <<< CHANGE-[2026-08-19 10:09:11]-营养宫格居中 结束
         .padding(12)
         .background(AIATheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
