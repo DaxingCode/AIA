@@ -442,13 +442,14 @@ struct ContentView: View {
         #if DEBUG
         print("[ContentView] onAppear, pending=\(quickAction.pending?.rawValue ?? "nil")")
         #endif
-        // HealthKit 授权：无条件触发，不依赖引导页关闭或 runDeferredStartup。
-        // 2026-08-11 把它塞进 runDeferredStartup 后，重装首开若走引导页分支会被推迟，
-        // 且引导页关闭的 onChange 偶发不命中 → 授权框不弹。提到此处保证每次进首页都尝试一次
-        // （内部有守卫不会重复弹，且仍是 0.6s 延后发系统 modal + 异步查询，不会卡老机型）。
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            HealthManager.shared.requestAuthorization()
-        }
+        // HealthKit 授权已挪到 runDeferredStartup（见该函数内调用）：引导页看完后才弹。
+        // >>> CHANGE-[2026-08-20 15:30:13]-[授权弹窗延后到新人引导后] 开始
+        // 原因：用户要求 HealthKit 授权弹窗在看完新人提示页后再出现。
+        // 原写法在 performOnAppear 顶层无条件触发（0.6s 延迟），引导页刚 push 就可能弹。
+        // 现挪到 runDeferredStartup —— 首装由「引导页关闭 onChange」触发，老用户直接进首页即触发，
+        // 两路都卡在引导页之后；requestAuthorization 系统幂等，已授权/已拒绝用户不会重复弹。
+        // 回退：把 runDeferredStartup 内的「HealthKit 授权」段搬回本处即可。
+        // <<< CHANGE-[2026-08-20 15:30:13]-[授权弹窗延后到新人引导后] 结束
         // >>> CHANGE-[2026-08-18 09:31:07]-[XS Max进度条无生长动画修复-冷启动补homeEnterToken] 开始
         // 原因：原注释主张「冷启动不再补 homeEnterToken，交给 MiniBar 自己 onAppear 自播」。
         // 但 XS Max(A12) 上该自播时序不稳常被吞（首帧 body 多轮重算 + 数据异步）→ 冷启动无生长动画。
@@ -524,6 +525,21 @@ struct ContentView: View {
     @MainActor
     private func runDeferredStartup() {
         Task(priority: .background) { await checkScreenshotPending() }
+        // >>> CHANGE-[2026-08-20 15:30:13]-[授权弹窗延后到新人引导后] 开始
+        // 原因：用户要求「消息提醒/HealthKit 授权弹窗在看完新人提示页后再出现」。
+        // runDeferredStartup 只在「引导页关闭后（首装）」或「直接进首页（老用户）」执行，
+        // 两路都卡在引导页之后，正好满足诉求。requestAuthorization 系统幂等，不会重复弹。
+        // 通知授权 + APNs token：原在 AppDelegate.didFinishLaunching，现挪到此。
+        ReminderNotificationManager.requestAuthorization()
+        #if !targetEnvironment(simulator)
+        UIApplication.shared.registerForRemoteNotifications()
+        #endif
+        // HealthKit 授权：原在 performOnAppear 顶层无条件触发，现挪到此，0.6s 延迟错峰
+        // （内部守卫：已授权/已拒绝/autoAuthEnabled=false 时静默返回，不反复弹）。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            HealthManager.shared.requestAuthorization()
+        }
+        // <<< CHANGE-[2026-08-20 15:30:13]-[授权弹窗延后到新人引导后] 结束
         // 睡眠遮罩恢复：交给 restoreSleepMaskOnStartup()，由根 .onAppear 无条件调用兜底，
         // 这里再调一次双保险（runDeferredStartup 在 .onAppear 之后由引导关闭/非首启触发）。
         // 两次都开 8s 窗口但第二次 isOpen 已被首次置 true，restoreSleepMaskIfNeeded 幂等，无害。
@@ -535,7 +551,6 @@ struct ContentView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             RecurringBillManager.generateDue(context: context)
         }
-        // HealthKit 授权已提到 performOnAppear 顶层无条件触发（见上），此处不再重复调用，避免非首启重复发起。
         // 冷启动首拉：延到 0.5s 让云端睡眠等数据更早回来，配合 8s 睡眠遮罩恢复窗口更稳。
         // （首帧空态已由 runDeferredStartup 延后调度保证，0.5s 不会与周期账单/HealthKit 撞窗。）
         coldStartSync(delay: 0.5)
