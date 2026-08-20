@@ -10,6 +10,7 @@ struct PaywallView: View {
     @StateObject private var ent = EntitlementManager.shared
 
     @State private var selected: SubscriptionProduct = .yearly
+    @State private var browserTarget: BrowserTarget?
     @State private var showError = false
     @State private var showSuccess = false
 
@@ -26,7 +27,10 @@ struct PaywallView: View {
                     subscribeButton
                     footerActions
                     legalText
-                }
+                    // >>> CHANGE-[2026-08-20 16:30:00]-订阅页补3.1.2条款链接 开始
+                    termsLinks
+                    // <<< CHANGE-[2026-08-20 16:30:00]-订阅页补3.1.2条款链接 结束
+                    }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 16)
             }
@@ -39,6 +43,7 @@ struct PaywallView: View {
                 }
             }
         }
+        .inAppBrowser(target: $browserTarget)
         .task {
             if sub.products.isEmpty { await sub.loadProducts() }
             await sub.refreshEntitlements()
@@ -269,4 +274,31 @@ struct PaywallView: View {
             .lineSpacing(3)
             .padding(.top, 2)
     }
+
+    // >>> CHANGE-[2026-08-20 16:30:00]-订阅页补3.1.2条款链接 开始
+    // 原因: 订阅页原仅 legalText 纯文字说明，缺《用户协议》《隐私政策》可点击链接，违反 App Review Guideline 3.1.2 硬性要求
+    // 回退: 删除本段 termsLinks 视图 + 主 VStack 内 `termsLinks` 调用即可
+    // MARK: - 用户协议 / 隐私政策链接（Guideline 3.1.2 要求，App 内打开）
+    private var termsLinks: some View {
+        HStack(spacing: 16) {
+            Spacer()
+            Button {
+                browserTarget = BrowserTarget(url: AppURLs.userAgreement)
+            } label: {
+                Text("《用户协议》")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.blue)
+            }
+            Button {
+                browserTarget = BrowserTarget(url: AppURLs.privacyPolicy)
+            } label: {
+                Text("《隐私政策》")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.blue)
+            }
+            Spacer()
+        }
+        .padding(.top, 2)
+    }
+    // <<< CHANGE-[2026-08-20 16:30:00]-订阅页补3.1.2条款链接 结束
 }
