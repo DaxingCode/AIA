@@ -126,7 +126,7 @@ struct LocalQuickParse {
         let fib = ref.fiber * ratio
         let sug = ref.sugar * ratio
         let sod = ref.sodium * ratio
-        var payload = FoodPayload(name: ref.name, calories: cal, protein: pro,
+        let payload = FoodPayload(name: ref.name, calories: cal, protein: pro,
                            carbs: car, fat: fat, fiber: fib, sugar: sug,
                            sodium: sod, portion: "\(gram)克",
                            meal: WaterIntakeParser.mealFromText(text),

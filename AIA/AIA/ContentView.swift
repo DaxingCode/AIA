@@ -53,6 +53,33 @@ enum HomeRoute: Hashable {
     case restingHeartRateRecords
     // 2026-08-19：近30日能量记录页（点饮食记录页净热量格跳转，顶部三汇总+下方每天三列）
     case energy30DaysRecords
+
+    // >>> CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 开始
+    // 原因：小记查询回复需在 AI 气泡下方渲染平级跳转按钮，把 HomeRoute 编码进 ChatMessage.actionRouteRaw（String?）。
+    //       routeKey 用于写；init(routeKey:) 用于读。仅覆盖小记实际使用的 5 个无关联值 case。
+    // 回退：删除本扩展 + ChatView 中 actionRouteRaw 读写即可。
+    var routeKey: String {
+        switch self {
+        case .bill: return "bill"
+        case .todo: return "todo"
+        case .diet: return "diet"
+        case .health: return "health"
+        case .settings: return "settings"
+        default: return ""
+        }
+    }
+
+    init?(routeKey: String) {
+        switch routeKey {
+        case "bill": self = .bill
+        case "todo": self = .todo
+        case "diet": self = .diet
+        case "health": self = .health
+        case "settings": self = .settings
+        default: return nil
+        }
+    }
+    // <<< CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 结束
 }
 
 struct ContentView: View {

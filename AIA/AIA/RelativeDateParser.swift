@@ -229,4 +229,56 @@ enum RelativeDateParser {
         }
         return cand
     }
+
+    // >>> CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 开始
+    // 原因：小记账单查询需支持"最近N天/本周/上周/这个月"等区间表达，复用本解析器口径。
+    //       返回 [start, end) 半开区间（end 为次日 00:00），与账单按 time 过滤一致。
+    // 回退：删除本方法即可（ChatView 内账单分支会回退到单日/最近7天兜底）。
+    /// 解析中文相对日期"区间"，返回 (start, end)。不支持时返回 nil。
+    /// 支持：最近N天 / 最近一周 / 本周 / 上周 / 这个月 / 本月 / 当月。
+    static func parseRange(from text: String) -> (start: Date, end: Date)? {
+        let cal = Calendar.current
+        let now = Date()
+        let tz = TimeZone(identifier: "Asia/Shanghai") ?? cal.timeZone
+        let lower = text.lowercased()
+
+        // 这个月 / 本月 / 当月：自然月 [月初, 下月初)
+        if lower.contains("本月") || lower.contains("这个月") || lower.contains("当月") {
+            var comps = cal.dateComponents([.year, .month], from: now)
+            comps.timeZone = tz
+            guard let start = cal.date(from: comps),
+                  let end = cal.date(byAdding: .month, value: 1, to: start) else { return nil }
+            return (start, end)
+        }
+
+        // 本周 / 上周：以周一为一周起点
+        if lower.contains("本周") || lower.contains("这周") || lower.contains("上周") {
+            let weeksAgo = lower.contains("上周") ? 1 : 0
+            var weekday = cal.component(.weekday, from: now) // 1=周日
+            let mondayOffset = (weekday + 5) % 7 // 距本周一的天数（周日→6，周一→0）
+            guard let thisMonday = cal.date(byAdding: .day, value: -mondayOffset, to: cal.startOfDay(for: now)),
+                  let start = cal.date(byAdding: .day, value: -7 * weeksAgo, to: thisMonday),
+                  let end = cal.date(byAdding: .day, value: 7, to: start) else { return nil }
+            return (start, end)
+        }
+
+        // 最近N天 / 最近一周：抓数字
+        if let r = lower.range(of: #"最近\s*(\d+)\s*天"#, options: .regularExpression) {
+            let seg = String(lower[r])
+            if let nStr = seg.range(of: #"\d+"#, options: .regularExpression),
+               let n = Int(String(seg[nStr])) {
+                let start = cal.date(byAdding: .day, value: -(n - 1), to: cal.startOfDay(for: now))!
+                let end = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now))!
+                return (start, end)
+            }
+        }
+        if lower.contains("最近一周") {
+            let start = cal.date(byAdding: .day, value: -6, to: cal.startOfDay(for: now))!
+            let end = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now))!
+            return (start, end)
+        }
+
+        return nil
+    }
+    // <<< CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 结束
 }

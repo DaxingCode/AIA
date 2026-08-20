@@ -1180,62 +1180,88 @@ struct ChatView: View {
         HStack {
             if userSide { Spacer(minLength: 28) }
 
-            ZStack(alignment: .topTrailing) {
-                Text(displayText)
-                    .font(AIATheme.Font.chatBody)
-                    .foregroundStyle(userSide ? .white : .primary)
-                    .textSelection(.enabled)
-                    .padding(10)
-                    .background(userSide ? AIATheme.blue : Color.adaptive(light: 0xffffff, dark: 0x2c2c2e))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .opacity(showSelection && !isSelected ? 0.4 : 1.0)
+            VStack(alignment: .leading, spacing: 6) {
+                ZStack(alignment: .topTrailing) {
+                    Text(displayText)
+                        .font(AIATheme.Font.chatBody)
+                        .foregroundStyle(userSide ? .white : .primary)
+                        .textSelection(.enabled)
+                        .padding(10)
+                        .background(userSide ? AIATheme.blue : Color.adaptive(light: 0xffffff, dark: 0x2c2c2e))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .opacity(showSelection && !isSelected ? 0.4 : 1.0)
 
-                if showSelection {
-                    // 深色模式适配：未选中圆圈禁写死黑色（深色下黑圈落在黑底/深灰气泡上隐形）。
-                    // 浅色=半透明黑、深色=半透明白，另加自适应细描边保证任意气泡底色上可见。
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle.fill")
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(
-                            isSelected ? Color.green : Color.adaptive(light: 0x000000, dark: 0xffffff).opacity(0.5),
-                            Color.white
-                        )
-                        .font(.system(size: 18))
-                        .overlay(
-                            Circle()
-                                .stroke(Color.adaptive(light: 0xffffff, dark: 0x8e8e93), lineWidth: 1)
-                                .opacity(isSelected ? 0 : 1)
-                        )
-                        .offset(x: 8, y: -8)
+                    if showSelection {
+                        // 深色模式适配：未选中圆圈禁写死黑色（深色下黑圈落在黑底/深灰气泡上隐形）。
+                        // 浅色=半透明黑、深色=半透明白，另加自适应细描边保证任意气泡底色上可见。
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle.fill")
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(
+                                isSelected ? Color.green : Color.adaptive(light: 0x000000, dark: 0xffffff).opacity(0.5),
+                                Color.white
+                            )
+                            .font(.system(size: 18))
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.adaptive(light: 0xffffff, dark: 0x8e8e93), lineWidth: 1)
+                                    .opacity(isSelected ? 0 : 1)
+                            )
+                            .offset(x: 8, y: -8)
+                    }
                 }
-            }
-            .contentShape(Rectangle())
-            .contextMenu {
-                // 多选模式不再弹出菜单；非多选且有 message 时才显示 复制/删除/选择
-                if let m = message, !messageMultiSelectMode {
+                .contentShape(Rectangle())
+                .contextMenu {
+                    // 多选模式不再弹出菜单；非多选且有 message 时才显示 复制/删除/选择
+                    if let m = message, !messageMultiSelectMode {
+                        Button {
+                            UIPasteboard.general.string = displayText
+                        } label: {
+                            Label("复制", systemImage: "doc.on.doc")
+                        }
+                        Button(role: .destructive) {
+                            // >>> CHANGE-[2026-08-17 11:34:00]-[临时对象失效崩溃] 开始
+                            // 原因：m 来自消息数组，删除后紧接 fetchMessages 重 fetch 可能释放引用。回退：改回 SafeDelete.chatMessage(m, in: context)
+                            SafeDelete.chatMessageByID(m.persistentModelID, in: context)
+                            // <<< CHANGE-[2026-08-17 11:34:00]-[临时对象失效崩溃] 结束
+                        } label: {
+                            Label("删除", systemImage: "trash")
+                        }
+                        Button {
+                            enterMessageMultiSelect(m.persistentModelID)
+                        } label: {
+                            Label("选择", systemImage: "checkmark.circle")
+                        }
+                    }
+                }
+                .onTapGesture {
+                    if showSelection {
+                        toggleMessageSelection(message!.persistentModelID)
+                    }
+                }
+
+                // >>> CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 开始
+                // 原因：数据查询类 AI 气泡下方渲染一个平级跳转按钮，点直达对应页面。
+                //       按钮放在气泡下方（VStack 兄弟层，与气泡 ZStack 平级），遵守项目"禁止嵌套 Button"铁律；不包 withAnimation。
+                // 回退：删除本 if 块即可。
+                if !userSide, let m = message, let routeKey = m.actionRouteRaw, let route = HomeRoute(routeKey: routeKey) {
                     Button {
-                        UIPasteboard.general.string = displayText
+                        NavigationRouter.shared.navigate(route)
                     } label: {
-                        Label("复制", systemImage: "doc.on.doc")
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.right.circle.fill")
+                                .font(.system(size: 12))
+                            Text("查看详情")
+                                .font(AIATheme.Font.micro)
+                        }
+                        .foregroundStyle(AIATheme.blue)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(AIATheme.blue.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
-                    Button(role: .destructive) {
-                        // >>> CHANGE-[2026-08-17 11:34:00]-[临时对象失效崩溃] 开始
-                        // 原因：m 来自消息数组，删除后紧接 fetchMessages 重 fetch 可能释放引用。回退：改回 SafeDelete.chatMessage(m, in: context)
-                        SafeDelete.chatMessageByID(m.persistentModelID, in: context)
-                        // <<< CHANGE-[2026-08-17 11:34:00]-[临时对象失效崩溃] 结束
-                    } label: {
-                        Label("删除", systemImage: "trash")
-                    }
-                    Button {
-                        enterMessageMultiSelect(m.persistentModelID)
-                    } label: {
-                        Label("选择", systemImage: "checkmark.circle")
-                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
-            }
-            .onTapGesture {
-                if showSelection {
-                    toggleMessageSelection(message!.persistentModelID)
-                }
+                // <<< CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 结束
             }
 
             if !userSide { Spacer(minLength: 28) }
@@ -3449,6 +3475,17 @@ struct ChatView: View {
             return queryReply
         }
 
+        // >>> CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 开始
+        // 数据查询分支（账单/待办/饮食/健康/会员）：本地优先、秒回，命中即插入带跳转按钮的 AI 消息。
+        // 与现有记账/待办逻辑并列，不命中 return nil 继续走下方元意图/云端兜底。
+        if let result = resolveDataQuery(t) {
+            insertAIMessage(text: result.text, actionRoute: result.route)
+            // 关键：标记"已插入气泡"，防止返回的 kHandledCard 哨兵被 processNext 当普通文本再插一条 __CARD_INSERTED__ 乱码气泡。
+            chatBubbleInserted = true
+            return kHandledCard
+        }
+        // <<< CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 结束
+
         // 7. 本地确能回答的元意图（问候/身份），不包含「今天花了多少」等可能需上下文的数据查询
         if let meta = replyForMetaIntent(t) {
             return meta
@@ -3457,6 +3494,179 @@ struct ChatView: View {
         // 本地兜不住 → 交给云端 LLM
         return nil
     }
+
+    // >>> CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 开始
+    // 原因：让小记在本地优先链里就能回答数据查询（账单/待办/饮食/健康/会员），并在 AI 气泡下方渲染平级跳转按钮。
+    //       一致性铁律：所有汇总复用各页面现成口径（MonthlyReportView 月度算法、RecordsViews.active），
+    //       且账单/饮食/待办取数一律带 !$0.syncDeleted（fetchLlmContextData 的 bills/foods 是全量、未过滤软删）。
+    // 回退：删除本段 + 删除 resolveLocally 第6、7分支间的调用 + 删除 insertAIMessage + messageBubble 的按钮即可。
+
+    /// 数据查询分支的返回结构：文案 + 可选跳转目标（nil 表示不渲染按钮）。
+    private struct DataQueryResult {
+        let text: String
+        let route: HomeRoute?
+    }
+
+    /// 插入一条带跳转路由的 AI 文本消息（复用项目统一插入流程，不重复插）。
+    private func insertAIMessage(text: String, actionRoute: HomeRoute?) {
+        let msg = ChatMessage(role: .ai, text: text,
+                              createdAt: Date().addingTimeInterval(0.1),
+                              actionRouteRaw: actionRoute?.routeKey)
+        context.insert(msg)
+        try? context.save()
+    }
+
+    /// 小记数据查询：识别并回答账单/待办/饮食/健康/会员类问题，命中即本地秒回。
+    /// 不命中 return nil，由调用方继续走云端兜底（不破坏现有记账/待办逻辑）。
+    private func resolveDataQuery(_ t: String) -> DataQueryResult? {
+        let lower = t.lowercased()
+        let data = fetchLlmContextData()
+        let cal = Calendar.current
+        let now = Date()
+        let f: (Double) -> String = { String(format: "%.0f", $0) }
+        let dayLabel: (Date) -> String = { AppFormat.isoDate.string(from: $0) }
+
+        // >>> CHANGE-[2026-08-20 16:00:00]-[小记查询扩充关键词] 开始
+        // 原因：用户希望小记查询支持更多说法。仅扩充触发关键词，不改查询逻辑/文案。
+        // 回退：删除各分支新增的关键词项即可。
+        // —— 会员到期查询（当前空白分支，优先级最高以免被其他词误吞） ——
+        if lower.contains("会员") || lower.contains("pro") || lower.contains("订阅") || lower.contains("到期") || lower.contains("过期") || lower.contains("还剩")
+            || lower.contains("付费") || lower.contains("包年") || lower.contains("包月") || lower.contains("续费")
+            || lower.contains("是不是会员") || lower.contains("是不是pro") || lower.contains("还有多久") || lower.contains("什么时候到期") || lower.contains("有效期") {
+            let sub = SubscriptionManager.shared
+            if sub.isSubscribed, let exp = sub.expiresAt {
+                let days = cal.dateComponents([.day], from: now, to: exp).day ?? 0
+                let expStr = AppFormat.isoDate.string(from: exp)
+                return DataQueryResult(text: "你的会员将在 \(expStr) 到期，还剩 \(days) 天。", route: .settings)
+            } else {
+                return DataQueryResult(text: "你目前是免费版，未订阅会员。", route: .settings)
+            }
+        }
+
+        // —— 饮食汇总（某天吃了多少热量） ——
+        if lower.contains("吃了多少") || lower.contains("热量") || lower.contains("今天吃") || lower.contains("吃了什么")
+            || lower.contains("吃了啥") || lower.contains("吃了多少卡") || lower.contains("摄入") || lower.contains("消耗") || lower.contains("卡路里") {
+            let (foodDate, _) = RelativeDateParser.dateTimeOrToday(from: t)
+            let start = cal.startOfDay(for: foodDate)
+            let end = cal.date(byAdding: .day, value: 1, to: start)!
+            let foods = data.foods.filter { !$0.syncDeleted && $0.date >= start && $0.date < end }
+            if foods.isEmpty {
+                return DataQueryResult(text: "\(dayLabel(foodDate)) 还没有记录饮食呢。", route: .diet)
+            }
+            let totalKcal = foods.reduce(0.0) { acc, item in
+                let gram = item.weightGram ?? 100.0
+                return acc + (item.calories * gram / 100.0)
+            }
+            let detail = foods.prefix(5).map { "· \($0.name) \(Int($0.weightGram ?? 100))g" }.joined(separator: "\n")
+            let more = foods.count > 5 ? "\n…等共 \(foods.count) 条" : ""
+            return DataQueryResult(text: "\(dayLabel(foodDate)) 共摄入约 \(f(totalKcal)) 千卡：\n\(detail)\(more)", route: .diet)
+        }
+
+        // —— 账单查询 ——
+        if lower.contains("花") || lower.contains("钱") || lower.contains("账单") || lower.contains("支出") || lower.contains("消费") || lower.contains("账") || lower.contains("商户") || lower.contains("商家")
+            || lower.contains("开销") || lower.contains("花费") || lower.contains("进账") || lower.contains("结余") || lower.contains("余额") || lower.contains("预算") || lower.contains("记账") {
+            // 商户模糊匹配优先
+            if let merchant = ["商户", "商家"].first(where: { lower.contains($0) }) {
+                // 取商户关键词：如"美团"——简单取"商户"/"商家"后2~4字
+                let kw = t.replacingOccurrences(of: "一共", with: "")
+                    .replacingOccurrences(of: "花了多少", with: "")
+                    .replacingOccurrences(of: "花了多少钱", with: "")
+                    .replacingOccurrences(of: "商户", with: "")
+                    .replacingOccurrences(of: "商家", with: "")
+                    .trimmingCharacters(in: .whitespaces)
+                let matched = data.bills.filter { !$0.syncDeleted && $0.merchant.localizedCaseInsensitiveContains(kw) }
+                if matched.isEmpty {
+                    return DataQueryResult(text: "没找到和「\(kw)」相关的账单记录。", route: .bill)
+                }
+                let expense = matched.filter { !$0.isIncome }.reduce(0) { $0 + $1.amount }
+                let income = matched.filter { $0.isIncome }.reduce(0) { $0 + $1.amount }
+                return DataQueryResult(text: "和「\(kw)」相关的账单：支出 ¥\(f(expense))，收入 ¥\(f(income))，共 \(matched.count) 笔。", route: .bill)
+            }
+
+            // 时间区间判定（复用 RelativeDateParser 单日 + 新增区间）
+            var start: Date
+            var end: Date
+            var label: String
+            if lower.contains("本月") || lower.contains("这个月") || lower.contains("当月") {
+                let comps = cal.dateComponents([.year, .month], from: now)
+                start = cal.date(from: comps)!
+                end = cal.date(byAdding: .month, value: 1, to: start)!
+                label = "本月"
+            } else if let range = RelativeDateParser.parseRange(from: t) {
+                start = range.start; end = range.end
+                label = "这段时间内"
+            } else if lower.contains("昨天") {
+                start = cal.date(byAdding: .day, value: -1, to: cal.startOfDay(for: now))!
+                end = cal.startOfDay(for: now)
+                label = "昨天"
+            } else if lower.contains("今天") {
+                start = cal.startOfDay(for: now)
+                end = cal.date(byAdding: .day, value: 1, to: start)!
+                label = "今天"
+            } else {
+                // 默认最近 7 天（不默认本月，歧义时由兜底反问；此处保留最近7天为最常用）
+                start = cal.date(byAdding: .day, value: -7, to: cal.startOfDay(for: now))!
+                end = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now))!
+                label = "最近 7 天"
+            }
+            let targetBills = data.bills.filter { !$0.syncDeleted && $0.time >= start && $0.time < end }
+            if targetBills.isEmpty {
+                return DataQueryResult(text: "\(label)还没有账单记录哦～", route: .bill)
+            }
+            let expense = targetBills.filter { !$0.isIncome }.reduce(0) { $0 + $1.amount }
+            let income = targetBills.filter { $0.isIncome }.reduce(0) { $0 + $1.amount }
+            return DataQueryResult(text: "\(label)共支出 ¥\(f(expense))，收入 ¥\(f(income))，涉及 \(targetBills.count) 笔。", route: .bill)
+        }
+
+        // —— 待办列表（含"未安排"due==nil，与 RecordsViews.active 口径一致） ——
+        if lower.contains("待办") || lower.contains("任务") || lower.contains("提醒") || lower.contains("事情") || lower.contains("todo") || lower.contains("安排")
+            || lower.contains("要做的事") || lower.contains("要做") || lower.contains("没做完") || lower.contains("未完成") || lower.contains("还有什么没做")
+            || lower.contains("有什么要办") || lower.contains("清单") || lower.contains("待完成") {
+            let active = data.reminders.filter { !$0.syncDeleted && !$0.done }
+            if active.isEmpty {
+                return DataQueryResult(text: "你目前没有未完成的待办，可以放松一下。", route: .todo)
+            }
+            let sorted = active.sorted {
+                let d0 = $0.due ?? .distantFuture
+                let d1 = $1.due ?? .distantFuture
+                return d0 < d1
+            }
+            let detail = sorted.prefix(8).map { "· \($0.title)" }.joined(separator: "\n")
+            let more = sorted.count > 8 ? "\n…等共 \(sorted.count) 件" : ""
+            return DataQueryResult(text: "你还有 \(sorted.count) 件待办没完成：\n\(detail)\(more)", route: .todo)
+        }
+
+        // —— 健康查询（步数/睡眠/体重，读已落库 ManualHealthStore） ——
+        if lower.contains("步数") || lower.contains("健康") || lower.contains("运动") || lower.contains("走") || lower.contains("锻炼") || lower.contains("睡眠") || lower.contains("睡了") || lower.contains("体重") || lower.contains("多重")
+            || lower.contains("走了多少") || lower.contains("走了几步") || lower.contains("今天走了")
+            || lower.contains("睡了多久") || lower.contains("睡了几个小时") || lower.contains("几点睡的")
+            || lower.contains("多少斤") || lower.contains("几斤") || lower.contains("体重多少") {
+            Task { await HealthManager.shared.refreshAll() }
+            if lower.contains("睡眠") || lower.contains("睡了") {
+                let (sleepDate, _) = RelativeDateParser.dateTimeOrToday(from: t)
+                let hours = ManualHealthStore.shared.sleepHours(for: sleepDate)
+                if hours <= 0 {
+                    return DataQueryResult(text: "还没同步到相关睡眠数据，去健康页授权后会更准确～", route: .health)
+                }
+                let h = Int(hours)
+                let m = Int((hours - Double(h)) * 60)
+                return DataQueryResult(text: "\(dayLabel(sleepDate)) 睡眠约 \(h) 小时 \(m) 分钟。", route: .health)
+            }
+            if lower.contains("体重") || lower.contains("多重") {
+                let (wDate, _) = RelativeDateParser.dateTimeOrToday(from: t)
+                let w = ManualHealthStore.shared.healthKitValue("weight", for: wDate)
+                if w > 0 {
+                    return DataQueryResult(text: "\(dayLabel(wDate)) 体重约 \(f(w)) kg。", route: .health)
+                }
+                return DataQueryResult(text: "还没记录体重数据哦。", route: .health)
+            }
+            let steps = ManualHealthStore.shared.steps(for: now)
+            return DataQueryResult(text: "今天步数约 \(steps) 步。", route: .health)
+        }
+
+        return nil
+    }
+    // <<< CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 结束
 
     // MARK: - 本地删除助手（针对"刚才/最近" 类指令）
 

@@ -58,6 +58,7 @@ enum RecognitionOutcome {
     case nothing
 }
 
+@MainActor
 enum RecognitionSaver {
     /// 从模型给的 due 字符串解析日期（兼容 ISO8601 / yyyy-MM-dd / 含时间串），失败回退到今天 8:00。
     static func dueDate(from dueString: String?) -> Date {
@@ -105,7 +106,7 @@ enum RecognitionSaver {
     }
 
     /// 按识别时间自动判断餐次：5–10 点早餐，11–15 点午餐，16–21 点晚餐，其余为加餐
-    static func defaultMeal(for date: Date) -> String {
+    nonisolated static func defaultMeal(for date: Date) -> String {
         let hour = Calendar.current.component(.hour, from: date)
         switch hour {
         case 5..<11:  return "早餐"
@@ -176,7 +177,7 @@ enum RecognitionSaver {
 
     /// 常见「份量单位 → 每单位克数」换算表（经验均值，用户可在详情页手动改）。
     /// 仅用于照片识别里模型只给「1碗/1个/1片」等无量词场景，避免一律兜底 100g。
-    private static let servingUnitGrams: [String: Double] = [
+    private nonisolated static let servingUnitGrams: [String: Double] = [
         "碗": 300, "碟": 100, "盘": 200, "份": 120, "个": 100, "颗": 100,
         "只": 100, "枚": 100, "片": 30, "块": 50, "根": 80, "条": 80,
         "杯": 240, "瓶": 500, "罐": 330, "勺": 15, "匙": 15, "把": 50,
@@ -787,7 +788,7 @@ static func insertPendingBubble(result: RecognitionResult, context: ModelContext
     }
 
     /// 生成人类可读的识别摘要（用于重复警告横幅）。
-    static func summary(of result: RecognitionResult) -> String {
+    nonisolated static func summary(of result: RecognitionResult) -> String {
         let types = result.types ?? []
         var parts: [String] = []
         if types.contains("bill") {

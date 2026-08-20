@@ -43,14 +43,25 @@ import SwiftData
     public var syncUpdatedAt: Date
     public var syncDeleted: Bool
 
+    // >>> CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 开始
+    // 原因：小记数据查询回复后，气泡下方需渲染一个平级跳转按钮直达对应页面。
+    //       该字段存 HomeRoute 的 case 名（如 "bill"/"todo"/"diet"/"health"/"settings"），nil 表示无跳转。
+    // 回退：删除本字段 + 撤销 AIAMigrationPlan 的 SchemaVersion18 + 撤销 AppPersistence.schema/currentSchemaVersion 改回 v17 即可。
+    public var actionRouteRaw: String? = nil
+    // <<< CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 结束
+
     public init(role: Role, text: String, createdAt: Date = .now,
-         syncId: UUID = UUID(), syncUpdatedAt: Date = .now, syncDeleted: Bool = false) {
+         syncId: UUID = UUID(), syncUpdatedAt: Date = .now, syncDeleted: Bool = false,
+         actionRouteRaw: String? = nil) {
         self.roleRaw = role.rawValue
         self.text = text
         self.createdAt = createdAt
         self.syncId = syncId
         self.syncUpdatedAt = syncUpdatedAt
         self.syncDeleted = syncDeleted
+        // >>> CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 开始
+        self.actionRouteRaw = actionRouteRaw
+        // <<< CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 结束
     }
 
     public var role: Role { Role(rawValue: roleRaw) ?? .ai }
