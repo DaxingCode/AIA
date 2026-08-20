@@ -679,7 +679,7 @@ struct SettingsView: View {
                     .font(AIATheme.Font.callout.weight(.medium))
                     .foregroundStyle(.primary)
                 Spacer()
-                Text("MVP · M5 云同步")
+                Text("好记AI 1.0.0")
                     .font(AIATheme.Font.footnote)
                     .foregroundStyle(AIATheme.muted)
             }
