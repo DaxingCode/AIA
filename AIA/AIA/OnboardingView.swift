@@ -159,16 +159,22 @@ struct OnboardingView: View {
     }
 
     // MARK: - 普通页（欢迎 / 截图 / 语音 / 完成）
+    // >>> CHANGE-[2026-08-20 15:00:00]-新人引导第一页换熊猫头像-开始
     private var welcomePage: some View {
         pageContent(kind: .welcome,
                     title: "你好，我是小记 👋",
-                    message: "你的专属AI助理，自动记账、记待办、记饮食、管健康，一个App全搞定")
+                    message: "你的专属AI助理，自动记账、记待办、记饮食、管健康，一个App全搞定",
+                    illustration: { AnyView(pandaAvatar) })
     }
+    // <<< CHANGE-[2026-08-20 15:00:00]-新人引导第一页换熊猫头像-结束
+
+    // >>> CHANGE-[2026-08-20 15:00:00]-新人引导第二页沿用第一页紫蓝渐变-开始
     private var screenshotPage: some View {
-        pageContent(kind: .screenshot,
+        pageContent(kind: .welcome,
                     title: "自动记账、记待办、记饮食",
                     message: "截屏、语音、Siri、拍照、图片、文字，都能自动记账、记待办、记饮食、记健康，超方便的！")
     }
+    // <<< CHANGE-[2026-08-20 15:00:00]-新人引导第二页沿用第一页紫蓝渐变-结束
     private var payScreenshotPage: some View {
         pageContent(kind: .screenshot,
                     title: "付款后截屏自动记账",
@@ -261,10 +267,30 @@ struct OnboardingView: View {
                     message: "现在就去截张图，或跟小记说句话试试吧。随时在「设置 → 重新查看新人引导」回看。")
     }
 
-    private func pageContent(kind: IllustrationView.Kind, title: String, message: String) -> some View {
+    // >>> CHANGE-[2026-08-20 15:00:00]-新人引导第一页换熊猫头像-开始
+    /// 圆形熊猫头像（用 Assets 里的 AIAvatar 资源，和「我的账号」页同款），不套方块外壳、不带 sparkle 角标。
+    /// 注：不能写 Image("AppIcon")，AppIcon 是 app icon 槽位、不在普通 Image 资源表里，OnboardingView 渲染会空白。
+    private var pandaAvatar: some View {
+        Image("AIAvatar")
+            .resizable()
+            .scaledToFill()
+            .frame(width: 120, height: 120)
+            .clipShape(Circle())
+            .shadow(color: .black.opacity(0.15), radius: 14, y: 8)
+    }
+    // <<< CHANGE-[2026-08-20 15:00:00]-新人引导第一页换熊猫头像-结束
+
+    private func pageContent(kind: IllustrationView.Kind,
+                             title: String,
+                             message: String,
+                             illustration: (() -> AnyView)? = nil) -> some View {
         VStack(spacing: 22) {
             Spacer()
-            IllustrationView(kind: kind, size: 120)
+            if let illustration {
+                illustration()
+            } else {
+                IllustrationView(kind: kind, size: 120)
+            }
             VStack(spacing: 12) {
                 Text(title).font(AIATheme.Font.title1.weight(.bold)).foregroundStyle(.primary)
                 Text(message)
