@@ -839,14 +839,10 @@ struct FoodListView: View {
             Group {
                 switch dietTab {
                 case .records:
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                        // 用 LazyVStack 而非 VStack：VStack eager 渲染全部子项，
-                        // 当餐次 filter 切换或新 food 入库触发 content 重建时（EmptyStateView ↔ ForEach 互换），
-                        // SwiftUI 会在 content 尺寸剧烈变化时 scroll position 复位到 top（用户反馈的"点 tab / chip 跳回顶部"）。
-                        // LazyVStack 只渲染可见项，content 结构变化时 scroll position 保持稳定。
-                        LazyVStack(alignment: .leading, spacing: 12) {
-                        // Card1 · 热量概览（日期 + 进度 + 净热量/TDEE/消耗 + 饮水）
+                    // >>> CHANGE-[2026-08-20 16:30:00]-饮食页Card1吸顶固定 开始
+                    // 原因: 用户要求饮食记录页顶部"日期+热量概览"卡(Card1)固定在屏幕上方不随下方滚动，
+                    //       方便长列表滚动时随时点 ◀/▶ 切换昨天/明天。原计划模式确认方案A(只固定Card1)。
+                    // 回退: 把下面这段(VStack...card)放回 ScrollView 内 LazyVStack 顶部，删除本固定层与 Divider 即可
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 8) {
                             Button {
@@ -970,8 +966,18 @@ struct FoodListView: View {
                         }
                     }
                     .padding(12)
-                    .card(radius: AIATheme.rMD)
+                    .card(radius: AIATheme.rMD, shadow: false)
+                    .padding(.horizontal, 16)
 
+                    // <<< CHANGE-[2026-08-20 16:30:00]-饮食页Card1吸顶固定 结束
+
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                        // 用 LazyVStack 而非 VStack：VStack eager 渲染全部子项，
+                        // 当餐次 filter 切换或新 food 入库触发 content 重建时（EmptyStateView ↔ ForEach 互换），
+                        // SwiftUI 会在 content 尺寸剧烈变化时 scroll position 复位到 top（用户反馈的"点 tab / chip 跳回顶部"）。
+                        // LazyVStack 只渲染可见项，content 结构变化时 scroll position 保持稳定。
+                        LazyVStack(alignment: .leading, spacing: 12) {
                     // Card2 · 营养构成（建议值随健身目标/体重/TDEE 联动，缺失时回落通用参考值）
                     // 拆为独立子视图避开 Swift 编译器「unable to type-check」级联（参考 ChatView.buildContext 拆分经验）。
                     let t = nutritionTargets
