@@ -130,60 +130,118 @@ enum SafeDelete {
     /// 详情页 pop 后若没有任何视图再引用该对象，SwiftData 可能把它标记为 fault。
     /// 此时若直接访问传入对象的属性会触发 fault 异常并闪退。
     /// ID 版本在真正执行时通过 context.model(for:) 重新取活对象，避免该问题。
+    // >>> CHANGE-[2026-08-21 14:00:30]-[byID闭包内按ID现取统一根治] 开始
+    // 原因：与 foodByID 同源隐患——旧实现在闭包外取活对象并捕获进 async 闭包，release 下对象可能已 fault。
+    // 修复：notify/sync 移闭包外，闭包内按 id 现取活对象，不捕获外部引用。
+    // 回退：恢复为 guard let x = context.model(for: id) ...; xxx(x, in: context)
     static func reminderByID(_ id: PersistentIdentifier, in context: ModelContext) {
-        guard let r = context.model(for: id) as? Reminder else { return }
-        reminder(r, in: context)
         notifyWidgetReload()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        DispatchQueue.main.async {
+            guard let r = context.model(for: id) as? Reminder else { return }
+            r.syncDeleted = true
+            r.syncUpdatedAt = Date()
+            deleteImageIfOrphaned(r, in: context)
+        }
     }
 
     static func billByID(_ id: PersistentIdentifier, in context: ModelContext) {
-        guard let b = context.model(for: id) as? Bill else { return }
-        bill(b, in: context)
         notifyWidgetReload()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        DispatchQueue.main.async {
+            guard let b = context.model(for: id) as? Bill else { return }
+            b.syncDeleted = true
+            b.syncUpdatedAt = Date()
+            deleteImageIfOrphaned(b, in: context)
+        }
     }
+    // <<< CHANGE-[2026-08-21 14:00:30]-[byID闭包内按ID现取统一根治] 结束
 
+    // >>> CHANGE-[2026-08-21 14:00:00]-[foodByID闭包内按ID现取根治fault] 开始
+    // 原因：旧 foodByID 在闭包外用 context.model(for:) 取活对象后传给 food()，但 food() 把 f 捕获进
+    //       DispatchQueue.main.async 闭包；图片识别记录(有 imageName)在闭包执行时若已无视图引用，
+    //       SwiftData 会把它标 fault → 访问 f.syncDeleted/imageName 闪退。手动记录 imageName==nil 提前
+    //       return 故不崩，表现为"仅图片识别记录闪退、手动添加不闪退"，且 debug 不优化不崩、release 必崩。
+    // 修复：把 notifyWidgetReload / syncAfterLocalChange 移到闭包外(不依赖 f)，闭包内按 id 现取活对象，
+    //       不再捕获任何外部对象引用，从根上消除 fault。
+    // 回退：恢复为 guard let f = context.model(for: id) ...; food(f, in: context)
     static func foodByID(_ id: PersistentIdentifier, in context: ModelContext) {
-        guard let f = context.model(for: id) as? FoodEntry else { return }
-        food(f, in: context)
         notifyWidgetReload()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        DispatchQueue.main.async {
+            guard let f = context.model(for: id) as? FoodEntry else { return }
+            // 先同步读出需要的值，再置软删标记，避免任何后续访问触发 fault
+            let targetSyncId = f.syncId
+            f.syncDeleted = true
+            f.syncUpdatedAt = Date()
+            // 图片孤儿清理：图片记录有 imageName 才会进来；手动记录 imageName==nil 直接跳过
+            let name = f.imageName
+            if let name, !name.isEmpty {
+                let alive = (try? context.fetch(FetchDescriptor<FoodEntry>(
+                    predicate: #Predicate { $0.imageName == name && !$0.syncDeleted }
+                )))?.count ?? 0
+                if alive == 0 { LocalImageStore.delete(name) }
+            }
+            // 清理来源标记，避免 FoodSource 残留挂空
+            if let fs = (try? context.fetch(FetchDescriptor<FoodSource>(
+                    predicate: #Predicate { $0.foodSyncId == targetSyncId }
+               )))?.first {
+                context.delete(fs)
+            }
+        }
     }
+    // <<< CHANGE-[2026-08-21 14:00:00]-[foodByID闭包内按ID现取根治fault] 结束
 
     static func healthByID(_ id: PersistentIdentifier, in context: ModelContext) {
-        guard let h = context.model(for: id) as? HealthMetric else { return }
-        health(h, in: context)
         notifyWidgetReload()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        DispatchQueue.main.async {
+            guard let h = context.model(for: id) as? HealthMetric else { return }
+            h.syncDeleted = true
+            h.syncUpdatedAt = Date()
+            deleteImageIfOrphaned(h, in: context)
+        }
     }
 
     static func recognitionRecordByID(_ id: PersistentIdentifier, in context: ModelContext) {
-        guard let r = context.model(for: id) as? RecognitionRecord else { return }
-        recognitionRecord(r, in: context)
         notifyWidgetReload()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        DispatchQueue.main.async {
+            guard let r = context.model(for: id) as? RecognitionRecord else { return }
+            r.syncDeleted = true
+            r.syncUpdatedAt = Date()
+            deleteImageIfOrphaned(r, in: context)
+        }
     }
 
     static func waterLogByID(_ id: PersistentIdentifier, in context: ModelContext) {
-        guard let w = context.model(for: id) as? WaterLog else { return }
-        waterLog(w, in: context)
         notifyWidgetReload()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        DispatchQueue.main.async {
+            guard let w = context.model(for: id) as? WaterLog else { return }
+            w.syncDeleted = true
+            w.syncUpdatedAt = Date()
+        }
     }
 
     static func chatMessageByID(_ id: PersistentIdentifier, in context: ModelContext) {
-        guard let m = context.model(for: id) as? ChatMessage else { return }
-        chatMessage(m, in: context)
         notifyWidgetReload()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        DispatchQueue.main.async {
+            guard let m = context.model(for: id) as? ChatMessage else { return }
+            m.syncDeleted = true
+            m.syncUpdatedAt = Date()
+        }
     }
 
     static func merchantMetaByID(_ id: PersistentIdentifier, in context: ModelContext) {
-        guard let m = context.model(for: id) as? MerchantMeta else { return }
-        merchantMeta(m, in: context)
         notifyWidgetReload()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        DispatchQueue.main.async {
+            guard let m = context.model(for: id) as? MerchantMeta else { return }
+            m.syncDeleted = true
+            m.syncUpdatedAt = Date()
+        }
     }
 }
 
