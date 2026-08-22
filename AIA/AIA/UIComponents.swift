@@ -764,16 +764,20 @@ final class RecognitionActivity: ObservableObject {
 /// - Parameter navigateToChat: 识别结束后是否跳到对话页看好记AI回复。
 ///   非对话页入口（首页底部栏、四宫格快捷操作等）必须传 true，否则用户留在原页看不到回复；
 ///   ChatView 自身的拍照/相册/文件入口传 false，避免在对话页上再压一层对话页。
+// >>> CHANGE-[2026-08-21 10:00:00]-[分享图片对话页识别] 开始
 func runImageRecognition(image: UIImage,
                          context: ModelContext,
                          errorMessage: Binding<String?>,
-                         navigateToChat: Bool = false) {
+                         navigateToChat: Bool = false,
+                         presavedImageName: String? = nil) {
     // 先发图：像微信一样，对话流里先出现「你发的这张图」，好记AI随后回识别卡片。
     // 返回的文件名同时给识别结果复用，同一张原图不必落盘两次。
     // 所有调用点都来自 UI 事件（主线程），assumeIsolated 成立。
     // 2026-08-02：删掉了原「识别中」全屏 cover（`coverItem` 参数已移除），识别中直接展示对话页。
-    let presavedName = MainActor.assumeIsolated {
-        appendUserImageMessage(image: image, context: context)
+    // presavedImageName：分享扩展等已先插好图的入口传入，避免重复插图。
+    let presavedName = MainActor.assumeIsolated { () -> String? in
+        if let name = presavedImageName { return name }
+        return appendUserImageMessage(image: image, context: context)
     }
     // 拍照/选图质量预检（主线程、256 缩图计算很快）：用于识别「没结果/失败」时，
     // 给出「图糊了/太暗了」这类针对性提示，而非笼统的「识别失败」。

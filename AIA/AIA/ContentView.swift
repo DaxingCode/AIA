@@ -922,6 +922,10 @@ struct ContentView: View {
         guard !isCheckingScreenshotPending, pendingPresent == nil else { return }
         guard let p = ScreenshotStore.loadPending() else { return }
         isCheckingScreenshotPending = true
+        // >>> 分享扩展来源：无论 App 是被系统接力唤起还是用户手动点图标冷启动，
+        // 都跳对话页看识别结果（手动点图标冷启动时没有 aia://chat 这个 URL，必须靠分享图本身的存在来跳）。
+        let shouldNavigate = navigateToChat || p.fromShareExtension
+        // <<<
         let img = ScreenshotStore.loadPendingImage()
         // 招呼气泡定位锚点：必须打在插入「你发的图」气泡之前，
         // 否则 ChatView.onAppear 会把这张截屏算成历史，招呼气泡排到图片后面。
@@ -929,6 +933,21 @@ struct ContentView: View {
         // 像微信一样：这张截屏先作为「你发的图」进对话流，好记AI随后在同一段对话里回识别卡片。
         // 返回的文件名给识别结果复用，同一张图不落盘两次。
         let presavedName = appendUserImageMessage(image: img, context: context)
+
+        // >>> 分享扩展来源：图片已进对话页，识别交给主 App 在对话页内完成（显示「好记AI正在识别…」加载条）。
+        // 不再读扩展端 result，统一复用拍照/相册那条成熟识别链路，避免两端各写一份识别。
+        if p.fromShareExtension {
+            ScreenshotStore.clearPending()
+            isCheckingScreenshotPending = false
+            if let img {
+                runImageRecognition(image: img, context: context,
+                                    errorMessage: Binding<String?>.constant(nil),
+                                    navigateToChat: shouldNavigate,
+                                    presavedImageName: presavedName)
+            }
+            return
+        }
+        // <<< 分享扩展来源结束
 
         // 付费墙拦截分支：后台识别被免费版权益拦截（无云端视觉 + 本地覆盖不到），
         // 不当作普通识别结果处理，而是回插「升级 Pro」引导气泡——与对话页付费墙做法一致。
@@ -971,7 +990,7 @@ struct ContentView: View {
         let hasPending = !forceSave && known.contains { ImageAutoRecogSettings.mode(for: $0, source: "image") == .pending }
 
         if hasPending {
-            pendingNavigate = navigateToChat
+            pendingNavigate = shouldNavigate
             pendingPresent = .pending(p.result, rawText: p.rawText,
                                       image: img, source: p.source ?? .cloud,
                                       presavedImageName: presavedName,
@@ -997,7 +1016,7 @@ struct ContentView: View {
                     context.insert(ChatMessage(role: .ai, text: "这张图我没识别到可记录的内容～可以在「设置 → 识别结果保存方式设置」里调整保存策略。"))
                 }
             }
-            if navigateToChat {
+            if shouldNavigate {
                 DispatchQueue.main.async {
                     NavigationRouter.shared.navigate(.chat)
                 }
