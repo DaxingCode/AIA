@@ -595,13 +595,18 @@ struct MiniBar: View {
 }
 
 // MARK: - 统计卡（体重/身高/心率/BMI）
+// >>> CHANGE-[2026-08-20 12:00:00]-[健康页深色模式StatCard可读性] 开始
+// 原因: 深色模式下 StatCard 数字用 AIATheme.ink(dark 0x2c2c2e) 与背景 surfaceSecondary(dark 0x2a2a2c) 几乎同色看不见,
+//       caption 标签用 muted(dark 0x8e8e93) 对比度仅~3:1 也模糊。改用 AIATheme.reading(dark 0xd1d1d6,~15:1) 恢复清晰。
+//       浅色模式 reading=0x3c3c43 与 ink 同为深灰, 观感不变。
+// 回退: valueColor 默认值恢复 AIATheme.ink + caption 恢复 AIATheme.muted 即可还原
 struct StatCard: View {
     let value: String
     let caption: String
     // >>> CHANGE-[2026-08-19 12:36:16]-[健康目标页净热量方块] 开始
     // 原因: 净热量需按正/负染不同色(正红负绿),StatCard 原写死 AIATheme.ink;加可选 valueColor 默认保持原观感
     // 回退: 删除本参数 + 调用处 valueColor 传参即可还原
-    var valueColor: Color = AIATheme.ink
+    var valueColor: Color = AIATheme.reading
     // <<< CHANGE-[2026-08-19 12:36:16]-[健康目标页净热量方块] 结束
     var body: some View {
         VStack(spacing: 2) {
@@ -613,7 +618,7 @@ struct StatCard: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
                 .frame(maxWidth: .infinity)
-            Text(caption).font(AIATheme.Font.micro).foregroundStyle(AIATheme.muted)
+            Text(caption).font(AIATheme.Font.micro).foregroundStyle(AIATheme.reading)
         }
         .frame(maxWidth: .infinity)
         .padding(10)
@@ -621,6 +626,7 @@ struct StatCard: View {
         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
     }
 }
+// <<< CHANGE-[2026-08-20 12:00:00]-[健康页深色模式StatCard可读性] 结束
 
 // MARK: - 卡片行（睡眠分期等）
 struct CardRow: View {

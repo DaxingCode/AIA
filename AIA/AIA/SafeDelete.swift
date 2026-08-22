@@ -227,11 +227,19 @@ enum SafeDelete {
     static func chatMessageByID(_ id: PersistentIdentifier, in context: ModelContext) {
         notifyWidgetReload()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
-        DispatchQueue.main.async {
-            guard let m = context.model(for: id) as? ChatMessage else { return }
-            m.syncDeleted = true
-            m.syncUpdatedAt = Date()
-        }
+        // >>> CHANGE-[2026-08-22 08:33:31]-[删除消息立即生效] 开始
+        // 原因：原 DispatchQueue.main.async 把标记软删延后，与 @Query 响应式刷新竞态，
+        //       点一次删除时 @Query 尚未刷新、消息仍显示，表现为"点了没反应、要点第二次"。
+        //       改为同步标记，@Query 同一轮 diff 即过滤该消息，一次点击立即消失。
+        // 注：旧防崩补丁（fetchMessages 重拉释放引用）的前提已不存在——当前列表全走 @Query，
+        //       context.model(for:) 取的是活对象，标记 syncDeleted 仅隐藏、不释放。
+        // 回退：改回 DispatchQueue.main.async { guard let m = context.model(for: id)... }
+        guard let m = context.model(for: id) as? ChatMessage else { return }
+        m.syncDeleted = true
+        m.syncUpdatedAt = Date()
+        // save 让 SwiftData 落库并触发 @Query 结果集刷新（关键；不 save 则当前页缓存不更新，消息要退出重进才消失）
+        try? context.save()
+        // <<< CHANGE-[2026-08-22 08:33:31]-[删除消息立即生效] 结束
     }
 
     static func merchantMetaByID(_ id: PersistentIdentifier, in context: ModelContext) {

@@ -15,7 +15,7 @@ import UniformTypeIdentifiers
 
 /// 首页可跳转的目的地。统一枚举 → 单个 navigationDestination，规避多 destination 冲突。
 enum HomeRoute: Hashable {
-    case diet, health, bill, billTools, todo, todoTools, chat, chatVoice, settings, autoSetup, myAccount
+    case diet, health, bill, billTools, todo, todoTools, chat, chatVoice, settings, autoSetup, myAccount, proBenefits
     // 详情/编辑页：用 associated value 携带记录引用，让 .navigationDestination(for: HomeRoute.self) 统一处理
     // 所有 push 目标。**严禁**用 SelectableCard 的闭包式 destination 嵌入本路径——会触发
     // SwiftUI.AnyNavigationPath.Error.comparisonTypeMismatch try! 强解崩溃（2026-07-24 踩坑）。
@@ -126,6 +126,8 @@ struct ContentView: View {
     @State private var showPaywall = false
     /// 免费试用期结束后弹出的引导弹窗（带「订阅 Pro 版」按钮，点击跳转到订阅页）。
     @State private var showTrialExpiredPrompt = false
+    /// 顶部 Pro 胶囊的订阅剩余天文字符串（由 onReceive(SubscriptionManager.shared.$expiresAt) 写入）。
+    @State private var subscriptionExpiryText: String? = nil
     /// 进入首页布局编辑态瞬间拍下的布局快照；非 Pro 用户退出编辑时回滚到此，
     /// 因为 setHidden/relocate 在编辑操作瞬间就已写入 UserDefaults，必须用进入前的快照才能还原。
     @State private var preEditLayout: HomeLayoutStore.Snapshot? = nil
@@ -374,6 +376,7 @@ struct ContentView: View {
         case .settings:     SettingsView()
         case .autoSetup:    AutoRecognitionSetupView()
         case .myAccount:    MyAccountView()
+        case .proBenefits:  ProBenefitsView()
         case .healthDetail(let m):
             HealthDetailView(metric: m)
         case .billDetail(let b):
@@ -644,6 +647,13 @@ struct ContentView: View {
                     showTrialExpiredPrompt = true
                     ent.presentTrialExpiredPrompt = false
                 }
+            }
+            // 订阅到期时间变化时（购买/降级/退款），重算顶部 Pro 胶囊天数字符串，
+            // 避免单例用 let 不订阅导致返回首页后文案不刷新。
+            .onReceive(SubscriptionManager.shared.$expiresAt) { exp in
+                guard let exp, exp > Date() else { subscriptionExpiryText = nil; return }
+                let days = max(0, Int(ceil(exp.timeIntervalSinceNow / 86400)))
+                subscriptionExpiryText = "剩余 \(days) 天"
             }
             // 去除 NavigationBar 底部分隔线（iOS 系统默认 shadow line）
             .toolbarBackground(.hidden, for: .navigationBar)
@@ -1043,16 +1053,41 @@ struct ContentView: View {
             Text("\(greeting)，\(userNickname) \(Self.greetingEmoji)")
                 .font(AIATheme.Font.title2.weight(.semibold))
             Spacer()
-            if pendingCount > 0 {
-                Text("\(pendingCount) 项待处理")
-                    .font(AIATheme.Font.micro.weight(.medium))
-                    .foregroundStyle(AIATheme.warn)
-                    .padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(AIATheme.warn.opacity(0.12))
-                    .clipShape(Capsule())
+            Button {
+                router.navigate(.proBenefits)
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "crown.fill")
+                        .font(AIATheme.Font.micro.weight(.semibold))
+                    Text(proCapsuleText)
+                }
+                .font(AIATheme.Font.micro.weight(.medium))
+                .foregroundStyle(AIATheme.amber)
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background(AIATheme.amber.opacity(0.12))
+                .clipShape(Capsule())
             }
+            .buttonStyle(.plain)
         }
         .padding(.leading, 2)
+    }
+
+    /// 右上角 Pro 胶囊文案（三态，Pro 仅首字母大写）：
+    /// 已订阅/7天试用 → "Pro 剩余 X 天"；10分钟体验 → "Pro 体验中"；非 Pro → "立即升级Pro"。
+    private var proCapsuleText: String {
+        if ent.isFullAccess {
+            if SubscriptionManager.shared.expiresAt != nil, subscriptionExpiryText != nil {
+                return "Pro \(subscriptionExpiryText!)"
+            }
+            if ent.trialActive {
+                return "Pro 剩余 \(ent.trialRemainingDays) 天"
+            }
+            return "Pro 已订阅"
+        }
+        if ent.isTempPro {
+            return "Pro 体验中"
+        }
+        return "立即升级Pro"
     }
 
     /// 问候语随机 emoji（每次启动从池中随机选一个，不随界面刷新变化）
@@ -2858,8 +2893,6 @@ struct ContentView: View {
         }
         return " · \(datePrefix) \(time)"
     }
-    // MARK: - 顶部待处理总数（今日待办）
-    private var pendingCount: Int { todayTodos.count }
 }
 
 // MARK: - 首同步指示器子视图（局部订阅 CloudSyncManager，避免根视图订阅）
