@@ -666,10 +666,18 @@ struct ChatView: View {
                         }
                         messageRow(m)
                     }
+                    // >>> CHANGE-[2026-08-22 14:57:57]-[底部占位锚点防末条被输入栏吞] 开始
+                    // 原因：XS Max 老机型一进对话页，招呼/最新消息被底部输入栏(safeAreaInset)盖住。
+                    //       根因：scrollToLatest/scrollToBottom 用 anchor:.bottom 锚定「末条气泡 item 底」，
+                    //       吞掉底部 padding，老芯片首帧 safeAreaInset 让位与滚动落位不同步 → 末条被输入栏盖。
+                    // 修复：追加透明占位锚点作为「真·内容底」，滚动一律锚定它，保证底部 padding 一并滚入可视区。
+                    // 回退：删除本段占位锚点 + padding(.bottom,24) 恢复 12。
+                    // <<< CHANGE-[2026-08-22 14:57:57]-[底部占位锚点防末条被输入栏吞] 结束
+                    Color.clear.frame(height: 0).id("chat-bottom-anchor")
                 }
                 .padding(.horizontal)
                 .padding(.top, 4)
-                .padding(.bottom, 12)
+                .padding(.bottom, 24)
                 .contentShape(Rectangle())
                 .animation(didInitialScroll ? scrollAnimation : nil, value: list.count)
                 .onTapGesture {
@@ -761,6 +769,16 @@ struct ChatView: View {
                 // 回退：恢复 scrollToBottom(proxy: proxy, delay: 0.4, animated: false)。
                 // <<< CHANGE-[2026-08-17 22:36:13]-[首帧钉底改到列表首次非空] 结束
                 // <<< CHANGE-[2026-08-17 15:05:00]-[对话页首屏干净落位] 结束
+                // >>> CHANGE-[2026-08-22 14:57:57]-[首帧延迟确定性落位防被输入栏吞] 开始
+                // 原因：XS Max 老芯片首帧 @Query/招呼/safeAreaInset 让位不同步，defaultScrollAnchor 落位不可靠，
+                //       末条气泡被输入栏盖。延迟到首帧重算风暴后（0.6s），用确定性 scrollTo 占位锚点再钉底一次。
+                // 回退：删除本段。
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    var tx = Transaction()
+                    tx.disablesAnimations = true
+                    withTransaction(tx) { proxy.scrollTo("chat-bottom-anchor", anchor: .bottom) }
+                }
+                // <<< CHANGE-[2026-08-22 14:57:57]-[首帧延迟确定性落位防被输入栏吞] 结束
             }
             // >>> CHANGE-[2026-08-17 21:36:03]-[去掉全局存库监听治发烫] 开始
             // 原因：原 .onReceive(NSManagedObjectContextDidSaveNotification) 监听【全局每一次 modelContext 保存】
@@ -3877,28 +3895,37 @@ struct ChatView: View {
     // proxy 由调用方从 ScrollViewReader 闭包内传入（当前有效值，不依赖跨闭包失效的 @State 副本）。
     // 不声明式跟随（声明式在键盘安全区过渡态/气泡注入时重算 → 「跳一下」「被挡」）。
     private func scrollToLatest(proxy: ScrollViewProxy, immediate: Bool = true) {
-        guard let last = cachedDisplayed.last ?? displayedMessages.last else { return }
-        let pid = last.persistentModelID
+        // >>> CHANGE-[2026-08-22 14:57:57]-[scrollToLatest 锚定底部占位锚点] 开始
+        // 原因：原锚定末条气泡 item 底(anchor:.bottom)，吞掉底部 padding，末条被输入栏盖。
+        // 修复：锚定「chat-bottom-anchor」占位锚点 = 真·内容底，padding 一并滚入可视区。
+        // 回退：恢复 anchor 末条 pid 写法。
+        guard !cachedDisplayed.isEmpty || !displayedMessages.isEmpty else { return }
         if immediate {
             var tx = Transaction()
             tx.disablesAnimations = true
-            withTransaction(tx) { proxy.scrollTo(pid, anchor: .bottom) }
+            withTransaction(tx) { proxy.scrollTo("chat-bottom-anchor", anchor: .bottom) }
         } else {
-            proxy.scrollTo(pid, anchor: .bottom)
+            proxy.scrollTo("chat-bottom-anchor", anchor: .bottom)
         }
+        // <<< CHANGE-[2026-08-22 14:57:57]-[scrollToLatest 锚定底部占位锚点] 结束
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy, delay: TimeInterval = 0, anchor: UnitPoint = .bottom, animated: Bool = true) {
+        // >>> CHANGE-[2026-08-22 14:57:57]-[scrollToBottom 锚定底部占位锚点] 开始
+        // 原因：与 scrollToLatest 同因，原锚定末条 item 底吞底部 padding。
+        // 修复：统一锚定「chat-bottom-anchor」真·内容底。
+        // 回退：恢复 last.id 写法。
         let work = {
-            guard let last = cachedDisplayed.last else { return }
+            guard !cachedDisplayed.isEmpty else { return }
             if animated {
-                withAnimation(scrollAnimation) { proxy.scrollTo(last.id, anchor: anchor) }
+                withAnimation(scrollAnimation) { proxy.scrollTo("chat-bottom-anchor", anchor: anchor) }
             } else {
                 var tx = Transaction()
                 tx.disablesAnimations = true
-                withTransaction(tx) { proxy.scrollTo(last.id, anchor: anchor) }
+                withTransaction(tx) { proxy.scrollTo("chat-bottom-anchor", anchor: anchor) }
             }
         }
+        // <<< CHANGE-[2026-08-22 14:57:57]-[scrollToBottom 锚定底部占位锚点] 结束
         if delay <= 0 {
             DispatchQueue.main.async(execute: work)
         } else {
