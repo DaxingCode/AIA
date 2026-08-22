@@ -1145,17 +1145,53 @@ struct ChatView: View {
     }
 
     /// 顶部小记招呼气泡（带小头像，区别于普通聊天记录）
+    @ViewBuilder
     private func greetingBubble(_ text: String) -> some View {
-        HStack(spacing: 8) {
-            Image("AIAvatar")
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 32, height: 32)
-                .clipShape(Circle())
-                .overlay(Circle().stroke(AIATheme.hairline, lineWidth: 0.5))
-            messageBubble(message: nil, text: text, isUser: false)
-            Spacer(minLength: 28)
+        VStack(alignment: .leading, spacing: 6) {
+            // >>> CHANGE-[2026-08-22 00:00:00]-[招呼头像贴气泡左侧中间] 开始
+            // 原因：原 HStack 把头像和「气泡+按钮」整列居中，气泡多行+按钮拉高后头像被顶到总高中点，相对气泡显得偏下。
+            // 修复：头像只与气泡同处一个 HStack(alignment:.center)，头像垂直中心恒等于气泡垂直中心（多行也稳），不再受下方按钮影响；
+            //       头像 .padding(.top,2) 略上提补偿气泡 10pt 内边距带来的文字中心偏低观感。按钮拆到外层 VStack 第二行并左缩进对齐气泡。
+            // 回退：删掉本 HStack + 外层 VStack，恢复原「头像 + (气泡+按钮)VStack」平铺结构即可。
+            HStack(alignment: .center, spacing: 8) {
+                Image("AIAvatar")
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 32, height: 32)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(AIATheme.hairline, lineWidth: 0.5))
+                    .padding(.top, 2)
+                messageBubble(message: nil, text: text, isUser: false)
+            }
+            // >>> CHANGE-[2026-08-22 00:00:00]-[招呼下加使用攻略按钮] 开始
+            // 原因：用户要求在招呼气泡下方加「好记AI使用攻略」小按钮（带 > 箭头），点开 App 内网页 http://a.u9c.cn/640Aia。
+            // 按钮与气泡平级（外层 VStack 兄弟层），遵守"禁止嵌套 Button"铁律；用 UIKit present 版 SFSafariViewController 绕开首页 body 重算吞 sheet。
+            // 回退：删掉 Button 块或整体回退到上一 CHANGE 前的结构。
+            Button {
+                if let url = URL(string: "http://a.u9c.cn/640Aia") {
+                    presentInAppBrowser(url)
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "book.fill")
+                        .font(.system(size: 12))
+                    Text("好记AI使用攻略")
+                        .font(AIATheme.Font.micro)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .foregroundStyle(AIATheme.blue)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(AIATheme.blue.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .buttonStyle(PlainButtonStyle())
+            .padding(.leading, 40)   // 头像 32 + spacing 8，与气泡左边缘对齐
+            // <<< CHANGE-[2026-08-22 00:00:00]-[招呼下加使用攻略按钮] 结束
+            // <<< CHANGE-[2026-08-22 00:00:00]-[招呼头像贴气泡左侧中间] 结束
         }
+        Spacer(minLength: 28)
         // >>> CHANGE-[2026-08-17 23:09:26]-[招呼从下往上顶出] 开始
         // 原因：用户要求招呼气泡"从下往上顶出来、把历史往上顶、吸引眼球"。
         // 原 CHANGE-[2026-08-17 20:58:00]-[招呼浮出] 用 offset(y:8) 8pt 轻浮出，太"温柔"。
