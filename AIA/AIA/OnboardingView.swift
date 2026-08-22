@@ -356,7 +356,9 @@ struct OnboardingView: View {
                 .foregroundStyle(AIATheme.sub)
                 .lineSpacing(3)
 
+            // >>> CHANGE-[2026-08-22 08:09:11]-[引导页/设置页主次按钮对调] 开始
             VStack(spacing: 12) {
+                // 次按钮：去添加
                 Button {
                     openShortcutImport { _, msg in
                         if let msg { showToast(msg) }
@@ -366,16 +368,16 @@ struct OnboardingView: View {
                         Image(systemName: "plus.circle.fill")
                         Text("去添加")
                     }
-                    .font(AIATheme.Font.callout.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .font(AIATheme.Font.subhead.weight(.medium))
+                    .foregroundStyle(AIATheme.blue)
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity)
-                    .background(LinearGradient.techAccent)
+                    .background(AIATheme.blue.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
                 }
                 .buttonStyle(.plain)
 
-                // 次按钮：查看视频教程
+                // 主按钮：查看视频教程
                 Button {
                     if let url = URL(string: "https://mp.weixin.qq.com/s/l0Gw35TCMUGgkYf18F73XA") {
                         presentInAppBrowser(url)
@@ -385,11 +387,11 @@ struct OnboardingView: View {
                         Image(systemName: "play.circle.fill")
                         Text("查看视频教程")
                     }
-                    .font(AIATheme.Font.subhead.weight(.medium))
-                    .foregroundStyle(AIATheme.blue)
+                    .font(AIATheme.Font.callout.weight(.semibold))
+                    .foregroundStyle(.white)
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity)
-                    .background(AIATheme.blue.opacity(0.08))
+                    .background(LinearGradient.techAccent)
                     .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
                 }
                 .buttonStyle(.plain)
@@ -478,11 +480,12 @@ struct OnboardingView: View {
                             Image(systemName: "gearshape.fill")
                             Text("打开系统设置")
                         }
-                        .font(AIATheme.Font.subhead.weight(.semibold))
-                        .foregroundStyle(.white)
+                        // <<< CHANGE-[2026-08-22 08:09:11]-[引导页/设置页主次按钮对调] 结束
+                        .font(AIATheme.Font.subhead.weight(.medium))
+                        .foregroundStyle(AIATheme.blue)
                         .padding(.vertical, 12)
                         .frame(maxWidth: .infinity)
-                        .background(LinearGradient.techAccent)
+                        .background(AIATheme.blue.opacity(0.08))
                         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
                     }
                     .buttonStyle(.plain)
@@ -498,11 +501,11 @@ struct OnboardingView: View {
                                 Image(systemName: "play.circle.fill")
                                 Text("查看视频教程")
                             }
-                            .font(AIATheme.Font.subhead.weight(.medium))
-                            .foregroundStyle(AIATheme.blue)
-                            .padding(.vertical, 10)
+                            .font(AIATheme.Font.callout.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.vertical, 12)
                             .frame(maxWidth: .infinity)
-                            .background(AIATheme.blue.opacity(0.08))
+                            .background(LinearGradient.techAccent)
                             .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
                         }
                         .buttonStyle(.plain)
