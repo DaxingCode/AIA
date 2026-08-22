@@ -111,10 +111,10 @@ struct MembershipCompareView: View {
             header
             compareTable
             pricingTagline
+            ctaButton
             proTrialCard
             summary
             accountDisclosure
-            ctaButton
         }
         .padding(14)
         .card()
@@ -317,7 +317,7 @@ struct MembershipCompareView: View {
         }
     }
 
-    // MARK: - 价格一句话总结（放在 Pro 体验卡上方）
+    // MARK: - 价格一句话总结（放在订阅按钮上方、Pro 体验卡上方）
     private var pricingTagline: some View {
         Text("本地功能永久免费，订阅 Pro 解锁云端识别、对话与多端同步。")
             .font(AIATheme.Font.micro)
