@@ -838,20 +838,11 @@ struct ChatView: View {
                 guard !isLoadingEarlier else { return }
                 scrollToLatest(proxy: proxy)
             }
-            // 键盘升降：defaultScrollAnchor(.bottom) 负责常规贴底，但「收起后再弹起」时声明式可能残留偏移
-            // → 第二次弹键盘气泡被挡。这里在键盘动画【真正结束后】做一次精确钉底兜底：
-            // 用键盘通知的 animationDuration 拿到真实动画时长，动画结束后 disablesAnimations scrollTo，
-            // 此时声明式已稳定，不会打架；且确保每次弹/收都回到最终视口底（输入栏上方）。
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
-                guard let last = cachedDisplayed.last ?? displayedMessages.last else { return }
-                let pid = last.persistentModelID
-                let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
-                DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.05) {
-                    var tx = Transaction()
-                    tx.disablesAnimations = true
-                    withTransaction(tx) { proxy.scrollTo(pid, anchor: .bottom) }
-                }
-            }
+            // 键盘升降：完全交给 defaultScrollAnchor(.bottom)——ScrollView 内容保持贴底，
+            // 键盘升起时 safeAreaInset(edge:.bottom) 把输入栏顶到键盘上方、视口底自动压缩到输入栏顶，
+            // 气泡随之贴顶，无需滚动。
+            // 不再手动 scrollTo：scrollTo(末条,.bottom) 锚定的是「末条 item 底」而非「内容底」，
+            // 会吞掉底部 padding，在键盘 safeArea 过渡态与 defaultScrollAnchor 竞争 →「气泡上升又回落被挡」。
         }
     }
 
