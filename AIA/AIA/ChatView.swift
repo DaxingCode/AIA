@@ -89,6 +89,8 @@ struct ChatView: View {
     @Environment(\.modelContext) private var context
 
     @State private var input = ""
+    /// 语音录音中、识别到说话前的输入框占位文案；识别到说话后由 transcript 覆盖。
+    private let voicePlaceholder = "请开口说话，我帮你记～"
     /// 首屏示例气泡随机轮播：用户点过任意一条后暂停，避免文案在用户阅读时跳走。
     @State private var examplePaused = false
 
@@ -399,9 +401,23 @@ struct ChatView: View {
                 }
             }
         }
+        // 语音输入：录音态切换时控制占位文案（transcript 在录音初期不变化，不能只靠它）
+        // 开始录音且尚无转写 → 显示占位；停止录音 → 清掉占位（避免残留）。
+        .onReceive(recognizer.$isRecording) { recording in
+            if recording {
+                if input.isEmpty || input == voicePlaceholder {
+                    input = voicePlaceholder
+                }
+            } else {
+                if input == voicePlaceholder { input = "" }
+            }
+        }
         // 语音输入：录音中实时把转写文字写入输入框（内联，不跳页面）
+        // 识别到说话前（transcript 为空）显示占位文案；一旦有转写即覆盖占位。
         .onReceive(recognizer.$transcript) { text in
-            if recognizer.isRecording { input = text }
+            if recognizer.isRecording {
+                input = text.isEmpty ? voicePlaceholder : text
+            }
         }
         // 兜底：当用户已经在对话页（任何 ChatView 实例）时，从快捷操作再次进入不会触发 onAppear，
         // 但会收到 .quickActionColdLaunch 通知。这里只要通知里的 action 是语音，就直接启动语音，
@@ -570,6 +586,7 @@ struct ChatView: View {
                     if recognizer.isRecording {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         recognizer.stop()
+                        if input == voicePlaceholder { input = "" } // 仅清占位，保留已识别的转写文字
                     } else {
                         isInputFocused = false
                         // 先立即同步触发触觉（与关麦同款时机），再把录音会话激活推迟 100ms，
@@ -3486,12 +3503,18 @@ struct ChatView: View {
     }
 
     private func send() {
-        // 若正在录音，先停止：避免 transcript 后续更新把刚清空的 input 重新填回来。
+        // 录音态：先停录。没说话(仍是占位文案)则不发；说了话则用当前转写直接发送。
         if recognizer.isRecording {
             #if DEBUG
             print("[ChatView] send while recording, stopping recognizer first")
             #endif
+            let snapshot = input
             recognizer.stop()
+            if snapshot == voicePlaceholder {
+                input = "" // 没开口，仅清占位，不发送
+                return
+            }
+            input = snapshot // 用已转写文案继续发送
         }
         let t = input.trimmingCharacters(in: .whitespaces)
         guard !t.isEmpty else { return }
