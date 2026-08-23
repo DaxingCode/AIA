@@ -732,14 +732,6 @@ struct ChatView: View {
                 .onTapGesture {
                     isInputFocused = false
                 }
-                // >>> CHANGE-[2026-08-23 20:00:00]-[对话页顶部自动加载更早消息] 开始
-                // 原因：上一轮用 .refreshable 做下拉刷新，但本页 ScrollView 挂了 .defaultScrollAnchor(.bottom)
-                // （微信式强制贴底 + 防白屏），二者冲突——系统刷新临界区永远露不出，下拉无转圈、无反应。
-                // 修复：去掉 .refreshable，改回「earlierLoader 滚入视口自动加载」(onAppear) + 点击兜底：
-                // 长列表往上滚到顶 → 提示条进入视口 → 自动加载；短列表提示条常驻屏幕内 → 点一下加载。
-                // 两种方式均靠 isLoadingEarlier 锁防重复，hasMoreMessages 仍 true 即可连续加载。
-                // 回退：恢复 .refreshable { await loadEarlierAsync }。
-                // <<< CHANGE-[2026-08-23 20:00:00]-[对话页顶部自动加载更早消息] 结束
             }
             .scrollDismissesKeyboard(.interactively)
             // 微信式自动贴底：ScrollView 内容布局后默认保持底部对齐（进页直接显示最新历史），
@@ -939,7 +931,7 @@ struct ChatView: View {
                         .font(AIATheme.Font.subhead)
                 } else if hasMoreMessages {
                     Image(systemName: "arrow.up.circle.dotted")
-                    Text("下拉或点此加载更早的消息")
+                    Text("点此加载更早的消息")
                         .font(AIATheme.Font.subhead)
                 } else {
                     Image(systemName: "checkmark.circle.fill")
