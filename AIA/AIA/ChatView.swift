@@ -93,6 +93,9 @@ struct ChatView: View {
     private let voicePlaceholder = "请开口说话，我帮你记～"
     /// 首屏示例气泡随机轮播：用户点过任意一条后暂停，避免文案在用户阅读时跳走。
     @State private var examplePaused = false
+    /// 保存成功微反馈：轻量浮标「✓ 已保存」，自动消失；配合轻触反馈。
+    @State private var showSaveToast = false
+    @State private var saveToastText = "✓ 已保存"
 
     // 智能问答 Agent 总开关：云端全局配置（开发者中心切换，所有用户自动跟随）。
     // 用 @ObservedObject 观察 GlobalConfigStore，开发者改完云端后正在看对话页的用户也会即时响应。
@@ -329,8 +332,16 @@ struct ChatView: View {
         // 修复：bottomBar 回到 messageList.safeAreaInset(edge:.bottom)，由系统确定性把 ScrollView 视口底压到输入栏顶，
         //       配合删除 .frame(maxHeight:.infinity)，白屏与遮挡一并解决。
         // <<< CHANGE-[2026-08-22 11:51:07]-[键盘修复：bottomBar 改回 safeAreaInset 让位] 结束
-        messageList
-            .safeAreaInset(edge: .bottom) { bottomBar }
+        ZStack(alignment: .bottom) {
+            messageList
+            if showSaveToast {
+                saveToastView
+                    .padding(.bottom, 96) // 避开底部输入栏
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .animation(.easeInOut(duration: 0.25), value: showSaveToast)
+            }
+        }
+        .safeAreaInset(edge: .bottom) { bottomBar }
         .navigationTitle("小记")
         .task { UsageAnalytics.logOpen("chat") }
         .navigationBarTitleDisplayMode(.inline)
@@ -970,7 +981,7 @@ struct ChatView: View {
         } else if m.text.hasPrefix(RECOGNITION_RESULT_PREFIX) {
             // 识别结果卡片宽度由内部气泡钉死到（屏宽 − 60），与文字气泡同宽；
             // 外层不再加 Spacer，避免二次扣减导致比文字气泡窄。
-            ChatRecognitionBubble(message: m)
+            ChatRecognitionBubble(message: m, onSaved: { markSaved() })
         } else if m.text.hasPrefix(UPGRADE_PRO_PREFIX) {
             // 付费墙拦截（免费版无云端视觉）时给的升级 Pro 引导气泡。
             upgradeProBubble(message: m)
@@ -1820,6 +1831,40 @@ struct ChatView: View {
     ]
     // <<< CHANGE-[2026-08-23 11:03:38]-[示例文案池扩充+health复用home+识别核对修正] 结束
 
+    // >>> CHANGE-[2026-08-23 15:10:00]-[保存成功微反馈 toast+触觉] 开始
+    // 原因：记录保存成功后仅插入「已保存态卡片」+AI 文字气泡，缺少即时轻量确认，用户不确定「发出去没」。
+    // 修复：保存成功统一弹底部黑胶囊浮标「✓ 已保存」+轻触反馈，1.6s 自动消失，不打断阅读。
+    // 回退：删除 body 内 ZStack toast + 本段方法 + markSaved() 调用即可恢复原状。
+    /// 保存成功浮标视图（底部居中黑胶囊，复用项目 BackgroundSettingsView 同款样式）。
+    private var saveToastView: some View {
+        Text(saveToastText)
+            .font(AIATheme.Font.footnote.weight(.medium))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16).padding(.vertical, 9)
+            .background(Capsule().fill(Color.black.opacity(0.82)))
+            .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+    }
+
+    /// 触发保存成功微反馈：轻触 + 浮标，1.6s 后自动隐藏。
+    private func showSaveToast(_ text: String) {
+        saveToastText = text
+        showSaveToast = true
+        let current = text
+        // ChatView 是 struct，@State 底层盒子按引用共享，逃逸闭包直接改属性即可（无需 [weak self]，struct 不支持）。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            if saveToastText == current { showSaveToast = false }
+        }
+    }
+
+    /// 记录保存成功：轻触反馈 + 弹「✓ 已保存」浮标（统一文案）。供各保存成功钩子调用。
+    private func markSaved() {
+        let impact = UIImpactFeedbackGenerator(style: .light)
+        impact.impactOccurred()
+        showSaveToast("✓ 已保存")
+    }
+    // <<< CHANGE-[2026-08-23 15:10:00]-[保存成功微反馈 toast+触觉] 结束
+
+
     /// 按入口来源选池 + 池内随机抽一组（A+B 组合）。兜底回 home 池。
     private static func examplePrompts(for source: String) -> [String] {
         let pool = examplePools[source] ?? examplePools["home"]!
@@ -2606,6 +2651,7 @@ struct ChatView: View {
         }
         try? context.save()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        markSaved()
         let joined = names.joined(separator: "、")
         return "🍽 已记下 \(joined)，但暂时没查到热量，点开记录可以补全哦～"
     }
@@ -3602,6 +3648,7 @@ struct ChatView: View {
                                     case .inserted:
                                         chatBubbleInserted = true
                                         responseText = ""
+                                        markSaved()
                                     case .nothing:
                                         responseText = await localReply(for: t)
                                     }
@@ -3647,6 +3694,7 @@ struct ChatView: View {
         case .inserted:
             chatBubbleInserted = true
             try? context.save()
+            markSaved()
             return true
         }
     }
