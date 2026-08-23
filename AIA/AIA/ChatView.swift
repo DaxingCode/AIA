@@ -780,12 +780,15 @@ struct ChatView: View {
                 // 首帧直接是最新屏，消除顶部闪历史；异步校正仅补高度、不再反向跳。
                 // 回退：恢复 defaultScrollAnchor 依赖 + 原 for 循环首拍延迟写法。
                 // 招呼气泡锚点：用户要求招呼时间 = 当前进入时刻（今天），且气泡位置与文案一致地落在最底部。
-                // 因此 greetingDate 直接取 Date.now，不再钉在历史末条之后 —— 有/无历史场景统一为“进页此刻”。
-                // （旧实现：有历史钉在最新历史之后 0.5s，无历史钉在本次会话起点之前 0.5s；现弃用以符合“显示当前进入时间”诉求。）
-                // sessionAnchor 仍仅用于下方「消费锚点防陈旧」逻辑，与 greetingDate 不再耦合。
+                // 因此 greetingDate 在无首页发图场景下取 Date.now，不钉在历史末条之后 —— 有/无历史统一为"进页此刻"。
+                // 但当次会话由首页发图发起（chatSessionAnchor 非 nil）时，必须用锚点而非 Date.now：
+                // runRecognize 先 navigateToChat() 再同步 runImageRecognition → appendUserImageMessage 插图，
+                // SwiftUI 导航异步导致 onAppear 晚于插图，若 greetingDate 取 Date.now 会 > 图片 createdAt，
+                // 排序后图片被钉到招呼【上方】（用户实测 bug）。锚点 beginChatSession() 在插图之前打，必早于图片，
+                // 用锚点即可保证「招呼在上、图片在下」。无发图进入时 sessionAnchor 为 nil，回退 Date.now，行为不变。
                 // orderedMessages 是正序（最旧在前、最新在后，见 47 行）。
-                // sessionAnchor 已在上方消费并清零（717-718 行），此处无需再持有。
-                let greetingDate = Date.now
+                // sessionAnchor 已在上方消费并清零（717-718 行），局部变量 sessionAnchor 此处仍可用。
+                let greetingDate = sessionAnchor ?? Date.now
                 // >>> CHANGE-[2026-08-17 22:36:13]-[首帧钉底改到列表首次非空] 开始
                 // 原因：原首帧钉底读 initialList（cachedDisplayed/displayedMessages）仍依赖 @Query 在 onAppear 此刻已就绪，
                 // 但 SwiftData @Query 首帧常晚于 onAppear 异步 materialize → 读到的列表为空 → 钉底被跳过/钉错位置 → 偶发白屏。
@@ -2107,7 +2110,7 @@ struct ChatView: View {
 
         // 待办 / 任务
         if lower.contains("待办") || lower.contains("任务") || lower.contains("提醒") || lower.contains("事情") || lower.contains("todo") || lower.contains("安排") {
-            // 兜底：如果用户明显是在“新建”待办，但云端没识别出来，直接本地创建
+            // 兜底：如果用户明显是在"新建"待办，但云端没识别出来，直接本地创建
             if let reply = await createTodoLocally(from: text) {
                 return reply
             }
