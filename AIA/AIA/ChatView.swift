@@ -89,6 +89,8 @@ struct ChatView: View {
     @Environment(\.modelContext) private var context
 
     @State private var input = ""
+    /// 首屏示例气泡随机轮播：用户点过任意一条后暂停，避免文案在用户阅读时跳走。
+    @State private var examplePaused = false
 
     // 智能问答 Agent 总开关：云端全局配置（开发者中心切换，所有用户自动跟随）。
     // 用 @ObservedObject 观察 GlobalConfigStore，开发者改完云端后正在看对话页的用户也会即时响应。
@@ -580,10 +582,27 @@ struct ChatView: View {
                         }
                     }
                 } label: {
+                    // >>> CHANGE-[2026-08-23 09:59:50]-[语音录音态脉冲可视化] 开始
+                    // 原因：麦克风录音时只有图标变红 + 文字实时进框，没有"正在听"的明确指示，用户不确定录音是否生效。
+                    //       录音态在图标外套一圈脉冲光圈（scale + opacity 循环），给清晰的"正在录音"反馈；非录音态无动画。
+                    // 回退：删除 overlay 脉冲块，恢复原 Image 单标签即可。
                     Image(systemName: recognizer.isRecording ? "stop.circle.fill" : "mic.fill")
                         .font(AIATheme.Font.title2.weight(.medium))
                         .foregroundStyle(recognizer.isRecording ? AIATheme.warn : AIATheme.sub)
                         .frame(width: 34, height: 34)
+                        .overlay(
+                            Circle()
+                                .stroke(AIATheme.warn, lineWidth: 2)
+                                .opacity(recognizer.isRecording ? 0.6 : 0)
+                                .scaleEffect(recognizer.isRecording ? 1.6 : 1.0)
+                                .animation(
+                                    recognizer.isRecording
+                                        ? Animation.easeOut(duration: 1.1).repeatForever(autoreverses: false)
+                                        : .default,
+                                    value: recognizer.isRecording
+                                )
+                        )
+                    // <<< CHANGE-[2026-08-23 09:59:50]-[语音录音态脉冲可视化] 结束
                 }
                 TextField("请输入文字，或点麦克风说话", text: $input, axis: .vertical)
                     .font(.system(size: 15.5))
@@ -1235,6 +1254,38 @@ struct ChatView: View {
             .buttonStyle(PlainButtonStyle())
             .padding(.leading, 40)   // 头像 32 + spacing 8，与气泡左边缘对齐
             // <<< CHANGE-[2026-08-22 00:00:00]-[招呼下加使用攻略按钮] 结束
+
+            // >>> CHANGE-[2026-08-23 09:59:50]-[首屏示例提问降低冷启动门槛] 开始
+            // >>> CHANGE-[2026-08-23 10:30:00]-[示例文案动态化A+B组合] 开始
+            // 原因：新用户首屏只有招呼 + 使用攻略，不知道能发图识别/语音记账。在攻略下方加 3 个可点示例气泡，
+            //       点一下把示例文本填入输入框并聚焦，降低"不知道说啥"的门槛（微信/钉钉同类做法）。
+            //       文案动态化：按 entrySource 选池（B）+ 池内随机抽一组（A），且全部为可直接发送自动记录的指令。
+            // 回退：把下面三行 examplePrompt(prompts[...]) 改回固定三句字符串即可。
+            // >>> CHANGE-[2026-08-23 14:30:00]-[首屏示例随机轮播 5秒] 开始
+            // 原因：原示例气泡只 randomElement 抽一组静态不动，用户停留首页看不到其他示例。
+            //       改为 TimelineView 每 5 秒随机切一组（不重复上一次），淡入淡出；点任意条暂停轮播。
+            // 回退：把本块改回 `let prompts = ChatView.examplePrompts(for: entrySource)` + 静态 HStack 即可。
+            let pool = ChatView.examplePool(for: entrySource)
+            TimelineView(.periodic(from: .now, by: 5)) { ctx in
+                // 用时间 + 池长推导出当前组索引，保证每次刷新换组且不重复上一次
+                let tick = Int(ctx.date.timeIntervalSince1970) / 3
+                let n = pool.count
+                let idx = n > 1 ? ((tick % (n - 1)) + ((tick / (n - 1)) % 2 == 0 ? 1 : 0)) % n : 0
+                let prompts = pool[idx]
+                HStack(spacing: 6) {
+                    examplePrompt(prompts[0])
+                    examplePrompt(prompts[1])
+                }
+                .id(idx) // 触发 transition 动画
+                .opacity(examplePaused ? 1 : 1) // 暂停仅停切换，不隐藏
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                .animation(.easeInOut(duration: 0.4), value: idx)
+            }
+            .padding(.leading, 40)
+            .padding(.top, 4)
+            // <<< CHANGE-[2026-08-23 14:30:00]-[首屏示例随机轮播 5秒] 结束
+            // <<< CHANGE-[2026-08-23 10:30:00]-[示例文案动态化A+B组合] 结束
+            // <<< CHANGE-[2026-08-23 09:59:50]-[首屏示例提问降低冷启动门槛] 结束
             // <<< CHANGE-[2026-08-22 00:00:00]-[招呼头像贴气泡左侧中间] 结束
         }
         Spacer(minLength: 28)
@@ -1267,8 +1318,13 @@ struct ChatView: View {
                     Text(displayText)
                         .font(AIATheme.Font.chatBody)
                         .foregroundStyle(userSide ? .white : .primary)
-                        .textSelection(.enabled)
+                        // >>> CHANGE-[2026-08-23 09:59:50]-[复制菜单统一去掉重复textSelection] 开始
+                        // 原因：气泡已自定义 .contextMenu（含"复制/删除/选择"），再开 .textSelection(.enabled) 会让系统原生
+                        //       选择态与自定义菜单并存，出现"两套复制"且长按易触发系统选择而非菜单，交互不一致。
+                        //       统一关闭 textSelection，复制/选择全部走自定义长按菜单（用户/AI 气泡一致）。
+                        // 回退：恢复 .textSelection(.enabled) 即可。
                         .padding(10)
+                        // <<< CHANGE-[2026-08-23 09:59:50]-[复制菜单统一去掉重复textSelection] 结束
                         .background(userSide ? AIATheme.blue : Color.adaptive(light: 0xffffff, dark: 0x2c2c2e))
                         .clipShape(RoundedRectangle(cornerRadius: 14))
                         .opacity(showSelection && !isSelected ? 0.4 : 1.0)
@@ -1633,6 +1689,10 @@ struct ChatView: View {
         }
     }
 
+    // >>> CHANGE-[2026-08-23 09:59:50]-[对话页chips按压反馈] 开始
+    // 原因：原 chip/feedbackChip 用 .buttonStyle(.plain)，点下去无任何视觉反馈，用户"没反应感"。
+    //       改用项目统一样式 PressableCardStyle()，按下有缩放+阴影反馈，与全 App 卡片交互一致。
+    // 回退：把两处 .buttonStyle(PressableCardStyle()) 改回 .buttonStyle(.plain) 即可。
     private func chip(_ title: String, route: HomeRoute) -> some View {
         Button {
             isInputFocused = false
@@ -1645,7 +1705,7 @@ struct ChatView: View {
                 .background(AIATheme.surfaceSecondary)
                 .clipShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableCardStyle())
     }
 
     private var feedbackChip: some View {
@@ -1660,8 +1720,119 @@ struct ChatView: View {
                 .background(AIATheme.surfaceSecondary)
                 .clipShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableCardStyle())
     }
+    // <<< CHANGE-[2026-08-23 09:59:50]-[对话页chips按压反馈] 结束
+
+    // >>> CHANGE-[2026-08-23 09:59:50]-[首屏示例提问降低冷启动门槛] 开始
+    // >>> CHANGE-[2026-08-23 10:30:00]-[示例文案动态化A+B组合] 开始
+    // A+B 组合：B=按 entrySource 选不同示例池（贴合入口），A=池内 randomElement 随机抽一组（每次不重样）。
+    // 铁律：所有示例必须是"点了直接发送就能自动记录"的指令（饮食/账单/待办），不含查询/闲聊句——
+    //       本功能是帮用户养成记录习惯，开放式提问（如"今天吃了什么"）不符合场景，已剔除。
+    // 回退：把 greetingBubble 里的 examplePrompts(for:) 调用改回固定三句 examplePrompt(...) 即可。
+    // >>> CHANGE-[2026-08-23 11:03:38]-[示例文案池扩充+health复用home+识别核对修正] 开始
+    // 原因：原每入口仅 3 组，随机抽易重复；扩充到 8 组（home）/ 8 组（其余），全部口语化、带数字、
+    //       每组 [饮食,账单,待办] 三类齐全且均可被 resolveLocally 识别（已逐句核对 createTodoLocally/
+    //       createBillLocally/isFoodLike 规则）。health 入口不再单独成池，复用 home 池（用户要求）。
+    // 修正（核对代码发现）：① home 第8组第3句原"后天中午12点还书"无"提醒"关键词→待办分支 hasObject
+    //       不满足→不会建待办，补"提醒"；② bill 第4组第3句"月底提醒我还房贷"→"28号提醒我还房贷"（更具体）。
+    // 回退：删除本 CHANGE 块，恢复旧 examplePools（5 池）即可。
+    /// 各入口对应的示例组池：每组 [饮食, 账单, 待办] 均为可直接发送自动记录的指令（已核对识别规则）。
+    private static let examplePools: [String: [[String]]] = [
+        // home / 兜底：均衡三类（口语化记录指令）；health 入口也复用本池。
+        // 12 组 × 2 条，D 混合轮替（饮+账 / 饮+待 / 账+待 各 4 组），靠 randomElement 每次随机抽一组。
+        "home": [
+            ["喝了1杯牛奶", "买早餐花了8元"],
+            ["吃了100克牛肉", "打车花了18元"],
+            ["吃了1份沙拉", "外卖花了32元"],
+            ["吃了一个苹果", "买饮料花了6元"],
+            ["吃了一碗米饭", "晚上8点提醒我健身"],
+            ["喝了1碗粥", "明早7点提醒我跑步"],
+            ["喝了1杯酸奶", "后天12点提醒我还书"],
+            ["吃了2个鸡蛋", "15点提醒我取快递"],
+            ["买菜花了12元", "每天10点提醒我服药"],
+            ["午餐花了25元", "下午3点提醒我交报表"],
+            ["便利店花了15元", "每天9点提醒我写日记"],
+            ["买水果花了10元", "周五11点提醒我开会"],
+        ],
+        // food 入口：饮食句更具体，仍配账单/待办凑齐三类；12 组 × 2 条 D 混合轮替
+        "food": [
+            ["吃了150克鸡胸肉", "午餐花了25元"],
+            ["喝了一杯豆浆", "买水果花了12元"],
+            ["吃了半碗面条", "晚饭外卖花了42元"],
+            ["吃了2个鸡蛋", "早餐花了5元"],
+            ["喝了1杯牛奶", "下午3点提醒我加餐"],
+            ["吃了1根香蕉", "每天8点提醒我称体重"],
+            ["吃了1份盖饭", "明晚7点提醒我上瑜伽课"],
+            ["喝了1碗汤", "周日10点提醒我采购"],
+            ["买面包花了9元", "下午5点提醒我喝水"],
+            ["超市买菜花了20元", "明天早上7点提醒我跑步"],
+            ["午饭花了28元", "今晚11点提醒我睡觉"],
+            ["买零食花了14元", "上午10点提醒我吃维生素"],
+        ],
+        // bill 入口：账单句更具体，仍配饮食/待办凑齐三类；12 组 × 2 条 D 混合轮替
+        "bill": [
+            ["午饭吃了30元", "超市购物花了88元"],
+            ["打车花了22元", "早餐吃了8元"],
+            ["买书花了45元", "喝了1杯咖啡花了18元"],
+            ["加油花了200元", "晚饭花了35元"],
+            ["买了1件衣服花了128元", "下周一提醒我交物业费"],
+            ["电影票花了60元", "每月15号提醒我还花呗"],
+            ["理发花了38元", "明天提醒我续话费"],
+            ["网购花了75元", "周六提醒我交水电费"],
+            ["超市购物花了88元", "下周一提醒我交房租"],
+            ["早餐吃了8元", "周五提醒我还信用卡"],
+            ["喝了1杯咖啡花了18元", "明天上午10点提醒我缴费"],
+            ["晚饭花了35元", "28号提醒我还房贷"],
+        ],
+        // todo 入口：待办句更具体，仍配饮食/账单凑齐三类；12 组 × 2 条 D 混合轮替
+        "todo": [
+            ["晚上吃1份沙拉", "花了15元买水"],
+            ["午饭吃了1个鸡腿", "加油花了200元"],
+            ["喝了1杯牛奶", "买菜花了33元"],
+            ["吃了1个三明治", "买咖啡花了18元"],
+            ["吃了1碗馄饨", "明天9点提醒我开会"],
+            ["喝了1杯果汁", "周六下午提醒我看牙医"],
+            ["吃了1份便当", "周日晚上8点提醒我复盘"],
+            ["吃了1个汉堡", "下午2点提醒我打电话给客户"],
+            ["买文具花了25元", "明天提醒我交报告"],
+            ["打车花了16元", "周五提醒我取体检报告"],
+            ["买药花了40元", "每天晚10点提醒我散步"],
+            ["买水花了4元", "后天上午提醒我寄快递"],
+        ],
+    ]
+    // <<< CHANGE-[2026-08-23 11:03:38]-[示例文案池扩充+health复用home+识别核对修正] 结束
+
+    /// 按入口来源选池 + 池内随机抽一组（A+B 组合）。兜底回 home 池。
+    private static func examplePrompts(for source: String) -> [String] {
+        let pool = examplePools[source] ?? examplePools["home"]!
+        return pool.randomElement() ?? pool[0]
+    }
+
+    /// 返回入口对应的整池（12 组），供首屏示例气泡随机轮播使用。兜底回 home 池。
+    private static func examplePool(for source: String) -> [[String]] {
+        return examplePools[source] ?? examplePools["home"]!
+    }
+
+    /// 首屏示例提问气泡：点一下把示例文本填入输入框并聚焦，引导新用户开口（全部为可直接记录的指令）。
+    /// 点击即暂停轮播（examplePaused = true），避免文案在用户阅读/准备点时跳走。
+    private func examplePrompt(_ text: String) -> some View {
+        Button {
+            examplePaused = true
+            input = text
+            isInputFocused = true
+        } label: {
+            Text(text)
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.blue)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(AIATheme.blue.opacity(0.10))
+                .clipShape(Capsule())
+        }
+        .buttonStyle(PressableCardStyle())
+    }
+    // <<< CHANGE-[2026-08-23 10:30:00]-[示例文案动态化A+B组合] 结束
+    // <<< CHANGE-[2026-08-23 09:59:50]-[首屏示例提问降低冷启动门槛] 结束
 
     /// 「联系我们」chip 点击：直接以小记身份发送一条带联系方式的 AI 消息进聊天流。
     private func postContactMessage() {
