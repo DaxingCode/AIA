@@ -1210,11 +1210,11 @@ struct ChatView: View {
                 messageBubble(message: nil, text: m.text, isUser: false)
             }
             // >>> CHANGE-[2026-08-22 00:00:00]-[招呼下加使用攻略按钮] 开始
-            // 原因：用户要求在招呼气泡下方加「好记AI使用攻略」小按钮（带 > 箭头），点开 App 内网页 http://a.u9c.cn/640Aia。
+            // 原因：用户要求在招呼气泡下方加「好记AI使用攻略」小按钮（带 > 箭头），点开 App 内网页 https://mp.weixin.qq.com/s/ekSczrt_yItd6UH4_n1PhA。
             // 按钮与气泡平级（外层 VStack 兄弟层），遵守"禁止嵌套 Button"铁律；用 UIKit present 版 SFSafariViewController 绕开首页 body 重算吞 sheet。
             // 回退：删掉 Button 块或整体回退到上一 CHANGE 前的结构。
             Button {
-                if let url = URL(string: "http://a.u9c.cn/640Aia") {
+                if let url = URL(string: "https://mp.weixin.qq.com/s/ekSczrt_yItd6UH4_n1PhA") {
                     presentInAppBrowser(url)
                 }
             } label: {
