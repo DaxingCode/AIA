@@ -64,6 +64,8 @@ struct ChatView: View {
     }
     /// 是否还有更早的消息未加载（由 fetchCount 决定，驱动「加载更早」入口显隐，避免无限加载）。
     @State private var hasMoreMessages = false
+    /// 是否已经加载到最早一条（hasMoreMessages 变 false 且确实加载过），用于显示「登顶成功」文案。
+    @State private var reachedTop = false
     /// 防止下拉自动加载时因视图反复进入视口而重复触发的锁。
     @State private var isLoadingEarlier = false
     @StateObject private var health = HealthManager.shared
@@ -699,7 +701,7 @@ struct ChatView: View {
             let showDivider = ChatView.dividerFlags(for: list)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    if hasMoreMessages {
+                    if hasMoreMessages || reachedTop {
                         earlierLoader(proxy: proxy)
                     }
                     ForEach(Array(list.enumerated()),
@@ -730,6 +732,14 @@ struct ChatView: View {
                 .onTapGesture {
                     isInputFocused = false
                 }
+                // >>> CHANGE-[2026-08-23 20:00:00]-[对话页顶部自动加载更早消息] 开始
+                // 原因：上一轮用 .refreshable 做下拉刷新，但本页 ScrollView 挂了 .defaultScrollAnchor(.bottom)
+                // （微信式强制贴底 + 防白屏），二者冲突——系统刷新临界区永远露不出，下拉无转圈、无反应。
+                // 修复：去掉 .refreshable，改回「earlierLoader 滚入视口自动加载」(onAppear) + 点击兜底：
+                // 长列表往上滚到顶 → 提示条进入视口 → 自动加载；短列表提示条常驻屏幕内 → 点一下加载。
+                // 两种方式均靠 isLoadingEarlier 锁防重复，hasMoreMessages 仍 true 即可连续加载。
+                // 回退：恢复 .refreshable { await loadEarlierAsync }。
+                // <<< CHANGE-[2026-08-23 20:00:00]-[对话页顶部自动加载更早消息] 结束
             }
             .scrollDismissesKeyboard(.interactively)
             // 微信式自动贴底：ScrollView 内容布局后默认保持底部对齐（进页直接显示最新历史），
@@ -914,29 +924,44 @@ struct ChatView: View {
         }
     }
 
-    /// 顶部「下拉自动加载更早的消息」：指示器滚入视口即自动扩大分页上限并重建查询，
-    /// 加载后锚定此前的首条保持可视位置；加载期间显示 spinner 并用 `isLoadingEarlier` 锁防重复触发。
+    /// 顶部「加载更早的消息」提示条：滚入视口自动加载（微信式，往上滚到顶即触发），
+    /// 同时支持点击兜底加载；加载期间显示 spinner 并用 `isLoadingEarlier` 锁防重复触发。
+    /// 已无更早消息（reachedTop）时显示「登顶成功」文案，不再触发加载。
     private func earlierLoader(proxy: ScrollViewProxy) -> some View {
-        HStack(spacing: 6) {
-            if isLoadingEarlier {
-                ProgressView()
-                    .controlSize(.small)
-                Text("加载中…")
-                    .font(AIATheme.Font.subhead)
-            } else {
-                Image(systemName: "arrow.up.circle.dotted")
-                Text("下拉加载更早的消息")
-                    .font(AIATheme.Font.subhead)
+        Button {
+            Task { await loadEarlierAsync(proxy: proxy) }
+        } label: {
+            HStack(spacing: 6) {
+                if isLoadingEarlier {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("加载中…")
+                        .font(AIATheme.Font.subhead)
+                } else if hasMoreMessages {
+                    Image(systemName: "arrow.up.circle.dotted")
+                    Text("下拉或点此加载更早的消息")
+                        .font(AIATheme.Font.subhead)
+                } else {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text("登顶成功，已没有更早的消息")
+                        .font(AIATheme.Font.subhead)
+                }
             }
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, 6)
         }
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, alignment: .center)
-        .padding(.vertical, 6)
-        .onAppear { loadEarlier(proxy: proxy) }
+        .buttonStyle(.plain)
+        // 滚入视口自动加载：长列表往上滚到顶部、提示条进入视口即触发；
+        // 加载后内容变长把提示条顶出视口，下次滚到顶会再次 onAppear，可连续加载。
+        // 已登顶（!hasMoreMessages）时 loadEarlierAsync 内部 guard 直接 return，不会重复加载。
+        .onAppear { Task { await loadEarlierAsync(proxy: proxy) } }
     }
 
-    /// 自动加载更早的消息：仅在未处于加载态、且仍有更早记录时触发，加载后锚定原首条。
-    private func loadEarlier(proxy: ScrollViewProxy) {
+    /// 加载更早的消息（异步版，供 .refreshable 与点击调用）：
+    /// 仅在未处于加载态、且仍有更早记录时触发，加载后锚定原首条保持可视位置。
+    @MainActor
+    private func loadEarlierAsync(proxy: ScrollViewProxy) async {
         guard !isLoadingEarlier, hasMoreMessages else { return }
         isLoadingEarlier = true
         let firstID = cachedDisplayed.first?.persistentModelID
@@ -945,17 +970,18 @@ struct ChatView: View {
         let oldest = loaded.min(by: { $0.createdAt < $1.createdAt })?.createdAt
         loadEarlierMessages()
         refreshHasMoreMessages(earliest: oldest)
+        // 等数据落位后，滚回加载前的首条顶部，避免加载完跳到底部或位置漂移。
         if let firstID {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                var tx = Transaction()
-                tx.disablesAnimations = true
-                withTransaction(tx) { proxy.scrollTo(firstID, anchor: .top) }
-            }
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            var tx = Transaction()
+            tx.disablesAnimations = true
+            withTransaction(tx) { proxy.scrollTo(firstID, anchor: .top) }
         }
-        // 锁在滚动校正完成后释放，无论滚动是否成功都解锁，避免死锁。
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            isLoadingEarlier = false
+        // 本次加载后已无更早消息（确实加载过才置位），提示条切换为「登顶成功」文案。
+        if !hasMoreMessages {
+            reachedTop = true
         }
+        isLoadingEarlier = false
     }
 
     @ViewBuilder
