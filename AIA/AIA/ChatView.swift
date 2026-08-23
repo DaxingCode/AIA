@@ -64,8 +64,6 @@ struct ChatView: View {
     }
     /// 是否还有更早的消息未加载（由 fetchCount 决定，驱动「加载更早」入口显隐，避免无限加载）。
     @State private var hasMoreMessages = false
-    /// 是否已加载到最老消息（登顶）：用于切换「加载」入口文案为「登顶成功」，且停止再触发加载。
-    @State private var reachedTop = false
     /// 防止下拉自动加载时因视图反复进入视口而重复触发的锁。
     @State private var isLoadingEarlier = false
     @StateObject private var health = HealthManager.shared
@@ -91,6 +89,8 @@ struct ChatView: View {
     @Environment(\.modelContext) private var context
 
     @State private var input = ""
+    /// 首屏示例气泡随机轮播：用户点过任意一条后暂停，避免文案在用户阅读时跳走。
+    @State private var examplePaused = false
 
     // 智能问答 Agent 总开关：云端全局配置（开发者中心切换，所有用户自动跟随）。
     // 用 @ObservedObject 观察 GlobalConfigStore，开发者改完云端后正在看对话页的用户也会即时响应。
@@ -203,6 +203,13 @@ struct ChatView: View {
     /// displayedMessages 计算结果缓存：body 每次重算都读它，避免 O(N²)+JSON 解码被反复放大（进页面 CPU 高主因之一）。
     /// 仅在 orderedMessages / greetingMessage / earlierMessages 变化时才重算。
     @State private var cachedDisplayed: [ChatMessage] = []
+    // >>> CHANGE-[2026-08-22 11:45:00]-[缓存填充标志防删空回退补回] 开始
+    // 原因：删除使 cachedDisplayed 变空时，原回退 `cachedDisplayed.isEmpty ? displayedMessages`
+    //       会暴露尚未被 @Query 刷新过滤的软删消息（displayedMessages 实时算、可能仍含）→ 消息又显示，
+    //       表现为"少部分情况点两次才删掉"。需区分"首帧未填充"与"删除后变空"：仅首帧回退。
+    // 回退：删除 cacheEverFilled 及下方对回退逻辑的改写。
+    @State private var cacheEverFilled = false
+    // <<< CHANGE-[2026-08-22 11:45:00]-[缓存填充标志防删空回退补回] 结束
     // >>> CHANGE-[2026-08-17 21:36:03]-[缓存非空守卫防空白与循环] 开始
     // 原因：原 recomputeDisplayed 无条件 cachedDisplayed = displayedMessages；
     // 当 @Query 异步间隙 displayedMessages 为空时，会把缓存清成 []，
@@ -214,6 +221,9 @@ struct ChatView: View {
         let fresh = displayedMessages
         guard !fresh.isEmpty else { return }
         cachedDisplayed = fresh
+        // >>> CHANGE-[2026-08-22 11:45:00]-[缓存填充标志防删空回退补回] 开始
+        cacheEverFilled = true
+        // <<< CHANGE-[2026-08-22 11:45:00]-[缓存填充标志防删空回退补回] 结束
     }
     // <<< CHANGE-[2026-08-17 21:36:03]-[缓存非空守卫防空白与循环] 结束
 
@@ -311,9 +321,14 @@ struct ChatView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            messageList
-        }
+        // >>> CHANGE-[2026-08-22 11:51:07]-[键盘修复：bottomBar 改回 safeAreaInset 让位] 开始
+        // 原因：之前把 bottomBar 从 safeAreaInset 抽到 VStack，并给 messageList 加 .frame(maxHeight:.infinity)，
+        //       键盘升起时 safeArea 首帧突变导致 messageList 整片白屏；且 VStack 自压缩让位不可靠，气泡被键盘/输入栏遮挡。
+        // 修复：bottomBar 回到 messageList.safeAreaInset(edge:.bottom)，由系统确定性把 ScrollView 视口底压到输入栏顶，
+        //       配合删除 .frame(maxHeight:.infinity)，白屏与遮挡一并解决。
+        // <<< CHANGE-[2026-08-22 11:51:07]-[键盘修复：bottomBar 改回 safeAreaInset 让位] 结束
+        messageList
+            .safeAreaInset(edge: .bottom) { bottomBar }
         .navigationTitle("小记")
         .task { UsageAnalytics.logOpen("chat") }
         .navigationBarTitleDisplayMode(.inline)
@@ -346,138 +361,6 @@ struct ChatView: View {
                             .foregroundStyle(AIATheme.sub)
                     }
                 }
-            }
-        }
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 0) {
-                // 处理中提示（放在 chips 上方，避免遮挡输入）：文字问答=思考中，图片识别=识别中
-                if isParsing || recognitionActivity.isRecognizing {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                        Text(recognitionActivity.isRecognizing ? "小记正在识别..." : "小记正在思考...")
-                            .font(AIATheme.Font.caption)
-                            .foregroundStyle(AIATheme.muted)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal)
-                    .padding(.top, 6)
-                    .background(Color(.systemBackground))
-                }
-
-                // 快捷意图 chips
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        chip("记饮食", route: .diet)
-                        chip("看健康", route: .health)
-                        chip("查账单", route: .bill)
-                        chip("加待办", route: .todo)
-                        chip("识别记录", route: .recognitionRecords)
-                        feedbackChip
-                    }
-                    .padding(.horizontal)
-                }
-                .padding(.vertical, 6)
-                .background(Color(.systemBackground))
-
-                // 语音错误提示（自动启动失败时显示，帮助定位权限/音频问题）
-                if let error = recognizer.errorMessage {
-                    Text(error)
-                        .font(AIATheme.Font.caption)
-                        .foregroundStyle(AIATheme.warn)
-                        .padding(.horizontal, 12)
-                        .padding(.top, 6)
-                }
-
-                // 扩展功能按钮（拍照/相册/文件）
-                if showInputActions {
-                    HStack(spacing: 0) {
-                        inputActionButton(icon: "camera.fill", title: NSLocalizedString("chat.action.camera", comment: "")) {
-                            showInputActions = false
-                            showCamera = true
-                        }
-                        inputActionButton(icon: "photo.fill", title: NSLocalizedString("chat.action.album", comment: "")) {
-                            showInputActions = false
-                            showPicker = true
-                        }
-                        inputActionButton(icon: "folder.fill", title: NSLocalizedString("chat.action.file", comment: "")) {
-                            showInputActions = false
-                            showFileImporter = true
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(Color(.systemBackground))
-                }
-
-                // 输入栏
-                HStack(spacing: 9) {
-                    Button {
-                        if recognizer.isRecording {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            recognizer.stop()
-                        } else {
-                            isInputFocused = false
-                            // 先立即同步触发触觉（与关麦同款时机），再把录音会话激活推迟 100ms，
-                            // 避免 setActive(true) 的同步音频初始化把 Taptic Engine 渲染挤掉。
-                            let gen = UIImpactFeedbackGenerator(style: .medium)
-                            gen.prepare()
-                            gen.impactOccurred()
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                recognizer.start()
-                            }
-                        }
-                    } label: {
-                        Image(systemName: recognizer.isRecording ? "stop.circle.fill" : "mic.fill")
-                            .font(AIATheme.Font.title2.weight(.medium))
-                            .foregroundStyle(recognizer.isRecording ? AIATheme.warn : AIATheme.sub)
-                            .frame(width: 34, height: 34)
-                    }
-                    TextField("请输入文字，或点麦克风说话", text: $input, axis: .vertical)
-                        .font(.system(size: 15.5))
-                        .lineLimit(1...5)
-                        .padding(.vertical, 15).padding(.horizontal, 14)
-                        .background(AIATheme.surfaceSecondary)
-                        .clipShape(Capsule())
-                        .focused($isInputFocused)
-                    if input.trimmingCharacters(in: .whitespaces).isEmpty {
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                showInputActions.toggle()
-                            }
-                            isInputFocused = false
-                        } label: {
-                            Image(systemName: showInputActions ? "xmark" : "plus")
-                                .font(AIATheme.Font.title2.weight(.medium))
-                                .foregroundStyle(.white)
-                                .frame(width: 34, height: 34)
-                                .background(AIATheme.blue)
-                                .clipShape(Circle())
-                        }
-                    } else {
-                        Button { send() } label: {
-                            Image(systemName: "arrow.up")
-                                .foregroundStyle(.white)
-                                .frame(width: 34, height: 34)
-                                .background(AIATheme.blue)
-                                .clipShape(Circle())
-                        }
-                    }
-                }
-                .padding(.horizontal, 12).padding(.vertical, 10)
-                .background(Color(.systemBackground))
-                .overlay(alignment: .top) { Divider() }
-
-                // 底部小字提示：免费版 AI 识别结果仅供参考，引导升级 Pro（2026-08-03）。
-                // 文案对 Pro 用户亦无害（"如需体验更好"为中性表达），故无条件展示，避免引入 ent 依赖。
-                Text("免费版AI识别结果仅供参考，如需体验更好可升级Pro版")
-                    .font(AIATheme.Font.micro)
-                    .foregroundStyle(AIATheme.muted)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 6)
-                    .background(Color(.systemBackground))
             }
         }
         .background(AppBackgroundView())
@@ -616,20 +499,179 @@ struct ChatView: View {
         // @Query 自动响应式刷新，无需手动 fetchMessages
     }
 
+    /// 底部输入区（tips + chips + 输入栏 + 提示），作为 messageList 的 .safeAreaInset(edge: .bottom)。
+    /// 键盘升起时 safeAreaInset 确定性把 ScrollView 视口底压到本栏顶之上，气泡滚到底即不被键盘/输入栏遮挡。
+    private var bottomBar: some View {
+        VStack(spacing: 0) {
+            // 处理中提示（放在 chips 上方，避免遮挡输入）：文字问答=思考中，图片识别=识别中
+            if isParsing || recognitionActivity.isRecognizing {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text(recognitionActivity.isRecognizing ? "小记正在识别..." : "小记正在思考...")
+                        .font(AIATheme.Font.caption)
+                        .foregroundStyle(AIATheme.muted)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+                .padding(.top, 6)
+                .background(Color(.systemBackground))
+            }
+
+            // 快捷意图 chips
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    chip("记饮食", route: .diet)
+                    chip("看健康", route: .health)
+                    chip("查账单", route: .bill)
+                    chip("加待办", route: .todo)
+                    chip("识别记录", route: .recognitionRecords)
+                    feedbackChip
+                }
+                .padding(.horizontal)
+            }
+            .padding(.vertical, 6)
+            .background(Color(.systemBackground))
+
+            // 语音错误提示（自动启动失败时显示，帮助定位权限/音频问题）
+            if let error = recognizer.errorMessage {
+                Text(error)
+                    .font(AIATheme.Font.caption)
+                    .foregroundStyle(AIATheme.warn)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 6)
+            }
+
+            // 扩展功能按钮（拍照/相册/文件）
+            if showInputActions {
+                HStack(spacing: 0) {
+                    inputActionButton(icon: "camera.fill", title: NSLocalizedString("chat.action.camera", comment: "")) {
+                        showInputActions = false
+                        showCamera = true
+                    }
+                    inputActionButton(icon: "photo.fill", title: NSLocalizedString("chat.action.album", comment: "")) {
+                        showInputActions = false
+                        showPicker = true
+                    }
+                    inputActionButton(icon: "folder.fill", title: NSLocalizedString("chat.action.file", comment: "")) {
+                        showInputActions = false
+                        showFileImporter = true
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(Color(.systemBackground))
+            }
+
+            // 输入栏
+            HStack(spacing: 9) {
+                Button {
+                    if recognizer.isRecording {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        recognizer.stop()
+                    } else {
+                        isInputFocused = false
+                        // 先立即同步触发触觉（与关麦同款时机），再把录音会话激活推迟 100ms，
+                        // 避免 setActive(true) 的同步音频初始化把 Taptic Engine 渲染挤掉。
+                        let gen = UIImpactFeedbackGenerator(style: .medium)
+                        gen.prepare()
+                        gen.impactOccurred()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            recognizer.start()
+                        }
+                    }
+                } label: {
+                    // >>> CHANGE-[2026-08-23 09:59:50]-[语音录音态脉冲可视化] 开始
+                    // 原因：麦克风录音时只有图标变红 + 文字实时进框，没有"正在听"的明确指示，用户不确定录音是否生效。
+                    //       录音态在图标外套一圈脉冲光圈（scale + opacity 循环），给清晰的"正在录音"反馈；非录音态无动画。
+                    // 回退：删除 overlay 脉冲块，恢复原 Image 单标签即可。
+                    Image(systemName: recognizer.isRecording ? "stop.circle.fill" : "mic.fill")
+                        .font(AIATheme.Font.title2.weight(.medium))
+                        .foregroundStyle(recognizer.isRecording ? AIATheme.warn : AIATheme.sub)
+                        .frame(width: 34, height: 34)
+                        .overlay(
+                            Circle()
+                                .stroke(AIATheme.warn, lineWidth: 2)
+                                .opacity(recognizer.isRecording ? 0.6 : 0)
+                                .scaleEffect(recognizer.isRecording ? 1.6 : 1.0)
+                                .animation(
+                                    recognizer.isRecording
+                                        ? Animation.easeOut(duration: 1.1).repeatForever(autoreverses: false)
+                                        : .default,
+                                    value: recognizer.isRecording
+                                )
+                        )
+                    // <<< CHANGE-[2026-08-23 09:59:50]-[语音录音态脉冲可视化] 结束
+                }
+                TextField("请输入文字，或点麦克风说话", text: $input, axis: .vertical)
+                    .font(.system(size: 15.5))
+                    .lineLimit(1...5)
+                    .padding(.vertical, 15).padding(.horizontal, 14)
+                    .background(AIATheme.surfaceSecondary)
+                    .clipShape(Capsule())
+                    .focused($isInputFocused)
+                if input.trimmingCharacters(in: .whitespaces).isEmpty {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            showInputActions.toggle()
+                        }
+                        isInputFocused = false
+                    } label: {
+                        Image(systemName: showInputActions ? "xmark" : "plus")
+                            .font(AIATheme.Font.title2.weight(.medium))
+                            .foregroundStyle(.white)
+                            .frame(width: 34, height: 34)
+                            .background(AIATheme.blue)
+                            .clipShape(Circle())
+                    }
+                } else {
+                    Button { send() } label: {
+                        Image(systemName: "arrow.up")
+                            .foregroundStyle(.white)
+                            .frame(width: 34, height: 34)
+                            .background(AIATheme.blue)
+                            .clipShape(Circle())
+                    }
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            .background(Color(.systemBackground))
+            .overlay(alignment: .top) { Divider() }
+
+            // 底部小字提示：免费版 AI 识别结果仅供参考，引导升级 Pro。
+            Text("免费版AI识别结果仅供参考，如需体验更好可升级Pro版")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 6)
+                .background(Color(.systemBackground))
+        }
+    }
+
     private var messageList: some View {
         ScrollViewReader { proxy in
+            // 微信式确定性钉底：持有 proxy，所有「滚到底」走一次 proxy.scrollTo（等价于 UIScrollView.setContentOffset），
+            // 不依赖 .scrollPosition 声明式跟随——声明式会在内容/安全区(键盘)过渡态重算 offset，导致「弹起又落下/被挡」。
+            // 远端 item 未渲染的可靠性由「onAppear 让帧后 scrollTo」保证（LazyVStack 已完成首屏布局）。
             // >>> CHANGE-[2026-08-17 21:31:57]-[首帧缓存空回退保零跳动] 开始
             // 原因：上一轮把列表改读 cachedDisplayed 缓存，但缓存首帧填充在 .onAppear（晚于首帧 body 渲染半拍），
             // 导致首帧 cachedDisplayed 仍为空 → 列表先空帧后暴涨 → 进页面又跳。
             // 修复：首帧缓存未就绪时回退读 displayedMessages 实时计算（首帧即满、钉底、不跳）；
             // .onAppear 填好缓存后后续帧统一走缓存，CPU 优化保留。
-            // 回退：恢复 let list = cachedDisplayed。
-            let list = cachedDisplayed.isEmpty ? displayedMessages : cachedDisplayed
+            // 回退：恢复 let list = cachedDisplayed.isEmpty ? displayedMessages : cachedDisplayed
+            // >>> CHANGE-[2026-08-22 11:45:00]-[缓存填充标志防删空回退补回] 开始
+            // 首帧缓存未填充（cacheEverFilled==false）才回退读 displayedMessages 保不空白/不跳；
+            // 一旦填充过，删除导致缓存变空也走空缓存（渲染空），不再回退暴露未刷新的软删消息。
+            // 回退：恢复 let list = cachedDisplayed.isEmpty ? displayedMessages : cachedDisplayed
+            let list = cacheEverFilled ? cachedDisplayed : displayedMessages
+            // <<< CHANGE-[2026-08-22 11:45:00]-[缓存填充标志防删空回退补回] 结束
             // <<< CHANGE-[2026-08-17 21:31:57]-[首帧缓存空回退保零跳动] 结束
             let showDivider = ChatView.dividerFlags(for: list)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    if hasMoreMessages || reachedTop {
+                    if hasMoreMessages {
                         earlierLoader(proxy: proxy)
                     }
                     ForEach(Array(list.enumerated()),
@@ -643,18 +685,35 @@ struct ChatView: View {
                         }
                         messageRow(m)
                     }
+                    // >>> CHANGE-[2026-08-22 14:57:57]-[底部占位锚点防末条被输入栏吞] 开始
+                    // 原因：XS Max 老机型一进对话页，招呼/最新消息被底部输入栏(safeAreaInset)盖住。
+                    //       根因：scrollToLatest/scrollToBottom 用 anchor:.bottom 锚定「末条气泡 item 底」，
+                    //       吞掉底部 padding，老芯片首帧 safeAreaInset 让位与滚动落位不同步 → 末条被输入栏盖。
+                    // 修复：追加透明占位锚点作为「真·内容底」，滚动一律锚定它，保证底部 padding 一并滚入可视区。
+                    // 回退：删除本段占位锚点 + padding(.bottom,24) 恢复 12。
+                    // <<< CHANGE-[2026-08-22 14:57:57]-[底部占位锚点防末条被输入栏吞] 结束
+                    Color.clear.frame(height: 0).id("chat-bottom-anchor")
                 }
                 .padding(.horizontal)
                 .padding(.top, 4)
-                .padding(.bottom, 12)
+                .padding(.bottom, 24)
                 .contentShape(Rectangle())
                 .animation(didInitialScroll ? scrollAnimation : nil, value: list.count)
                 .onTapGesture {
                     isInputFocused = false
                 }
             }
-            .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
+            // 微信式自动贴底：ScrollView 内容布局后默认保持底部对齐（进页直接显示最新历史），
+            // 气泡追加时自动吸底（新消息式）。不依赖任何 scrollTo/scrollPosition——
+            // 手动 scrollTo 在 LazyVStack 远端 item 未渲染时失效（这是之前停在周三的根因）。
+            // 此前该修饰符配合 .frame(maxHeight:.infinity)+VStack 布局导致白屏，现已无此干扰。
+            .defaultScrollAnchor(.bottom)
+            // >>> CHANGE-[2026-08-22 11:51:07]-[键盘修复：回退 .frame(maxHeight:.infinity) 消除首帧白屏] 开始
+            // 原因：.frame(maxHeight:.infinity) 在 VStack 里让 ScrollView 撑满，配合 .defaultScrollAnchor(.bottom)
+            //       与第三方键盘(wetype)的 safeArea 首帧突变，把 messageList 渲染成空白。
+            // 修复：删除该行，恢复 ScrollView 按内容分配高度，白屏消失。
+            // <<< CHANGE-[2026-08-22 11:51:07]-[键盘修复：回退 .frame(maxHeight:.infinity) 消除首帧白屏] 结束
             .onAppear {
                 // 首屏由 @Query(recentMessages) 自动同步填充，首帧即满、零跳动，无需手动 fetch。
                 // 先算一次缓存，保证列表（读 cachedDisplayed）首帧即有数据。
@@ -692,22 +751,13 @@ struct ChatView: View {
                 // 修复：进入即同步 disablesAnimations 钉底（proxy 在 onAppear 闭包内已就绪），
                 // 首帧直接是最新屏，消除顶部闪历史；异步校正仅补高度、不再反向跳。
                 // 回退：恢复 defaultScrollAnchor 依赖 + 原 for 循环首拍延迟写法。
-                // 招呼气泡锚点：有历史钉在最新历史之后 0.5s，无历史钉在本次会话起点之前 0.5s。
-                // 分界点用 NavigationRouter.chatSessionAnchor —— 由发起方（首页拍照/相册、截屏通知、语音）
-                // 在插入本次第一条新消息「之前」打点，因此绝不会把本次新消息误判成历史。
-                // 旧实现用「进入时刻往前 1s 固定窗口」，慢设备/冷启动时 onAppear 比插图晚超过 1s，
-                // 窗口反向包含刚插的新图 → last(where:) 命中图片自己 → 招呼被钉到图片之后（实测 bug）。
-                // 无锚点（用户直接点进对话页，没有新消息）时用当前时刻：所有消息都是历史，招呼落在最底部。
+                // 招呼气泡锚点：用户要求招呼时间 = 当前进入时刻（今天），且气泡位置与文案一致地落在最底部。
+                // 因此 greetingDate 直接取 Date.now，不再钉在历史末条之后 —— 有/无历史场景统一为“进页此刻”。
+                // （旧实现：有历史钉在最新历史之后 0.5s，无历史钉在本次会话起点之前 0.5s；现弃用以符合“显示当前进入时间”诉求。）
+                // sessionAnchor 仍仅用于下方「消费锚点防陈旧」逻辑，与 greetingDate 不再耦合。
                 // orderedMessages 是正序（最旧在前、最新在后，见 47 行）。
-                let anchor = sessionAnchor ?? Date.now
-                let greetingDate: Date
-                if let lastHistory = orderedMessages.last(where: { $0.createdAt < anchor }) {
-                    // 有历史：钉在最新历史之后；上限压到 anchor，
-                    // 防止「刚聊过 0.1s 又发图」时 +0.5s 越过 anchor 反超本次新消息。
-                    greetingDate = min(lastHistory.createdAt.addingTimeInterval(0.5), anchor)
-                } else {
-                    greetingDate = anchor.addingTimeInterval(-0.5)  // 无历史：钉在本次会话起点之前
-                }
+                // sessionAnchor 已在上方消费并清零（717-718 行），此处无需再持有。
+                let greetingDate = Date.now
                 // >>> CHANGE-[2026-08-17 22:36:13]-[首帧钉底改到列表首次非空] 开始
                 // 原因：原首帧钉底读 initialList（cachedDisplayed/displayedMessages）仍依赖 @Query 在 onAppear 此刻已就绪，
                 // 但 SwiftData @Query 首帧常晚于 onAppear 异步 materialize → 读到的列表为空 → 钉底被跳过/钉错位置 → 偶发白屏。
@@ -738,6 +788,16 @@ struct ChatView: View {
                 // 回退：恢复 scrollToBottom(proxy: proxy, delay: 0.4, animated: false)。
                 // <<< CHANGE-[2026-08-17 22:36:13]-[首帧钉底改到列表首次非空] 结束
                 // <<< CHANGE-[2026-08-17 15:05:00]-[对话页首屏干净落位] 结束
+                // >>> CHANGE-[2026-08-22 14:57:57]-[首帧延迟确定性落位防被输入栏吞] 开始
+                // 原因：XS Max 老芯片首帧 @Query/招呼/safeAreaInset 让位不同步，defaultScrollAnchor 落位不可靠，
+                //       末条气泡被输入栏盖。延迟到首帧重算风暴后（0.6s），用确定性 scrollTo 占位锚点再钉底一次。
+                // 回退：删除本段。
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    var tx = Transaction()
+                    tx.disablesAnimations = true
+                    withTransaction(tx) { proxy.scrollTo("chat-bottom-anchor", anchor: .bottom) }
+                }
+                // <<< CHANGE-[2026-08-22 14:57:57]-[首帧延迟确定性落位防被输入栏吞] 结束
             }
             // >>> CHANGE-[2026-08-17 21:36:03]-[去掉全局存库监听治发烫] 开始
             // 原因：原 .onReceive(NSManagedObjectContextDidSaveNotification) 监听【全局每一次 modelContext 保存】
@@ -758,15 +818,14 @@ struct ChatView: View {
             // @Query 到或 greetingMessage 注入任一路径首次非空都精准钉底一次并置位 didInitialScroll；
             // 不破坏 recomputeDisplayed 的非空守卫 CPU 优化（缓存仍受其保护）。
             // 回退：恢复监听 cachedDisplayed.count + 读 cachedDisplayed.last。
-            .onChange(of: displayedMessages.count) { _, newCount in
-                guard !didInitialScroll else { return }
-                guard newCount > 0 else { return }
-                guard let last = displayedMessages.last else { return }
-                var tx = Transaction()
-                tx.disablesAnimations = true
-                withTransaction(tx) { proxy.scrollTo(last.id, anchor: .bottom) }
-                didInitialScroll = true
-            }
+            // >>> CHANGE-[2026-08-22 12:01:29]-[首次非空守卫改读渲染真实末条] 开始
+            // 原因：原守卫读 displayedMessages.last 钉底，但渲染列表实际读 list = cacheEverFilled ? cachedDisplayed : displayedMessages；
+            //       当气泡(greetingMessage)延迟 0.4s 注入、cachedDisplayed 已填充时，displayedMessages.last 未必是气泡，
+            //       守卫钉到非末条 → 气泡（在更底）被挡、仅其上方时间戳可见。
+            // 修复：改读 cachedDisplayed.last（渲染真实最后一条，含气泡），钉底对象正确。
+            // <<< CHANGE-[2026-08-22 12:01:29]-[首次非空守卫改读渲染真实末条] 结束
+            // 首屏钉底已移入 ScrollView 内层 .onChange(of: list.count)（见 681 行附近），此处不再冗余守卫，
+            // 避免两套滚动逻辑抢 didInitialScroll。
             // <<< CHANGE-[2026-08-17 23:05:00]-[首次非空守卫改监听displayedMessages] 结束
             // >>> CHANGE-[2026-08-17 23:41:25]-[新消息不自动显示修复-监听集合而非数量] 开始
             // 原因：渲染列表绝大多数读 cachedDisplayed 缓存（见 list = cachedDisplayed.isEmpty ? displayedMessages : cachedDisplayed），
@@ -776,15 +835,20 @@ struct ChatView: View {
             // 修复：改监听 recentMessages 集合本身（@Model 引用数组，Equatable 逐元素比较 persistentModelID），
             // 只要 @Query 刷新产生的内容不同的新数组（新增/挤掉均触发，count 不变也触发）就重算缓存+滚动校正。
             // 回退：恢复 .onChange(of: orderedMessages.count)。
-            .onChange(of: recentMessages) { _, _ in
+            // >>> CHANGE-[2026-08-22 08:33:31]-[删除消息不强制滚底] 开始
+            // 原因：原写法 recentMessages 一变（无论新增还是删除）都 scrollToBottom，
+            //       删除历史消息时屏幕被错误拽到底。仅当 new.count >= old.count（新增/更新）
+            //       才补偿滚动，删除（count 变小）时保持原滚动位置。
+            // 回退：恢复无条件 for d in [...] scrollToBottom(proxy:...)。
+            .onChange(of: recentMessages) { old, new in
                 guard !isLoadingEarlier else { return }
                 recomputeDisplayed()   // 数据集合变化，重算缓存（切断 body 重算放大）
-                // 多段校正：兜住识别卡片（含本地小票图/食物图）的异步高度，
-                // 避免单次滚动被后续图片解码/卡片加载顶回中间，结果滚不到视口。
-                for d in [0.0, 0.15, 0.45] {
-                    scrollToBottom(proxy: proxy, delay: d, animated: false)
+                // 仅新增/更新（count 不减）时钉到底；删除历史消息保持原滚动位置，不被错误拽到底。
+                if new.count >= old.count {
+                    scrollToLatest(proxy: proxy)
                 }
             }
+            // <<< CHANGE-[2026-08-22 08:33:31]-[删除消息不强制滚底] 结束
             // <<< CHANGE-[2026-08-17 23:41:25]-[新消息不自动显示修复-监听集合而非数量] 结束
             .onChange(of: greetingMessage) { old, new in
                 // 招呼气泡插入/替换 → 重算缓存（displayedMessages 含 greetingMessage）
@@ -794,63 +858,49 @@ struct ChatView: View {
                 // 修复：区分「注入（old==nil→new 非 nil）」与「替换（LLM 刷新文案，old 非 nil）」，
                 // 注入时 withAnimation(招呼专属弹性 spring) 滚动到底 → 招呼从底部滚出（微信式阶段B）；
                 // 替换不动滚动（气泡原地换文案）。
-                // 2026-08-17 23:09 调整：原用全局 scrollAnimation(.spring(response:0.42, dampingFraction:0.9))，
-                // 用户要求招呼"单独"动画 → 改用专属弹性 .spring(response:0.55, dampingFraction:0.75)，
-                // 区别于普通消息滚动；与 greetingBubble 的 offset(y:56) 顶出 transition 协同。
+                // 气泡注入（微信新消息式）：列表已钉到历史末条（周六）贴底，气泡作为更底下的新消息，
+                // 用专属弹性动画滚到底 → 周六被往上推、气泡从底部弹出浮现。这是用户确认的「弹入」效果。
+                // greetingBubble 自身 offset(y:56) transition 与滚入协同，营造从底部滑出。
                 // 回退：恢复 .onChange(of: greetingMessage) { _, _ in recomputeDisplayed() }。
-                if old == nil, let new {
+                if old == nil {
                     withAnimation(.spring(response: 0.55, dampingFraction: 0.75)) {
-                        proxy.scrollTo(new.id, anchor: .bottom)
+                        scrollToLatest(proxy: proxy, immediate: false)   // 气泡弹入：带动画，不被 disablesAnimations 压制
                     }
                 }
                 // <<< CHANGE-[2026-08-17 23:09:26]-[招呼注入带动画滚出-专属弹性] 结束
             }
             // 识别落地（拍照/相册/截屏/ShareExtension/语音等）主动广播的滚动信号：
-            // 刷新列表 + 多段校正，保证结果气泡出现后页面自动滚到底、最新卡片完整可见。
+            // 刷新列表 + 钉到底，保证结果气泡出现后页面自动滚到底、最新卡片完整可见。
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("AIA.chatScrollToBottom"))) { _ in
                 guard !isLoadingEarlier else { return }
-                // @Query 已自动刷新，仅做多段滚动校正保证新气泡完整可见
-                for d in [0.0, 0.15, 0.45] {
-                    scrollToBottom(proxy: proxy, delay: d, animated: false)
-                }
+                scrollToLatest(proxy: proxy)
             }
-            .onChange(of: isInputFocused) { _, focused in
-                if focused {
-                    scrollToBottom(proxy: proxy, delay: 0.30)
-                } else {
-                    scrollToBottom(proxy: proxy, delay: 0)
-                }
-            }
+            // 键盘升降：完全交给 defaultScrollAnchor(.bottom)——ScrollView 内容保持贴底，
+            // 键盘升起时 safeAreaInset(edge:.bottom) 把输入栏顶到键盘上方、视口底自动压缩到输入栏顶，
+            // 气泡随之贴顶，无需滚动。
+            // 不再手动 scrollTo：scrollTo(末条,.bottom) 锚定的是「末条 item 底」而非「内容底」，
+            // 会吞掉底部 padding，在键盘 safeArea 过渡态与 defaultScrollAnchor 竞争 →「气泡上升又回落被挡」。
         }
     }
 
     /// 顶部「下拉自动加载更早的消息」：指示器滚入视口即自动扩大分页上限并重建查询，
     /// 加载后锚定此前的首条保持可视位置；加载期间显示 spinner 并用 `isLoadingEarlier` 锁防重复触发。
     private func earlierLoader(proxy: ScrollViewProxy) -> some View {
-        Button {
-            loadEarlier(proxy: proxy)
-        } label: {
-            HStack(spacing: 6) {
-                if isLoadingEarlier {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("加载中…")
-                        .font(AIATheme.Font.subhead)
-                } else if hasMoreMessages {
-                    Image(systemName: "arrow.up.circle.dotted")
-                    Text("点此加载更早的消息")
-                        .font(AIATheme.Font.subhead)
-                } else {
-                    Image(systemName: "checkmark.circle.fill")
-                    Text("登顶成功，已没有更早的消息")
-                        .font(AIATheme.Font.subhead)
-                }
+        HStack(spacing: 6) {
+            if isLoadingEarlier {
+                ProgressView()
+                    .controlSize(.small)
+                Text("加载中…")
+                    .font(AIATheme.Font.subhead)
+            } else {
+                Image(systemName: "arrow.up.circle.dotted")
+                Text("下拉加载更早的消息")
+                    .font(AIATheme.Font.subhead)
             }
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.vertical, 6)
         }
-        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.vertical, 6)
         .onAppear { loadEarlier(proxy: proxy) }
     }
 
@@ -864,8 +914,6 @@ struct ChatView: View {
         let oldest = loaded.min(by: { $0.createdAt < $1.createdAt })?.createdAt
         loadEarlierMessages()
         refreshHasMoreMessages(earliest: oldest)
-        // 本次加载后若已无更早消息，标记登顶，提示条文案切换为「登顶成功」且不再触发加载。
-        if !hasMoreMessages { reachedTop = true }
         if let firstID {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 var tx = Transaction()
@@ -882,36 +930,7 @@ struct ChatView: View {
     @ViewBuilder
     private func messageRow(_ m: ChatMessage) -> some View {
         if let greeting = greetingMessage, m === greeting {
-            // >>> CHANGE-[2026-08-31 19:31:53]-[恢复招呼下使用攻略按钮] 开始
-            // 原因：提交 83c361f「首屏示例文案池重构」重构招呼区时，把原来嵌在招呼气泡下方的
-            //        「好记AI使用攻略」按钮（及使用引导）一并删除，导致对话页看不到攻略入口。
-            //        按方案 A 恢复：按钮与 greetingBubble 平级（外层 VStack 兄弟层），遵守"禁止嵌套 Button"铁律；
-            //        链接复用统一入口 AppURLs.featureIntro（默认即微信文章，云端可改），用 UIKit present 版 SFSafariViewController
-            //        绕开首页 body 重算吞 sheet。
-            // 回退：删掉 VStack 包裹与 Button 块，恢复成单行 greetingBubble(m.text)。
-            VStack(alignment: .leading, spacing: 8) {
-                greetingBubble(m.text)
-                Button {
-                    presentInAppBrowser(AppURLs.featureIntro)
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "book.fill")
-                            .font(.system(size: 12))
-                        Text("好记AI使用攻略")
-                            .font(AIATheme.Font.micro)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10))
-                    }
-                    .foregroundStyle(AIATheme.blue)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(AIATheme.blue.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
-                .padding(.leading, 40)
-            }
-            // <<< CHANGE-[2026-08-31 19:31:53]-[恢复招呼下使用攻略按钮] 结束
+            greetingBubble(m)
         } else if let imgName = decodeUserImageName(m.text) {
             // 用户发出的图片（拍照/相册/文件/截屏）：像微信一样先出现你发的图，小记随后回识别卡片
             UserImageBubble(
@@ -920,13 +939,14 @@ struct ChatView: View {
                 showSelection: messageMultiSelectMode,
                 onToggleSelection: { toggleMessageSelection(m.persistentModelID) },
                 onDelete: {
-                    // 【C】SafeDelete.chatMessage 内部用 DispatchQueue.main.async 标记 syncDeleted，
-                    // 必须把 fetchMessages() 也排到同一 main 队列之后，否则当前栈里同步 fetch
-                    // 会读回尚未标记的删除消息，导致「删了没反应 / 时间戳残留」。
-                    // >>> CHANGE-[2026-08-17 11:33:00]-[临时对象失效崩溃] 开始
-                    // 原因：m 来自消息数组，删除后紧接 fetchMessages() 重 fetch 可能释放引用。回退：改回 SafeDelete.chatMessage(m, in: context)
-                    SafeDelete.chatMessageByID(m.persistentModelID, in: context)
-                    // <<< CHANGE-[2026-08-17 11:33:00]-[临时对象失效崩溃] 结束
+                    // >>> CHANGE-[2026-08-22 11:20:00]-[长按删除消除竞态] 开始
+                    // 同长按删除：当帧即时移除缓存（立即少一行、不跳底），软删落库延后下一帧，
+                    // 顺序隔离避免 recompute 用旧 fresh 把消息补回。回退：恢复同步 removeMessageFromCache + SafeDelete.chatMessageByID。
+                    cachedDisplayed.removeAll { $0.persistentModelID == m.persistentModelID }
+                    DispatchQueue.main.async {
+                        SafeDelete.chatMessageByID(m.persistentModelID, in: context)
+                    }
+                    // <<< CHANGE-[2026-08-22 11:20:00]-[长按删除消除竞态] 结束
                 },
                 onEnterMultiSelect: { enterMessageMultiSelect(m.persistentModelID) }
             )
@@ -1187,17 +1207,88 @@ struct ChatView: View {
     }
 
     /// 顶部小记招呼气泡（带小头像，区别于普通聊天记录）
-    private func greetingBubble(_ text: String) -> some View {
-        HStack(spacing: 8) {
-            Image("AIAvatar")
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 32, height: 32)
-                .clipShape(Circle())
-                .overlay(Circle().stroke(AIATheme.hairline, lineWidth: 0.5))
-            messageBubble(message: nil, text: text, isUser: false)
-            Spacer(minLength: 28)
+    @ViewBuilder
+    private func greetingBubble(_ m: ChatMessage) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // 注：原「招呼气泡显示时间」Text 块已删除。原因：ForEach 里 messageRow(m) 之前会按 showDivider 渲染一个
+            //     ChatTimeDivider(date: m.createdAt)，招呼消息同样会触发，于是招呼上方已有一个水平居中的胶囊时间戳，
+            //     再在招呼气泡内加一个完全一样的就会重复显示。招呼时间直接复用 ChatTimeDivider，无需自己再画一遍。
+            // >>> CHANGE-[2026-08-22 00:00:00]-[招呼头像贴气泡左侧中间] 开始
+            // 原因：原 HStack 把头像和「气泡+按钮」整列居中，气泡多行+按钮拉高后头像被顶到总高中点，相对气泡显得偏下。
+            // 修复：头像只与气泡同处一个 HStack(alignment:.center)，头像垂直中心恒等于气泡垂直中心（多行也稳），不再受下方按钮影响；
+            //       头像 .padding(.top,2) 略上提补偿气泡 10pt 内边距带来的文字中心偏低观感。按钮拆到外层 VStack 第二行并左缩进对齐气泡。
+            // 回退：删掉本 HStack + 外层 VStack，恢复原「头像 + (气泡+按钮)VStack」平铺结构即可。
+            HStack(alignment: .center, spacing: 8) {
+                Image("AIAvatar")
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 32, height: 32)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(AIATheme.hairline, lineWidth: 0.5))
+                    .padding(.top, 2)
+                messageBubble(message: nil, text: m.text, isUser: false)
+            }
+            // >>> CHANGE-[2026-08-22 00:00:00]-[招呼下加使用攻略按钮] 开始
+            // 原因：用户要求在招呼气泡下方加「好记AI使用攻略」小按钮（带 > 箭头），点开 App 内网页 https://mp.weixin.qq.com/s/ekSczrt_yItd6UH4_n1PhA。
+            // 按钮与气泡平级（外层 VStack 兄弟层），遵守"禁止嵌套 Button"铁律；用 UIKit present 版 SFSafariViewController 绕开首页 body 重算吞 sheet。
+            // 回退：删掉 Button 块或整体回退到上一 CHANGE 前的结构。
+            Button {
+                if let url = URL(string: "https://mp.weixin.qq.com/s/ekSczrt_yItd6UH4_n1PhA") {
+                    presentInAppBrowser(url)
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "book.fill")
+                        .font(.system(size: 12))
+                    Text("好记AI使用攻略")
+                        .font(AIATheme.Font.micro)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .foregroundStyle(AIATheme.blue)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(AIATheme.blue.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .buttonStyle(PlainButtonStyle())
+            .padding(.leading, 40)   // 头像 32 + spacing 8，与气泡左边缘对齐
+            // <<< CHANGE-[2026-08-22 00:00:00]-[招呼下加使用攻略按钮] 结束
+
+            // >>> CHANGE-[2026-08-23 09:59:50]-[首屏示例提问降低冷启动门槛] 开始
+            // >>> CHANGE-[2026-08-23 10:30:00]-[示例文案动态化A+B组合] 开始
+            // 原因：新用户首屏只有招呼 + 使用攻略，不知道能发图识别/语音记账。在攻略下方加 3 个可点示例气泡，
+            //       点一下把示例文本填入输入框并聚焦，降低"不知道说啥"的门槛（微信/钉钉同类做法）。
+            //       文案动态化：按 entrySource 选池（B）+ 池内随机抽一组（A），且全部为可直接发送自动记录的指令。
+            // 回退：把下面三行 examplePrompt(prompts[...]) 改回固定三句字符串即可。
+            // >>> CHANGE-[2026-08-23 14:30:00]-[首屏示例随机轮播 5秒] 开始
+            // 原因：原示例气泡只 randomElement 抽一组静态不动，用户停留首页看不到其他示例。
+            //       改为 TimelineView 每 5 秒随机切一组（不重复上一次），淡入淡出；点任意条暂停轮播。
+            // 回退：把本块改回 `let prompts = ChatView.examplePrompts(for: entrySource)` + 静态 HStack 即可。
+            let pool = ChatView.examplePool(for: entrySource)
+            TimelineView(.periodic(from: .now, by: 5)) { ctx in
+                // 用时间 + 池长推导出当前组索引，保证每次刷新换组且不重复上一次
+                let tick = Int(ctx.date.timeIntervalSince1970) / 3
+                let n = pool.count
+                let idx = n > 1 ? ((tick % (n - 1)) + ((tick / (n - 1)) % 2 == 0 ? 1 : 0)) % n : 0
+                let prompts = pool[idx]
+                HStack(spacing: 6) {
+                    examplePrompt(prompts[0])
+                    examplePrompt(prompts[1])
+                }
+                .id(idx) // 触发 transition 动画
+                .opacity(examplePaused ? 1 : 1) // 暂停仅停切换，不隐藏
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                .animation(.easeInOut(duration: 0.4), value: idx)
+            }
+            .padding(.leading, 40)
+            .padding(.top, 4)
+            // <<< CHANGE-[2026-08-23 14:30:00]-[首屏示例随机轮播 5秒] 结束
+            // <<< CHANGE-[2026-08-23 10:30:00]-[示例文案动态化A+B组合] 结束
+            // <<< CHANGE-[2026-08-23 09:59:50]-[首屏示例提问降低冷启动门槛] 结束
+            // <<< CHANGE-[2026-08-22 00:00:00]-[招呼头像贴气泡左侧中间] 结束
         }
+        Spacer(minLength: 28)
         // >>> CHANGE-[2026-08-17 23:09:26]-[招呼从下往上顶出] 开始
         // 原因：用户要求招呼气泡"从下往上顶出来、把历史往上顶、吸引眼球"。
         // 原 CHANGE-[2026-08-17 20:58:00]-[招呼浮出] 用 offset(y:8) 8pt 轻浮出，太"温柔"。
@@ -1222,62 +1313,104 @@ struct ChatView: View {
         HStack {
             if userSide { Spacer(minLength: 28) }
 
-            ZStack(alignment: .topTrailing) {
-                Text(displayText)
-                    .font(AIATheme.Font.chatBody)
-                    .foregroundStyle(userSide ? .white : .primary)
-                    .textSelection(.enabled)
-                    .padding(10)
-                    .background(userSide ? AIATheme.blue : Color.adaptive(light: 0xffffff, dark: 0x2c2c2e))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .opacity(showSelection && !isSelected ? 0.4 : 1.0)
+            VStack(alignment: .leading, spacing: 6) {
+                ZStack(alignment: .topTrailing) {
+                    Text(displayText)
+                        .font(AIATheme.Font.chatBody)
+                        .foregroundStyle(userSide ? .white : .primary)
+                        // >>> CHANGE-[2026-08-23 09:59:50]-[复制菜单统一去掉重复textSelection] 开始
+                        // 原因：气泡已自定义 .contextMenu（含"复制/删除/选择"），再开 .textSelection(.enabled) 会让系统原生
+                        //       选择态与自定义菜单并存，出现"两套复制"且长按易触发系统选择而非菜单，交互不一致。
+                        //       统一关闭 textSelection，复制/选择全部走自定义长按菜单（用户/AI 气泡一致）。
+                        // 回退：恢复 .textSelection(.enabled) 即可。
+                        .padding(10)
+                        // <<< CHANGE-[2026-08-23 09:59:50]-[复制菜单统一去掉重复textSelection] 结束
+                        .background(userSide ? AIATheme.blue : Color.adaptive(light: 0xffffff, dark: 0x2c2c2e))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .opacity(showSelection && !isSelected ? 0.4 : 1.0)
 
-                if showSelection {
-                    // 深色模式适配：未选中圆圈禁写死黑色（深色下黑圈落在黑底/深灰气泡上隐形）。
-                    // 浅色=半透明黑、深色=半透明白，另加自适应细描边保证任意气泡底色上可见。
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle.fill")
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(
-                            isSelected ? Color.green : Color.adaptive(light: 0x000000, dark: 0xffffff).opacity(0.5),
-                            Color.white
-                        )
-                        .font(.system(size: 18))
-                        .overlay(
-                            Circle()
-                                .stroke(Color.adaptive(light: 0xffffff, dark: 0x8e8e93), lineWidth: 1)
-                                .opacity(isSelected ? 0 : 1)
-                        )
-                        .offset(x: 8, y: -8)
+                    if showSelection {
+                        // 深色模式适配：未选中圆圈禁写死黑色（深色下黑圈落在黑底/深灰气泡上隐形）。
+                        // 浅色=半透明黑、深色=半透明白，另加自适应细描边保证任意气泡底色上可见。
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle.fill")
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(
+                                isSelected ? Color.green : Color.adaptive(light: 0x000000, dark: 0xffffff).opacity(0.5),
+                                Color.white
+                            )
+                            .font(.system(size: 18))
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.adaptive(light: 0xffffff, dark: 0x8e8e93), lineWidth: 1)
+                                    .opacity(isSelected ? 0 : 1)
+                            )
+                            .offset(x: 8, y: -8)
+                    }
                 }
-            }
-            .contentShape(Rectangle())
-            .contextMenu {
-                // 多选模式不再弹出菜单；非多选且有 message 时才显示 复制/删除/选择
-                if let m = message, !messageMultiSelectMode {
+                .contentShape(Rectangle())
+                .contextMenu {
+                    // 多选模式不再弹出菜单；非多选且有 message 时才显示 复制/删除/选择
+                    if let m = message, !messageMultiSelectMode {
+                        Button {
+                            UIPasteboard.general.string = displayText
+                        } label: {
+                            Label("复制", systemImage: "doc.on.doc")
+                        }
+                        Button(role: .destructive) {
+                            // >>> CHANGE-[2026-08-22 11:20:00]-[长按删除消除竞态] 开始
+                            // 根因：原 action 同时做"手动 removeAll 缓存"和"SafeDelete.save() 软删"。
+                            //       save() 触发 @Query 刷新 → onChange → recomputeDisplayed → cachedDisplayed = fresh。
+                            //       若 recompute 比 removeAll 晚到（@Query 刷新异步、非确定性），会用"还含该消息的旧 fresh"
+                            //       把缓存补回 → 表现为"有时点一次不消失、要点两次"（竞态，非确定性）。
+                            // 修复：1) 当帧只从渲染缓存即时移除（列表立即少一行、不触发 scrollToBottom，故不跳底）；
+                            //       2) 软删落库延后到下一帧（contextMenu 已关闭、body 已重绘后），再 save() 触发
+                            //          @Query 刷新 → recompute 时 fresh 已不含该消息 → 缓存与数据一致，绝不再补回。
+                            //       两帧隔离彻底消除"手动移除"与"recompute 覆盖"的竞态，每次点一次都消失。
+                            // 回退：恢复同步调用 removeMessageFromCache + SafeDelete.chatMessageByID。
+                            cachedDisplayed.removeAll { $0.persistentModelID == m.persistentModelID }
+                            DispatchQueue.main.async {
+                                SafeDelete.chatMessageByID(m.persistentModelID, in: context)
+                            }
+                            // <<< CHANGE-[2026-08-22 11:20:00]-[长按删除消除竞态] 结束
+                        } label: {
+                            Label("删除", systemImage: "trash")
+                        }
+                        Button {
+                            enterMessageMultiSelect(m.persistentModelID)
+                        } label: {
+                            Label("选择", systemImage: "checkmark.circle")
+                        }
+                    }
+                }
+                .onTapGesture {
+                    if showSelection {
+                        toggleMessageSelection(message!.persistentModelID)
+                    }
+                }
+
+                // >>> CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 开始
+                // 原因：数据查询类 AI 气泡下方渲染一个平级跳转按钮，点直达对应页面。
+                //       按钮放在气泡下方（VStack 兄弟层，与气泡 ZStack 平级），遵守项目"禁止嵌套 Button"铁律；不包 withAnimation。
+                // 回退：删除本 if 块即可。
+                if !userSide, let m = message, let routeKey = m.actionRouteRaw, let route = HomeRoute(routeKey: routeKey) {
                     Button {
-                        UIPasteboard.general.string = displayText
+                        NavigationRouter.shared.navigate(route)
                     } label: {
-                        Label("复制", systemImage: "doc.on.doc")
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.right.circle.fill")
+                                .font(.system(size: 12))
+                            Text("查看详情")
+                                .font(AIATheme.Font.micro)
+                        }
+                        .foregroundStyle(AIATheme.blue)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(AIATheme.blue.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
-                    Button(role: .destructive) {
-                        // >>> CHANGE-[2026-08-17 11:34:00]-[临时对象失效崩溃] 开始
-                        // 原因：m 来自消息数组，删除后紧接 fetchMessages 重 fetch 可能释放引用。回退：改回 SafeDelete.chatMessage(m, in: context)
-                        SafeDelete.chatMessageByID(m.persistentModelID, in: context)
-                        // <<< CHANGE-[2026-08-17 11:34:00]-[临时对象失效崩溃] 结束
-                    } label: {
-                        Label("删除", systemImage: "trash")
-                    }
-                    Button {
-                        enterMessageMultiSelect(m.persistentModelID)
-                    } label: {
-                        Label("选择", systemImage: "checkmark.circle")
-                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
-            }
-            .onTapGesture {
-                if showSelection {
-                    toggleMessageSelection(message!.persistentModelID)
-                }
+                // <<< CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 结束
             }
 
             if !userSide { Spacer(minLength: 28) }
@@ -1309,9 +1442,12 @@ struct ChatView: View {
         let ids = selectedMessageIDs
         messageMultiSelectMode = false
         selectedMessageIDs.removeAll()
-        // SafeDelete.chatMessageByID 内部用 DispatchQueue.main.async 标记 syncDeleted，
-        // @Query(recentMessages) 在 SafeDelete.chatMessageByID 内部 main.async 标记 syncDeleted 后，
-        // 下次 body 自动按 !syncDeleted 过滤掉被删消息，无需手动 fetchMessages。
+        // >>> CHANGE-[2026-08-22 11:20:00]-[长按删除消除竞态] 开始
+        // 当帧即时从渲染缓存批量移除（立即少多行、不跳底）；软删落库在下方 async 延后执行。
+        // 顺序隔离同单条长按删除，避免 recompute 用旧 fresh 把消息补回。
+        // 回退：恢复 for id in ids { removeMessageFromCache(id) }。
+        cachedDisplayed.removeAll { ids.contains($0.persistentModelID) }
+        // <<< CHANGE-[2026-08-22 11:20:00]-[长按删除消除竞态] 结束
         DispatchQueue.main.async {
             for id in ids {
                 SafeDelete.chatMessageByID(id, in: context)
@@ -1553,6 +1689,10 @@ struct ChatView: View {
         }
     }
 
+    // >>> CHANGE-[2026-08-23 09:59:50]-[对话页chips按压反馈] 开始
+    // 原因：原 chip/feedbackChip 用 .buttonStyle(.plain)，点下去无任何视觉反馈，用户"没反应感"。
+    //       改用项目统一样式 PressableCardStyle()，按下有缩放+阴影反馈，与全 App 卡片交互一致。
+    // 回退：把两处 .buttonStyle(PressableCardStyle()) 改回 .buttonStyle(.plain) 即可。
     private func chip(_ title: String, route: HomeRoute) -> some View {
         Button {
             isInputFocused = false
@@ -1565,7 +1705,7 @@ struct ChatView: View {
                 .background(AIATheme.surfaceSecondary)
                 .clipShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableCardStyle())
     }
 
     private var feedbackChip: some View {
@@ -1580,8 +1720,119 @@ struct ChatView: View {
                 .background(AIATheme.surfaceSecondary)
                 .clipShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableCardStyle())
     }
+    // <<< CHANGE-[2026-08-23 09:59:50]-[对话页chips按压反馈] 结束
+
+    // >>> CHANGE-[2026-08-23 09:59:50]-[首屏示例提问降低冷启动门槛] 开始
+    // >>> CHANGE-[2026-08-23 10:30:00]-[示例文案动态化A+B组合] 开始
+    // A+B 组合：B=按 entrySource 选不同示例池（贴合入口），A=池内 randomElement 随机抽一组（每次不重样）。
+    // 铁律：所有示例必须是"点了直接发送就能自动记录"的指令（饮食/账单/待办），不含查询/闲聊句——
+    //       本功能是帮用户养成记录习惯，开放式提问（如"今天吃了什么"）不符合场景，已剔除。
+    // 回退：把 greetingBubble 里的 examplePrompts(for:) 调用改回固定三句 examplePrompt(...) 即可。
+    // >>> CHANGE-[2026-08-23 11:03:38]-[示例文案池扩充+health复用home+识别核对修正] 开始
+    // 原因：原每入口仅 3 组，随机抽易重复；扩充到 8 组（home）/ 8 组（其余），全部口语化、带数字、
+    //       每组 [饮食,账单,待办] 三类齐全且均可被 resolveLocally 识别（已逐句核对 createTodoLocally/
+    //       createBillLocally/isFoodLike 规则）。health 入口不再单独成池，复用 home 池（用户要求）。
+    // 修正（核对代码发现）：① home 第8组第3句原"后天中午12点还书"无"提醒"关键词→待办分支 hasObject
+    //       不满足→不会建待办，补"提醒"；② bill 第4组第3句"月底提醒我还房贷"→"28号提醒我还房贷"（更具体）。
+    // 回退：删除本 CHANGE 块，恢复旧 examplePools（5 池）即可。
+    /// 各入口对应的示例组池：每组 [饮食, 账单, 待办] 均为可直接发送自动记录的指令（已核对识别规则）。
+    private static let examplePools: [String: [[String]]] = [
+        // home / 兜底：均衡三类（口语化记录指令）；health 入口也复用本池。
+        // 12 组 × 2 条，D 混合轮替（饮+账 / 饮+待 / 账+待 各 4 组），靠 randomElement 每次随机抽一组。
+        "home": [
+            ["喝了1杯牛奶", "买早餐花了8元"],
+            ["吃了100克牛肉", "打车花了18元"],
+            ["吃了1份沙拉", "外卖花了32元"],
+            ["吃了一个苹果", "买饮料花了6元"],
+            ["吃了一碗米饭", "晚上8点提醒我健身"],
+            ["喝了1碗粥", "明早7点提醒我跑步"],
+            ["喝了1杯酸奶", "后天12点提醒我还书"],
+            ["吃了2个鸡蛋", "15点提醒我取快递"],
+            ["买菜花了12元", "每天10点提醒我服药"],
+            ["午餐花了25元", "下午3点提醒我交报表"],
+            ["便利店花了15元", "每天9点提醒我写日记"],
+            ["买水果花了10元", "周五11点提醒我开会"],
+        ],
+        // food 入口：饮食句更具体，仍配账单/待办凑齐三类；12 组 × 2 条 D 混合轮替
+        "food": [
+            ["吃了150克鸡胸肉", "午餐花了25元"],
+            ["喝了一杯豆浆", "买水果花了12元"],
+            ["吃了半碗面条", "晚饭外卖花了42元"],
+            ["吃了2个鸡蛋", "早餐花了5元"],
+            ["喝了1杯牛奶", "下午3点提醒我加餐"],
+            ["吃了1根香蕉", "每天8点提醒我称体重"],
+            ["吃了1份盖饭", "明晚7点提醒我上瑜伽课"],
+            ["喝了1碗汤", "周日10点提醒我采购"],
+            ["买面包花了9元", "下午5点提醒我喝水"],
+            ["超市买菜花了20元", "明天早上7点提醒我跑步"],
+            ["午饭花了28元", "今晚11点提醒我睡觉"],
+            ["买零食花了14元", "上午10点提醒我吃维生素"],
+        ],
+        // bill 入口：账单句更具体，仍配饮食/待办凑齐三类；12 组 × 2 条 D 混合轮替
+        "bill": [
+            ["午饭吃了30元", "超市购物花了88元"],
+            ["打车花了22元", "早餐吃了8元"],
+            ["买书花了45元", "喝了1杯咖啡花了18元"],
+            ["加油花了200元", "晚饭花了35元"],
+            ["买了1件衣服花了128元", "下周一提醒我交物业费"],
+            ["电影票花了60元", "每月15号提醒我还花呗"],
+            ["理发花了38元", "明天提醒我续话费"],
+            ["网购花了75元", "周六提醒我交水电费"],
+            ["超市购物花了88元", "下周一提醒我交房租"],
+            ["早餐吃了8元", "周五提醒我还信用卡"],
+            ["喝了1杯咖啡花了18元", "明天上午10点提醒我缴费"],
+            ["晚饭花了35元", "28号提醒我还房贷"],
+        ],
+        // todo 入口：待办句更具体，仍配饮食/账单凑齐三类；12 组 × 2 条 D 混合轮替
+        "todo": [
+            ["晚上吃1份沙拉", "花了15元买水"],
+            ["午饭吃了1个鸡腿", "加油花了200元"],
+            ["喝了1杯牛奶", "买菜花了33元"],
+            ["吃了1个三明治", "买咖啡花了18元"],
+            ["吃了1碗馄饨", "明天9点提醒我开会"],
+            ["喝了1杯果汁", "周六下午提醒我看牙医"],
+            ["吃了1份便当", "周日晚上8点提醒我复盘"],
+            ["吃了1个汉堡", "下午2点提醒我打电话给客户"],
+            ["买文具花了25元", "明天提醒我交报告"],
+            ["打车花了16元", "周五提醒我取体检报告"],
+            ["买药花了40元", "每天晚10点提醒我散步"],
+            ["买水花了4元", "后天上午提醒我寄快递"],
+        ],
+    ]
+    // <<< CHANGE-[2026-08-23 11:03:38]-[示例文案池扩充+health复用home+识别核对修正] 结束
+
+    /// 按入口来源选池 + 池内随机抽一组（A+B 组合）。兜底回 home 池。
+    private static func examplePrompts(for source: String) -> [String] {
+        let pool = examplePools[source] ?? examplePools["home"]!
+        return pool.randomElement() ?? pool[0]
+    }
+
+    /// 返回入口对应的整池（12 组），供首屏示例气泡随机轮播使用。兜底回 home 池。
+    private static func examplePool(for source: String) -> [[String]] {
+        return examplePools[source] ?? examplePools["home"]!
+    }
+
+    /// 首屏示例提问气泡：点一下把示例文本填入输入框并聚焦，引导新用户开口（全部为可直接记录的指令）。
+    /// 点击即暂停轮播（examplePaused = true），避免文案在用户阅读/准备点时跳走。
+    private func examplePrompt(_ text: String) -> some View {
+        Button {
+            examplePaused = true
+            input = text
+            isInputFocused = true
+        } label: {
+            Text(text)
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.blue)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(AIATheme.blue.opacity(0.10))
+                .clipShape(Capsule())
+        }
+        .buttonStyle(PressableCardStyle())
+    }
+    // <<< CHANGE-[2026-08-23 10:30:00]-[示例文案动态化A+B组合] 结束
+    // <<< CHANGE-[2026-08-23 09:59:50]-[首屏示例提问降低冷启动门槛] 结束
 
     /// 「联系我们」chip 点击：直接以小记身份发送一条带联系方式的 AI 消息进聊天流。
     private func postContactMessage() {
@@ -3323,8 +3574,7 @@ struct ChatView: View {
                                     // （已保存/待确认三态卡片），由气泡承担本次回复，不再插入纯文本。
                                     let outcome = await RecognitionSaver.processRecognition(
                                         result: result, rawText: t, image: nil,
-                                        context: context, source: .cloud, entryOrigin: "text",
-                                        marksHomeHighlight: true)
+                                        context: context, source: .cloud, entryOrigin: "text")
                                     switch outcome {
                                     case .inserted:
                                         chatBubbleInserted = true
@@ -3367,8 +3617,7 @@ struct ChatView: View {
     private func routeRecognition(_ result: RecognitionResult, rawText: String) async -> Bool {
         let outcome = await RecognitionSaver.processRecognition(
             result: result, rawText: rawText, image: nil,
-            context: context, source: .local, entryOrigin: "text",
-            marksHomeHighlight: true)
+            context: context, source: .local, entryOrigin: "text")
         switch outcome {
         case .nothing:
             return false
@@ -3493,6 +3742,17 @@ struct ChatView: View {
             return queryReply
         }
 
+        // >>> CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 开始
+        // 数据查询分支（账单/待办/饮食/健康/会员）：本地优先、秒回，命中即插入带跳转按钮的 AI 消息。
+        // 与现有记账/待办逻辑并列，不命中 return nil 继续走下方元意图/云端兜底。
+        if let result = resolveDataQuery(t) {
+            insertAIMessage(text: result.text, actionRoute: result.route)
+            // 关键：标记"已插入气泡"，防止返回的 kHandledCard 哨兵被 processNext 当普通文本再插一条 __CARD_INSERTED__ 乱码气泡。
+            chatBubbleInserted = true
+            return kHandledCard
+        }
+        // <<< CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 结束
+
         // 7. 本地确能回答的元意图（问候/身份），不包含「今天花了多少」等可能需上下文的数据查询
         if let meta = replyForMetaIntent(t) {
             return meta
@@ -3501,6 +3761,179 @@ struct ChatView: View {
         // 本地兜不住 → 交给云端 LLM
         return nil
     }
+
+    // >>> CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 开始
+    // 原因：让小记在本地优先链里就能回答数据查询（账单/待办/饮食/健康/会员），并在 AI 气泡下方渲染平级跳转按钮。
+    //       一致性铁律：所有汇总复用各页面现成口径（MonthlyReportView 月度算法、RecordsViews.active），
+    //       且账单/饮食/待办取数一律带 !$0.syncDeleted（fetchLlmContextData 的 bills/foods 是全量、未过滤软删）。
+    // 回退：删除本段 + 删除 resolveLocally 第6、7分支间的调用 + 删除 insertAIMessage + messageBubble 的按钮即可。
+
+    /// 数据查询分支的返回结构：文案 + 可选跳转目标（nil 表示不渲染按钮）。
+    private struct DataQueryResult {
+        let text: String
+        let route: HomeRoute?
+    }
+
+    /// 插入一条带跳转路由的 AI 文本消息（复用项目统一插入流程，不重复插）。
+    private func insertAIMessage(text: String, actionRoute: HomeRoute?) {
+        let msg = ChatMessage(role: .ai, text: text,
+                              createdAt: Date().addingTimeInterval(0.1),
+                              actionRouteRaw: actionRoute?.routeKey)
+        context.insert(msg)
+        try? context.save()
+    }
+
+    /// 小记数据查询：识别并回答账单/待办/饮食/健康/会员类问题，命中即本地秒回。
+    /// 不命中 return nil，由调用方继续走云端兜底（不破坏现有记账/待办逻辑）。
+    private func resolveDataQuery(_ t: String) -> DataQueryResult? {
+        let lower = t.lowercased()
+        let data = fetchLlmContextData()
+        let cal = Calendar.current
+        let now = Date()
+        let f: (Double) -> String = { String(format: "%.0f", $0) }
+        let dayLabel: (Date) -> String = { AppFormat.isoDate.string(from: $0) }
+
+        // >>> CHANGE-[2026-08-20 16:00:00]-[小记查询扩充关键词] 开始
+        // 原因：用户希望小记查询支持更多说法。仅扩充触发关键词，不改查询逻辑/文案。
+        // 回退：删除各分支新增的关键词项即可。
+        // —— 会员到期查询（当前空白分支，优先级最高以免被其他词误吞） ——
+        if lower.contains("会员") || lower.contains("pro") || lower.contains("订阅") || lower.contains("到期") || lower.contains("过期") || lower.contains("还剩")
+            || lower.contains("付费") || lower.contains("包年") || lower.contains("包月") || lower.contains("续费")
+            || lower.contains("是不是会员") || lower.contains("是不是pro") || lower.contains("还有多久") || lower.contains("什么时候到期") || lower.contains("有效期") {
+            let sub = SubscriptionManager.shared
+            if sub.isSubscribed, let exp = sub.expiresAt {
+                let days = cal.dateComponents([.day], from: now, to: exp).day ?? 0
+                let expStr = AppFormat.isoDate.string(from: exp)
+                return DataQueryResult(text: "你的会员将在 \(expStr) 到期，还剩 \(days) 天。", route: .settings)
+            } else {
+                return DataQueryResult(text: "你目前是免费版，未订阅会员。", route: .settings)
+            }
+        }
+
+        // —— 饮食汇总（某天吃了多少热量） ——
+        if lower.contains("吃了多少") || lower.contains("热量") || lower.contains("今天吃") || lower.contains("吃了什么")
+            || lower.contains("吃了啥") || lower.contains("吃了多少卡") || lower.contains("摄入") || lower.contains("消耗") || lower.contains("卡路里") {
+            let (foodDate, _) = RelativeDateParser.dateTimeOrToday(from: t)
+            let start = cal.startOfDay(for: foodDate)
+            let end = cal.date(byAdding: .day, value: 1, to: start)!
+            let foods = data.foods.filter { !$0.syncDeleted && $0.date >= start && $0.date < end }
+            if foods.isEmpty {
+                return DataQueryResult(text: "\(dayLabel(foodDate)) 还没有记录饮食呢。", route: .diet)
+            }
+            let totalKcal = foods.reduce(0.0) { acc, item in
+                let gram = item.weightGram ?? 100.0
+                return acc + (item.calories * gram / 100.0)
+            }
+            let detail = foods.prefix(5).map { "· \($0.name) \(Int($0.weightGram ?? 100))g" }.joined(separator: "\n")
+            let more = foods.count > 5 ? "\n…等共 \(foods.count) 条" : ""
+            return DataQueryResult(text: "\(dayLabel(foodDate)) 共摄入约 \(f(totalKcal)) 千卡：\n\(detail)\(more)", route: .diet)
+        }
+
+        // —— 账单查询 ——
+        if lower.contains("花") || lower.contains("钱") || lower.contains("账单") || lower.contains("支出") || lower.contains("消费") || lower.contains("账") || lower.contains("商户") || lower.contains("商家")
+            || lower.contains("开销") || lower.contains("花费") || lower.contains("进账") || lower.contains("结余") || lower.contains("余额") || lower.contains("预算") || lower.contains("记账") {
+            // 商户模糊匹配优先
+            if ["商户", "商家"].contains(where: { lower.contains($0) }) {
+                // 取商户关键词：如"美团"——简单取"商户"/"商家"后2~4字
+                let kw = t.replacingOccurrences(of: "一共", with: "")
+                    .replacingOccurrences(of: "花了多少", with: "")
+                    .replacingOccurrences(of: "花了多少钱", with: "")
+                    .replacingOccurrences(of: "商户", with: "")
+                    .replacingOccurrences(of: "商家", with: "")
+                    .trimmingCharacters(in: .whitespaces)
+                let matched = data.bills.filter { !$0.syncDeleted && $0.merchant.localizedCaseInsensitiveContains(kw) }
+                if matched.isEmpty {
+                    return DataQueryResult(text: "没找到和「\(kw)」相关的账单记录。", route: .bill)
+                }
+                let expense = matched.filter { !$0.isIncome }.reduce(0) { $0 + $1.amount }
+                let income = matched.filter { $0.isIncome }.reduce(0) { $0 + $1.amount }
+                return DataQueryResult(text: "和「\(kw)」相关的账单：支出 ¥\(f(expense))，收入 ¥\(f(income))，共 \(matched.count) 笔。", route: .bill)
+            }
+
+            // 时间区间判定（复用 RelativeDateParser 单日 + 新增区间）
+            var start: Date
+            var end: Date
+            var label: String
+            if lower.contains("本月") || lower.contains("这个月") || lower.contains("当月") {
+                let comps = cal.dateComponents([.year, .month], from: now)
+                start = cal.date(from: comps)!
+                end = cal.date(byAdding: .month, value: 1, to: start)!
+                label = "本月"
+            } else if let range = RelativeDateParser.parseRange(from: t) {
+                start = range.start; end = range.end
+                label = "这段时间内"
+            } else if lower.contains("昨天") {
+                start = cal.date(byAdding: .day, value: -1, to: cal.startOfDay(for: now))!
+                end = cal.startOfDay(for: now)
+                label = "昨天"
+            } else if lower.contains("今天") {
+                start = cal.startOfDay(for: now)
+                end = cal.date(byAdding: .day, value: 1, to: start)!
+                label = "今天"
+            } else {
+                // 默认最近 7 天（不默认本月，歧义时由兜底反问；此处保留最近7天为最常用）
+                start = cal.date(byAdding: .day, value: -7, to: cal.startOfDay(for: now))!
+                end = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now))!
+                label = "最近 7 天"
+            }
+            let targetBills = data.bills.filter { !$0.syncDeleted && $0.time >= start && $0.time < end }
+            if targetBills.isEmpty {
+                return DataQueryResult(text: "\(label)还没有账单记录哦～", route: .bill)
+            }
+            let expense = targetBills.filter { !$0.isIncome }.reduce(0) { $0 + $1.amount }
+            let income = targetBills.filter { $0.isIncome }.reduce(0) { $0 + $1.amount }
+            return DataQueryResult(text: "\(label)共支出 ¥\(f(expense))，收入 ¥\(f(income))，涉及 \(targetBills.count) 笔。", route: .bill)
+        }
+
+        // —— 待办列表（含"未安排"due==nil，与 RecordsViews.active 口径一致） ——
+        if lower.contains("待办") || lower.contains("任务") || lower.contains("提醒") || lower.contains("事情") || lower.contains("todo") || lower.contains("安排")
+            || lower.contains("要做的事") || lower.contains("要做") || lower.contains("没做完") || lower.contains("未完成") || lower.contains("还有什么没做")
+            || lower.contains("有什么要办") || lower.contains("清单") || lower.contains("待完成") {
+            let active = data.reminders.filter { !$0.syncDeleted && !$0.done }
+            if active.isEmpty {
+                return DataQueryResult(text: "你目前没有未完成的待办，可以放松一下。", route: .todo)
+            }
+            let sorted = active.sorted {
+                let d0 = $0.due ?? .distantFuture
+                let d1 = $1.due ?? .distantFuture
+                return d0 < d1
+            }
+            let detail = sorted.prefix(8).map { "· \($0.title)" }.joined(separator: "\n")
+            let more = sorted.count > 8 ? "\n…等共 \(sorted.count) 件" : ""
+            return DataQueryResult(text: "你还有 \(sorted.count) 件待办没完成：\n\(detail)\(more)", route: .todo)
+        }
+
+        // —— 健康查询（步数/睡眠/体重，读已落库 ManualHealthStore） ——
+        if lower.contains("步数") || lower.contains("健康") || lower.contains("运动") || lower.contains("走") || lower.contains("锻炼") || lower.contains("睡眠") || lower.contains("睡了") || lower.contains("体重") || lower.contains("多重")
+            || lower.contains("走了多少") || lower.contains("走了几步") || lower.contains("今天走了")
+            || lower.contains("睡了多久") || lower.contains("睡了几个小时") || lower.contains("几点睡的")
+            || lower.contains("多少斤") || lower.contains("几斤") || lower.contains("体重多少") {
+            Task { HealthManager.shared.refreshAll() }
+            if lower.contains("睡眠") || lower.contains("睡了") {
+                let (sleepDate, _) = RelativeDateParser.dateTimeOrToday(from: t)
+                let hours = ManualHealthStore.shared.sleepHours(for: sleepDate)
+                if hours <= 0 {
+                    return DataQueryResult(text: "还没同步到相关睡眠数据，去健康页授权后会更准确～", route: .health)
+                }
+                let h = Int(hours)
+                let m = Int((hours - Double(h)) * 60)
+                return DataQueryResult(text: "\(dayLabel(sleepDate)) 睡眠约 \(h) 小时 \(m) 分钟。", route: .health)
+            }
+            if lower.contains("体重") || lower.contains("多重") {
+                let (wDate, _) = RelativeDateParser.dateTimeOrToday(from: t)
+                let w = ManualHealthStore.shared.healthKitValue("weight", for: wDate)
+                if w > 0 {
+                    return DataQueryResult(text: "\(dayLabel(wDate)) 体重约 \(f(w)) kg。", route: .health)
+                }
+                return DataQueryResult(text: "还没记录体重数据哦。", route: .health)
+            }
+            let steps = ManualHealthStore.shared.steps(for: now)
+            return DataQueryResult(text: "今天步数约 \(steps) 步。", route: .health)
+        }
+
+        return nil
+    }
+    // <<< CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 结束
 
     // MARK: - 本地删除助手（针对"刚才/最近" 类指令）
 
@@ -3629,17 +4062,41 @@ struct ChatView: View {
     // 回退：恢复 .spring(response: 0.32, dampingFraction: 0.82)。
     private let scrollAnimation: Animation = .spring(response: 0.42, dampingFraction: 0.9)
     // <<< CHANGE-[2026-08-17 16:30:00]-[对话页进入淡入兜底] 结束
+    // 「钉到底」统一入口（微信式）：纯确定性 proxy.scrollTo（等价于 UIScrollView.setContentOffset）。
+    // proxy 由调用方从 ScrollViewReader 闭包内传入（当前有效值，不依赖跨闭包失效的 @State 副本）。
+    // 不声明式跟随（声明式在键盘安全区过渡态/气泡注入时重算 → 「跳一下」「被挡」）。
+    private func scrollToLatest(proxy: ScrollViewProxy, immediate: Bool = true) {
+        // >>> CHANGE-[2026-08-22 14:57:57]-[scrollToLatest 锚定底部占位锚点] 开始
+        // 原因：原锚定末条气泡 item 底(anchor:.bottom)，吞掉底部 padding，末条被输入栏盖。
+        // 修复：锚定「chat-bottom-anchor」占位锚点 = 真·内容底，padding 一并滚入可视区。
+        // 回退：恢复 anchor 末条 pid 写法。
+        guard !cachedDisplayed.isEmpty || !displayedMessages.isEmpty else { return }
+        if immediate {
+            var tx = Transaction()
+            tx.disablesAnimations = true
+            withTransaction(tx) { proxy.scrollTo("chat-bottom-anchor", anchor: .bottom) }
+        } else {
+            proxy.scrollTo("chat-bottom-anchor", anchor: .bottom)
+        }
+        // <<< CHANGE-[2026-08-22 14:57:57]-[scrollToLatest 锚定底部占位锚点] 结束
+    }
+
     private func scrollToBottom(proxy: ScrollViewProxy, delay: TimeInterval = 0, anchor: UnitPoint = .bottom, animated: Bool = true) {
+        // >>> CHANGE-[2026-08-22 14:57:57]-[scrollToBottom 锚定底部占位锚点] 开始
+        // 原因：与 scrollToLatest 同因，原锚定末条 item 底吞底部 padding。
+        // 修复：统一锚定「chat-bottom-anchor」真·内容底。
+        // 回退：恢复 last.id 写法。
         let work = {
-            guard let last = cachedDisplayed.last else { return }
+            guard !cachedDisplayed.isEmpty else { return }
             if animated {
-                withAnimation(scrollAnimation) { proxy.scrollTo(last.id, anchor: anchor) }
+                withAnimation(scrollAnimation) { proxy.scrollTo("chat-bottom-anchor", anchor: anchor) }
             } else {
                 var tx = Transaction()
                 tx.disablesAnimations = true
-                withTransaction(tx) { proxy.scrollTo(last.id, anchor: anchor) }
+                withTransaction(tx) { proxy.scrollTo("chat-bottom-anchor", anchor: anchor) }
             }
         }
+        // <<< CHANGE-[2026-08-22 14:57:57]-[scrollToBottom 锚定底部占位锚点] 结束
         if delay <= 0 {
             DispatchQueue.main.async(execute: work)
         } else {
@@ -4022,6 +4479,14 @@ struct ChatView: View {
         let fmt = DateFormatter()
         fmt.locale = Locale(identifier: "zh_CN")
         fmt.dateFormat = "M月d日 HH:mm"
+        return fmt.string(from: date)
+    }
+
+    /// 仅显示时分（HH:mm），用于招呼气泡时间小字。
+    private func formatTimeOnly(_ date: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "zh_CN")
+        fmt.dateFormat = "HH:mm"
         return fmt.string(from: date)
     }
 
