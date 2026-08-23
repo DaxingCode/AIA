@@ -334,6 +334,7 @@ func buildPendingItems(from result: RecognitionResult, source: String,
 
 struct ChatRecognitionBubble: View {
     let message: ChatMessage
+    var onSaved: (() -> Void)? = nil
     @State private var items: [RecognitionItem]
     @Environment(\.modelContext) private var context
 
@@ -343,8 +344,9 @@ struct ChatRecognitionBubble: View {
     @Query(filter: #Predicate<FoodEntry> { !$0.syncDeleted }) private var allFoods: [FoodEntry]
     @Query(filter: #Predicate<HealthMetric> { !$0.syncDeleted }) private var allHealths: [HealthMetric]
 
-    init(message: ChatMessage) {
+    init(message: ChatMessage, onSaved: (() -> Void)? = nil) {
         self.message = message
+        self.onSaved = onSaved
         _items = State(initialValue: decodeRecognitionPayload(message.text)?.items ?? [])
     }
 
@@ -367,22 +369,26 @@ struct ChatRecognitionBubble: View {
                     BillRowCard(item: itemBinding,
                                 allBills: allBills,
                                 persist: persist,
-                                onRemove: { removeItem(element.id) })
+                                onRemove: { removeItem(element.id) },
+                                onSaved: onSaved)
                 case .todo:
                     TodoRowCard(item: itemBinding,
                                 allReminders: allReminders,
                                 persist: persist,
-                                onRemove: { removeItem(element.id) })
+                                onRemove: { removeItem(element.id) },
+                                onSaved: onSaved)
                 case .food:
                     FoodRowCard(item: itemBinding,
                                 allFoods: allFoods,
                                 persist: persist,
-                                onRemove: { removeItem(element.id) })
+                                onRemove: { removeItem(element.id) },
+                                onSaved: onSaved)
                 case .health:
                     HealthRowCard(item: itemBinding,
                                   allHealths: allHealths,
                                   persist: persist,
-                                  onRemove: { removeItem(element.id) })
+                                  onRemove: { removeItem(element.id) },
+                                  onSaved: onSaved)
                 }
             }
         }
@@ -596,6 +602,7 @@ struct BillRowCard: View {
     let allBills: [Bill]
     var persist: () -> Void
     var onRemove: () -> Void
+    var onSaved: (() -> Void)? = nil
     @Environment(\.modelContext) private var context
 
     /// 编辑弹窗目标：存 PersistentIdentifier，sheet 内取活实例，避免 @Query 刷新抖动导致 sheet 重弹。
@@ -606,8 +613,9 @@ struct BillRowCard: View {
         if case .bill(let p) = item.payload { return p } else { return nil }
     }
 
-    init(item: Binding<RecognitionItem>, allBills: [Bill], persist: @escaping () -> Void, onRemove: @escaping () -> Void) {
+    init(item: Binding<RecognitionItem>, allBills: [Bill], persist: @escaping () -> Void, onRemove: @escaping () -> Void, onSaved: (() -> Void)? = nil) {
         _item = item
+        self.onSaved = onSaved
         self.allBills = allBills
         self.persist = persist
         self.onRemove = onRemove
@@ -709,6 +717,8 @@ struct BillRowCard: View {
         // >>> CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 开始
         HomeHighlight.mark(types: [item.type.rawValue])
         // <<< CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 结束
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        onSaved?()
     }
 
     /// 待确认态「编辑」/点卡片：先按识别结果入库并切换到已保存壳，
@@ -776,6 +786,7 @@ struct TodoRowCard: View {
     let allReminders: [Reminder]
     var persist: () -> Void
     var onRemove: () -> Void
+    var onSaved: (() -> Void)? = nil
     @Environment(\.modelContext) private var context
 
     /// 编辑弹窗目标：存 PersistentIdentifier，sheet 内取活实例，避免 @Query 刷新抖动导致 sheet 重弹。
@@ -786,8 +797,9 @@ struct TodoRowCard: View {
         if case .todo(let p) = item.payload { return p } else { return nil }
     }
 
-    init(item: Binding<RecognitionItem>, allReminders: [Reminder], persist: @escaping () -> Void, onRemove: @escaping () -> Void) {
+    init(item: Binding<RecognitionItem>, allReminders: [Reminder], persist: @escaping () -> Void, onRemove: @escaping () -> Void, onSaved: (() -> Void)? = nil) {
         _item = item
+        self.onSaved = onSaved
         self.allReminders = allReminders
         self.persist = persist
         self.onRemove = onRemove
@@ -875,6 +887,8 @@ struct TodoRowCard: View {
         // >>> CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 开始
         HomeHighlight.mark(types: [item.type.rawValue])
         // <<< CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 结束
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        onSaved?()
     }
 
     /// 待确认态「编辑」/点卡片：先入库切壳，再把弹 sheet 延后一帧，
@@ -921,6 +935,7 @@ struct FoodRowCard: View {
     let allFoods: [FoodEntry]
     var persist: () -> Void
     var onRemove: () -> Void
+    var onSaved: (() -> Void)? = nil
     @Environment(\.modelContext) private var context
 
     /// 编辑弹窗目标：存 PersistentIdentifier（ID 永远稳定），sheet 内再取活实例，
@@ -950,8 +965,9 @@ struct FoodRowCard: View {
         ""
     }
 
-    init(item: Binding<RecognitionItem>, allFoods: [FoodEntry], persist: @escaping () -> Void, onRemove: @escaping () -> Void) {
+    init(item: Binding<RecognitionItem>, allFoods: [FoodEntry], persist: @escaping () -> Void, onRemove: @escaping () -> Void, onSaved: (() -> Void)? = nil) {
         _item = item
+        self.onSaved = onSaved
         self.allFoods = allFoods
         self.persist = persist
         self.onRemove = onRemove
@@ -1122,6 +1138,8 @@ struct FoodRowCard: View {
         // >>> CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 开始
         HomeHighlight.mark(types: [item.type.rawValue])
         // <<< CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 结束
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        onSaved?()
     }
 
     /// 待确认态「编辑」：方案 B——只把识别 payload 交给编辑页做草稿，
@@ -1191,6 +1209,7 @@ struct HealthRowCard: View {
     let allHealths: [HealthMetric]
     var persist: () -> Void
     var onRemove: () -> Void
+    var onSaved: (() -> Void)? = nil
     @Environment(\.modelContext) private var context
 
     /// 编辑弹窗目标：存 PersistentIdentifier，sheet 内取活实例，避免 @Query 刷新抖动导致 sheet 重弹。
@@ -1201,8 +1220,9 @@ struct HealthRowCard: View {
         if case .health(let p) = item.payload { return p } else { return nil }
     }
 
-    init(item: Binding<RecognitionItem>, allHealths: [HealthMetric], persist: @escaping () -> Void, onRemove: @escaping () -> Void) {
+    init(item: Binding<RecognitionItem>, allHealths: [HealthMetric], persist: @escaping () -> Void, onRemove: @escaping () -> Void, onSaved: (() -> Void)? = nil) {
         _item = item
+        self.onSaved = onSaved
         self.allHealths = allHealths
         self.persist = persist
         self.onRemove = onRemove
@@ -1284,6 +1304,8 @@ struct HealthRowCard: View {
         // >>> CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 开始
         HomeHighlight.mark(types: [item.type.rawValue])
         // <<< CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 结束
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        onSaved?()
     }
 
     /// 待确认态「编辑」/点卡片：先入库切壳，再把弹 sheet 延后一帧，
