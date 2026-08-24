@@ -103,6 +103,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             ReminderNotificationManager.sleepHourKey: 23,
             ReminderNotificationManager.sleepMinuteKey: 0,
             // <<< CHANGE-[2026-08-18 18:28:46]-[睡眠提醒默认值] 结束
+            // >>> CHANGE-[2026-08-24 09:26:09]-[每天记录提醒默认值] 开始
+            // 原因: 每天记录提醒默认开、默认9:00。register 仅兜底新装；老用户走下方迁移段强制开。
+            // 回退: 删除本段 3 行 + 删除下方 morningDefaultOnMigratedKey 迁移段。
+            ReminderNotificationManager.morningEnabledKey: true,
+            ReminderNotificationManager.morningHourKey: 9,
+            ReminderNotificationManager.morningMinuteKey: 0,
+            // <<< CHANGE-[2026-08-24 09:26:09]-[每天记录提醒默认值] 结束
             ICloudBackupManager.enabledKey: false,
         ])
         // <<< CHANGE-[2026-08-16 21:30:00]-健康目标提醒默认值 结束
@@ -128,6 +135,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             UserDefaults.standard.set(true, forKey: sleepDefaultOnMigratedKey)
         }
         // <<< CHANGE-[2026-08-18 18:28:46]-[睡眠提醒老用户迁移] 结束
+        // >>> CHANGE-[2026-08-24 09:26:09]-[每天记录提醒老用户迁移] 开始
+        // 原因: register 只兜底新装，老用户没注册过这 3 个 key（默认 false/0）→ 无提醒。
+        // 用户要求默认开+9:00，故一次性强制开 + 写入默认时间；之后用户可手动改，不再覆盖。
+        // 回退: 删除本段即可。
+        let morningDefaultOnMigratedKey = "aia.migratedMorningDefaultOn"
+        if !UserDefaults.standard.bool(forKey: morningDefaultOnMigratedKey) {
+            UserDefaults.standard.set(true, forKey: ReminderNotificationManager.morningEnabledKey)
+            UserDefaults.standard.set(9, forKey: ReminderNotificationManager.morningHourKey)
+            UserDefaults.standard.set(0, forKey: ReminderNotificationManager.morningMinuteKey)
+            UserDefaults.standard.set(true, forKey: morningDefaultOnMigratedKey)
+        }
+        // <<< CHANGE-[2026-08-24 09:26:09]-[每天记录提醒老用户迁移] 结束
 
         // 一次性迁移：强制自动同步默认关闭。
         // 逻辑同上：只清一次（用版本标记守卫），重置老用户/测试机已存的 true；
