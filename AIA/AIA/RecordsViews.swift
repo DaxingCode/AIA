@@ -2767,13 +2767,22 @@ struct BillListView: View {
                                 .font(AIATheme.Font.subhead.weight(.medium))
                         )
                 }
+                // >>> CHANGE-[2026-08-24 16:07:54]-[账单分类图例金额截断] 开始
+                // 原因：原 .frame(width: 90) 把图例区硬限 90pt，5 位数金额(如 ¥10,472) 超出后被 HStack 的 Spacer 挤压截断，
+                //       表现为「¥10,2...」漏显。改为 maxWidth 自然展开 + 金额允许缩放，彻底防溢出。
+                // 二次微调（同日同主题）：去限宽后图例顶到卡边、文字贴左右，加 .padding(.horizontal, 10) 留呼吸。
+                // 回退：删本块标记并恢复 .frame(width: 90) 即回旧观感（但 5 位数仍会截断）。
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(Array(categories.prefix(3)), id: \.cat) { item in
                         HStack(spacing: 4) {
                             Circle().fill(BillCategoryHelpers.color(for: item.cat)).frame(width: 6, height: 6)
                             Text(item.cat).font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
-                            Spacer()
-                            Text("¥\(Int(item.sum))").font(AIATheme.Font.micro.weight(.medium))
+                            Spacer(minLength: 4)
+                            Text("¥\(Int(item.sum))")
+                                .font(AIATheme.Font.micro.weight(.medium))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+                                .fixedSize(horizontal: true, vertical: false)
                         }
                     }
                     if categories.isEmpty {
@@ -2781,7 +2790,9 @@ struct BillListView: View {
                             .font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
                     }
                 }
-                .frame(width: 90)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                // <<< CHANGE-[2026-08-24 16:07:54]-[账单分类图例金额截断] 结束
             }
             .frame(maxWidth: .infinity)
         }
@@ -4392,6 +4403,15 @@ struct ReminderListView: View {
         // 直接同步改 done，@Query 会在下一帧自然重 fetch 一次，当前行从列表消失即可。
         r.done.toggle()
         if !wasDone { UsageAnalytics.log("todo_done") }
+        // >>> CHANGE-[2026-08-24 12:34:50]-[完成待办立即取消通知] 开始
+        // 原因：原 cancel(r) 包在 DispatchQueue.main.async，下一帧 @Query 重排可能把 r 变成 fault，
+        //       syncId 取不到正确值 → 通知删不掉 → 重复待办今天仍响。
+        //       修复：同步段先抓取 syncId 字符串，立即取消（用 bySyncId 重载，不依赖异步闭包里的 r）。
+        let finishedSyncId = r.syncId.uuidString
+        if !wasDone {
+            ReminderNotificationManager.cancel(bySyncId: finishedSyncId)
+        }
+        // <<< CHANGE-[2026-08-24 12:34:50]-[完成待办立即取消通知] 结束
         // 通知调度延后到下一帧，不阻塞当前点击事件。
         // 显式 context.save() 也去掉，由 SwiftData autosave 处理。
         DispatchQueue.main.async {
@@ -4399,8 +4419,7 @@ struct ReminderListView: View {
                 // 之前已完成，现在切回未完成：重新排程提醒
                 ReminderNotificationManager.schedule(r)
             } else {
-                // 之前未完成，现在标记为已完成：取消提醒
-                ReminderNotificationManager.cancel(r)
+                // 之前未完成，现在标记为已完成：取消提醒（已同步段处理）
                 // 如果是重复待办，自动创建下一个周期的新实例
                 createNextRepeatReminder(r)
             }
