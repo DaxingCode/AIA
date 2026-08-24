@@ -124,10 +124,21 @@ enum ReminderNotificationManager {
 
     /// 取消某条待办的所有 pending 通知（覆盖所有时间点，循环上限放宽到 8 以兼容 4 个默认提醒）
     static func cancel(_ reminder: Reminder) {
-        var ids = ["reminder-\(reminder.syncId.uuidString)"] // 旧版单通知 id
-        for i in 0..<8 { ids.append("reminder-\(reminder.syncId.uuidString)-\(i)") }
+        cancel(bySyncId: reminder.syncId.uuidString)
+    }
+
+    /// >>> CHANGE-[2026-08-24 12:34:50]-[完成待办立即取消通知] 开始
+    /// 原因：原 cancel(_ reminder:) 在调用方把 reminder 包进 DispatchQueue.main.async 闭包时，
+    ///       下一帧 @Query 重排可能把该 @Model 实例变成 fault，reminder.syncId 取不到正确值，
+    ///       导致拼出的通知 id 错误、系统里那条通知删不掉（重复待办今天仍响）。
+    ///       新增按 syncId 字符串取消的重载，调用方在同步段先抓取 syncId 再传入，避免 fault 风险。
+    /// 回退：删除本函数即可，cancel(_ reminder:) 仍可用。
+    static func cancel(bySyncId syncId: String) {
+        var ids = ["reminder-\(syncId)"] // 旧版单通知 id
+        for i in 0..<8 { ids.append("reminder-\(syncId)-\(i)") }
         center.removePendingNotificationRequests(withIdentifiers: ids)
     }
+    /// <<< CHANGE-[2026-08-24 12:34:50]-[完成待办立即取消通知] 结束
 
     /// 发送一条测试通知（延迟 seconds 秒），用于验证授权与横幅弹出是否正常。
     /// completion 回调在主线程返回是否成功排程（false 表示未授权，需去系统设置手动开启）。
