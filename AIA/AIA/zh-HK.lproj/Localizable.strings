@@ -49,6 +49,8 @@
 "bill.details" = "帳單詳情";
 "bill.searchMerchant" = "搜尋商戶、金額、分類、日期、備註";
 "bill.searchEmpty" = "未找到匹配“%@”的帳單";
+"bill.categoryCount" = "%d 筆";
+"bill.categoryEmpty" = "該週期內沒有「%@」的記錄了";
 "bill.carousel.hint" = "點擊圓環查看詳情 / 左右滑動查看更多";
 "bill.grid.hint" = "點擊圓環查看詳情";
 "bill.empty.title" = "沒有%@帳單記錄";

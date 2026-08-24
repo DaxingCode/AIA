@@ -49,6 +49,8 @@
 "bill.details" = "Bill Details";
 "bill.searchMerchant" = "Search merchant, amount, category, date, note";
 "bill.searchEmpty" = "No bills matching “%@”";
+"bill.categoryCount" = "%d entries";
+"bill.categoryEmpty" = "No “%@” records in this period";
 "bill.carousel.hint" = "Tap a ring for details / Swipe to see more";
 "bill.grid.hint" = "Tap a ring for details";
 "bill.empty.title" = "No %@ bill records";

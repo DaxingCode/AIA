@@ -49,6 +49,8 @@
 "bill.details" = "账单详情";
 "bill.searchMerchant" = "搜索商户、金额、分类、日期、备注";
 "bill.searchEmpty" = "未找到匹配“%@”的账单";
+"bill.categoryCount" = "%d 笔";
+"bill.categoryEmpty" = "该周期内没有“%@”的记录了";
 "bill.carousel.hint" = "点击圆环查看详情 / 左右滑动查看更多";
 "bill.grid.hint" = "点击圆环查看详情";
 "bill.empty.title" = "没有%@账单记录";

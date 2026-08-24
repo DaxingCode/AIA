@@ -29,6 +29,13 @@ enum HomeRoute: Hashable {
     case bodyData
     case healthGoals
     case billDashboard(BillDashboardMode)
+    // >>> CHANGE-[2026-08-24 17:59:13]-[账单分类点击跳分类明细] 开始
+    // 原因：账单仪表盘分类构成页点击某一分类，需跳到"仅该分类的账单列表"。
+    //      新增携带快照参数的路由（category/periodStart/periodEnd/onlyIncome），跳转时深拷贝父页当前值，
+    //      回退后父页时间/类型变化不影响已开的列表页。
+    // 回退：删本行 + routeDestination 内对应分支 + BillCategoryListView.swift 即可整体移除该功能。
+    case billCategory(category: String, periodStart: Date, periodEnd: Date, onlyIncome: Bool)
+    // <<< CHANGE-[2026-08-24 17:59:13]-[账单分类点击跳分类明细] 结束
     case recognitionRecords
     // Settings 子页（2026-07-29 从 SettingsView 闭包式 NavigationLink 改造为路由推送）
     case homeLayoutSettings
@@ -387,6 +394,13 @@ struct ContentView: View {
             HealthGoalsView()
         case .billDashboard(let mode):
             BillDashboardView(mode: mode)
+        // >>> CHANGE-[2026-08-24 17:59:13]-[账单分类点击跳分类明细] 开始
+        case let .billCategory(category, periodStart, periodEnd, onlyIncome):
+            BillCategoryListView(category: category,
+                                 periodStart: periodStart,
+                                 periodEnd: periodEnd,
+                                 onlyIncome: onlyIncome)
+        // <<< CHANGE-[2026-08-24 17:59:13]-[账单分类点击跳分类明细] 结束
         case .recognitionRecords:
             RecognitionRecordsView()
         case .homeLayoutSettings:
