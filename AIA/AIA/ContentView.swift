@@ -2563,14 +2563,7 @@ struct ContentView: View {
             // >>> CHANGE-[2026-08-26 14:00:00]-移除首页宫格"点击记录"假按钮标签 开始
             // 原因: 原空状态用圆角胶囊 + hand.tap 图标展示"点击记录"，外观极似按钮但 .allowsHitTesting(false) 完全不接收点击，审核员（iPad 模式）误判为"占位按钮/功能不完整"触发 Guideline 2.1.0 App Completeness。整张宫格本就可点进模块，无需此误导标签。
             // 回退: 恢复下方被删除的 if isEmpty { HStack ... } 胶囊标签即可
-            // 空状态改为低调文字提示（非按钮形态，不误导）
-            if isEmpty {
-                Text("暂无数据，点击卡片开始记录 →")
-                    .font(AIATheme.Font.micro)
-                    .foregroundStyle(AIATheme.muted)
-                    .padding(.leading, 12)
-                    .allowsHitTesting(false)
-            }
+            // 空状态提示已彻底移除（用户要求连低调文字也去掉），仅凭整张宫格可点进入模块即可。
             // <<< CHANGE-[2026-08-26 14:00:00]-移除首页宫格"点击记录"假按钮标签 结束
 
             // 右上角小按钮（睡眠/饮水/隐私眼等）：用 .overlay(alignment:.topTrailing) 盖在父卡片之上，
