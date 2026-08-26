@@ -1010,8 +1010,15 @@ struct EditFoodView: View {
                 baseCalories: nil, baseProtein: nil, baseCarbs: nil, baseFat: nil,
                 baseFiber: nil, baseSugar: nil, baseSodium: nil,
                 imageName: sourceImageName)
-            applyState(to: entry)
+            // >>> CHANGE-[2026-08-26 12:14:09]-[待确认卡保存崩溃加固] 开始
+            // 原因：草稿模式新建的 FoodEntry 在 context.insert 之前访问属性，
+            //       某些 SwiftData 配置下 backing 尚未就绪，写属性会触发
+            //       _InvalidFutureBackingData 断言崩(EXC_BREAKPOINT)。
+            //       改为先 insert 拿到合法 backing，再 applyState 写属性。
+            // 回退：把下面两行顺序换回 applyState(to: entry) 在前、context.insert(entry) 在后。
             context.insert(entry)
+            applyState(to: entry)
+            // <<< CHANGE-[2026-08-26 12:14:09]-[待确认卡保存崩溃加固] 结束
             // 备注：草稿首次保存即新建 FoodNote
             if !(noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || !noteImageNames.isEmpty {
                 context.insert(FoodNote(syncId: entry.syncId, note: noteText, imageNames: noteImageNames))
@@ -1051,6 +1058,15 @@ struct EditFoodView: View {
 
     /// 把当前 @State 字段写入给定 FoodEntry（草稿新建 & 已保存实例两种路径复用）。
     private func applyState(to entry: FoodEntry) {
+        // >>> CHANGE-[2026-08-26 12:14:09]-[待确认卡保存崩溃加固] 开始
+        // 防御：传入的 entry 若 backing 已失效(幽灵对象/未就绪)，
+        //       写属性会触发 SwiftData _InvalidFutureBackingData 断言崩(EXC_BREAKPOINT)。
+        //       草稿新建实例 insert 后 storeIdentifier 非 nil、modelContext 非 nil；
+        //       已保存实例经 resolveEntry 取回时同样校验，避免崩。
+        guard entry.persistentModelID.storeIdentifier != nil else { return }
+        guard entry.modelContext != nil else { return }
+        guard !entry.syncDeleted else { return }
+        // <<< CHANGE-[2026-08-26 12:14:09]-[待确认卡保存崩溃加固] 结束
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         entry.name = trimmed.isEmpty ? entry.name : trimmed
         entry.meal = meal

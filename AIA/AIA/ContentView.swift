@@ -2560,20 +2560,18 @@ struct ContentView: View {
             // 用 ButtonStyle 实现，与 Button 点击共存，不吞点击，且自动遵守「减弱动态效果」。
             .buttonStyle(PressableCardStyle())
 
-            // 空状态提示（点击记录）
+            // >>> CHANGE-[2026-08-26 14:00:00]-移除首页宫格"点击记录"假按钮标签 开始
+            // 原因: 原空状态用圆角胶囊 + hand.tap 图标展示"点击记录"，外观极似按钮但 .allowsHitTesting(false) 完全不接收点击，审核员（iPad 模式）误判为"占位按钮/功能不完整"触发 Guideline 2.1.0 App Completeness。整张宫格本就可点进模块，无需此误导标签。
+            // 回退: 恢复下方被删除的 if isEmpty { HStack ... } 胶囊标签即可
+            // 空状态改为低调文字提示（非按钮形态，不误导）
             if isEmpty {
-                HStack(spacing: 4) {
-                    Image(systemName: "hand.tap")
-                        .font(AIATheme.Font.micro.weight(.semibold))
-                    Text("点击记录")
-                        .font(AIATheme.Font.micro.weight(.medium))
-                }
-                .foregroundStyle(accent)
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(accent.opacity(0.12))
-                .clipShape(Capsule())
-                .allowsHitTesting(false)
+                Text("暂无数据，点击卡片开始记录 →")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+                    .padding(.leading, 12)
+                    .allowsHitTesting(false)
             }
+            // <<< CHANGE-[2026-08-26 14:00:00]-移除首页宫格"点击记录"假按钮标签 结束
 
             // 右上角小按钮（睡眠/饮水/隐私眼等）：用 .overlay(alignment:.topTrailing) 盖在父卡片之上，
             // 点击命中必然独立，不会被大卡片的 contentShape 吞掉。
