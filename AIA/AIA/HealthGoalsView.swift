@@ -108,7 +108,7 @@ struct HealthGoalsView: View {
                         }
                         .padding(.horizontal, 12)
                         // >>> CHANGE-[2026-08-26 14:05:00]-BMI加WHO来源引用 开始
-                        Link("BMI 依据 WHO 标准计算", destination: URL(string: "https://www.who.int/europe/news-room/fact-sheets/item/body-mass-index-(bmi)")!)
+                        Link("BMI 依据 WHO 标准计算", destination: URL(string: "https://www.who.int/news-room/fact-sheets/detail/obesity-and-overweight")!)
                             .font(AIATheme.Font.micro)
                             .foregroundStyle(AIATheme.muted)
                             .padding(.horizontal, 12)
