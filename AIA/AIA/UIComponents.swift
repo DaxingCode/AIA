@@ -455,20 +455,36 @@ struct MiniBar: View {
                 // >>> CHANGE-[2026-08-19 09:15:14]-MiniBar超额整条同深红 开始
                 // 原因: 用户要求"摄入超目标后整个进度条变成同一个颜色的深红"(2026-08-19 截图 1821/1731 坐实)。
                 // 旧版底层 overColor.opacity(0.18) 与前景实色色差过大,动画中段/数据截断时"前实色+后浅色"像两种颜色。
-                // 策略: 底层铺 overColor 实色(不再 0.18 透明),前景 mask 同色覆盖(动画仍从左往右生长,颜色不变),
+                // 策略: 底层铺 overColor 实色(不再 0.18 透明),前景 mask 覆盖(动画仍从左往右生长),
                 //       末端高光用 Color.white.opacity(0.35) blend 提亮,非 overColor 实色,避免出现第二种红。
+                // 2026-08-26 修正: 前景 mask 原与底色同色→生长过程肉眼不可见(满值无"在长"反馈)。
+                //       现改为 overColor + 白混合(amount:0.32) 的更亮红,已长段偏亮、未长段深红,生长可见,不引入第二种色相。
                 // 回退: 删除本 if over 分支,恢复原单条 RoundedRectangle(over ? overColor.opacity(0.18) : fillSoft)
                 //       + 渐变前景 + 末端 overColor 脉冲结构(即 09:05:07 标记版)。
                 let dp = displayed  // mask 比例: displayed 即 0→value,超额 value>1 会被 safeFraction 钳到 1.0
                 ZStack(alignment: .leading) {
-                    // 底层铺满 overColor 实色
+                    // 底层铺满 overColor 实色(深红)——始终整条可见,未生长段也保持深红底色
                     RoundedRectangle(cornerRadius: height / 2)
                         .fill(overColor ?? AIATheme.over)
                         .frame(width: geo.size.width, height: height)
-                    // 前景 mask 同色: 动画仍从左往右生长,但颜色不变,整条始终同一深红
-                    RoundedRectangle(cornerRadius: height / 2)
-                        .fill(overColor ?? AIATheme.over)
-                        .frame(width: geo.size.width, height: height)
+                    // >>> CHANGE-[2026-08-26 20:51:06]-MiniBar超额生长可见性 开始
+                    // 原因: 超额时原前景 mask 与底色同色,生长过程肉眼不可见(用户反馈"满值无生长动画")。
+                    // 策略: 前景 mask 改用「overColor 实色 + 白色 0.32 叠加层」,已长段偏亮、未长段深红,从左往右蔓延可见。
+                    //       不用 Color.mix(因当前工具链无该 API),改用叠加白色半透明层等价实现提亮。
+                    // 回退: 将此前景 ZStack 改回单条 .fill(overColor ?? AIATheme.over) 同色即可恢复原"整条同深红"但不生长可见的观感。
+                    // 注意: overColor 是 Color?,且 AIATheme.over 可能推断为可选,用 as Color? ?? AIATheme.over 兜底拿到非可选 Color。
+                    // 前景 mask 用「更亮的红」(深红上叠白),让生长过程肉眼可见:
+                    // 已长区域偏亮、未长区域是底层深红,从左往右蔓延即有"在长"的反馈。
+                    // 注意:仍属红色系(白混合非纯白),不引入第二种色相,保持超额态统一深红观感。
+                    let baseOver: Color = (overColor ?? AIATheme.over) as Color? ?? AIATheme.over
+                    ZStack {
+                        RoundedRectangle(cornerRadius: height / 2)
+                            .fill(baseOver)
+                        RoundedRectangle(cornerRadius: height / 2)
+                            .fill(Color.white.opacity(0.32))
+                    }
+                    .frame(width: geo.size.width, height: height)
+                    // <<< CHANGE-[2026-08-26 20:51:06]-MiniBar超额生长可见性 结束
                         .mask(alignment: .leading) {
                             Rectangle().scale(x: safeFraction(dp), anchor: .leading)
                         }
@@ -518,6 +534,8 @@ struct MiniBar: View {
         // >>> CHANGE-[2026-08-18 14:54:59]-[区分冷启动/热启动延迟] 开始
         // 冷启动(coldStart=true)用 growDelay(1.5s)躲首帧重算风暴；热启动/返回首页(coldStart=false)用 warmDelay(0.3s)即时播。
         .onAppear {
+            // 首帧同步超额态：不传 resetToken 的页面（如饮食记录页）靠这里初始化 over，否则首次进入一直是黄色/非超额分支。
+            over = value > 1
             // 首帧不立即播：先落位 0，延迟后再 withAnimation，避开首帧 body 重算风暴合并。
             guard !AIATheme.motionReduce else { displayed = value; return }
             displayed = 0
