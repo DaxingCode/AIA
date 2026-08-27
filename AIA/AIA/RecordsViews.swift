@@ -4824,7 +4824,13 @@ private struct DietAnalysisView: View {
     // 回退: 删本段,恢复原判(5 元组 periodAvg 无 carb/fat)。
     private var periodAvg: (cal: Double, protein: Double, carb: Double, fat: Double, fiber: Double, sugar: Double, sodium: Double) {
         let (s, e) = period.range()
-        let dayCount = max(1, Calendar.current.dateComponents([.day], from: s, to: e).day ?? 1)
+        // >>> CHANGE-[2026-08-27 14:42:18]-饮食分析日均改按记录天数 开始
+        // 原因: 原 dayCount 用区间日历天数(本周=7/本月=整月)，未记录的日子会拉低日均，导致"本周平均达成"永远偏低。
+        // 修法: 改为去重后的实际记录天数，无记录时回落 1 防除零。
+        // 回退: 恢复 let dayCount = max(1, Calendar.current.dateComponents([.day], from: s, to: e).day ?? 1)
+        let recordedDays = Set(periodFoods.map { Calendar.current.startOfDay(for: $0.date) }).count
+        let dayCount = max(1, recordedDays)
+        // <<< CHANGE-[2026-08-27 14:42:18]-饮食分析日均改按记录天数 结束
         var calSum = 0.0, proteinSum = 0.0, carbSum = 0.0, fatSum = 0.0, fiberSum = 0.0, sugarSum = 0.0, sodiumSum = 0.0
         for f in periodFoods {
             calSum += f.calories
@@ -4872,7 +4878,13 @@ private struct DietAnalysisView: View {
     /// 颜色：前 4 项按宏量素语义色；后 4 项同色
     private var nutritionCards: [(label: String, value: String, color: Color)] {
         let (s, e) = period.range()
-        let dayCount = max(1, Calendar.current.dateComponents([.day], from: s, to: e).day ?? 1)
+        // >>> CHANGE-[2026-08-27 14:42:18]-饮食分析日均改按记录天数 开始
+        // 原因: 与 periodAvg 同步，营养小卡日均也按实际记录天数除，保证两处口径一致。
+        // 修法: 同 periodAvg，用去重后的实际记录天数，无记录时回落 1。
+        // 回退: 恢复 let dayCount = max(1, Calendar.current.dateComponents([.day], from: s, to: e).day ?? 1)
+        let recordedDays = Set(periodFoods.map { Calendar.current.startOfDay(for: $0.date) }).count
+        let dayCount = max(1, recordedDays)
+        // <<< CHANGE-[2026-08-27 14:42:18]-饮食分析日均改按记录天数 结束
         let sum = periodFoods.reduce((cal: 0.0, p: 0.0, c: 0.0, f: 0.0, fiber: 0.0, sugar: 0.0, sodium: 0.0, water: 0.0)) { acc, f in
             (acc.cal + f.calories, acc.p + f.protein, acc.c + f.carbs, acc.f + f.fat,
              acc.fiber + f.fiber, acc.sugar + f.sugar, acc.sodium + f.sodium, acc.water + f.waterIntake)
@@ -4921,17 +4933,7 @@ private struct DietAnalysisView: View {
                     )
                 }
 
-                // 4. 平均每日营养摄入：3 列网格（与饮食记录页 MacroCard 网格列数一致）
-                SectionTitle(text: "平均每日营养摄入", trailing: "基于周期内记录自动计算")
-                LazyVGrid(columns: [
-                    GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())
-                ], spacing: 8) {
-                    ForEach(nutritionCards, id: \.label) { c in
-                        DietNutritionCard(label: c.label, value: c.value, color: c.color)
-                    }
-                }
-
-                // 5. 目标达成（减脂/增肌/维持 对比层）：热量/蛋白目标 = TDEE × 系数 / 体重 × g/kg；
+                // 4. 目标达成（减脂/增肌/维持 对比层）：热量/蛋白目标 = TDEE × 系数 / 体重 × g/kg；
                 //    纤维/糖/钠目标按「目标热量（calorieTarget = TDEE × 系数，即本卡顶部显示的“目标热量”）」线性缩放，与热量行同源一致。
                 SectionTitle(text: NSLocalizedString("diet.analysis.goalTarget", comment: ""), trailing: nil)
                 if let cal = calorieTarget {
@@ -4961,6 +4963,16 @@ private struct DietAnalysisView: View {
                     )
                 } else {
                     DietAnalysisNoWeightCard()
+                }
+
+                // 5. 平均每日营养摄入：3 列网格（与饮食记录页 MacroCard 网格列数一致）
+                SectionTitle(text: "平均每日营养摄入", trailing: "基于周期内记录自动计算")
+                LazyVGrid(columns: [
+                    GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())
+                ], spacing: 8) {
+                    ForEach(nutritionCards, id: \.label) { c in
+                        DietNutritionCard(label: c.label, value: c.value, color: c.color)
+                    }
                 }
 
                 // 底部留白

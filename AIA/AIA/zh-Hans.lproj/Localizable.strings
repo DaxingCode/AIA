@@ -163,7 +163,7 @@
 "fitness.goal.cut" = "减脂";
 "fitness.goal.bulk" = "增肌";
 "fitness.goal.maintain" = "维持";
-"diet.analysis.goalTarget" = "目标达成";
+"diet.analysis.goalTarget" = "平均每日摄入情况";
 "diet.analysis.calorieTarget" = "目标热量";
 "diet.analysis.proteinTarget" = "蛋白推荐";
 "diet.analysis.goalMet" = "达标";

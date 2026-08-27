@@ -162,7 +162,7 @@
 "fitness.goal.cut" = "Cut";
 "fitness.goal.bulk" = "Bulk";
 "fitness.goal.maintain" = "Maintain";
-"diet.analysis.goalTarget" = "Goal check";
+"diet.analysis.goalTarget" = "Daily intake vs goal";
 "diet.analysis.calorieTarget" = "Calorie target";
 "diet.analysis.proteinTarget" = "Protein target";
 "diet.analysis.goalMet" = "On track";
