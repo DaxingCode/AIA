@@ -77,8 +77,19 @@ struct EditFoodView: View {
 
     private func resolveEntry() -> FoodEntry? {
         guard let id = entryID else { return nil }
-        let r = context.model(for: id) as? FoodEntry
-        return r
+        // >>> CHANGE-[2026-08-27 13:05:00]-[临时ID幽灵实例崩溃] 开始
+        // 原因：temporaryIdentifier 的实例一旦 backing 失效（被 @Query 替换/已删），对其读任何属性
+        //       （含 modelContext、syncDeleted）都会 fatal("model instance was invalidated...")。
+        //       实测 modelContext===context 守卫也拦不住僵尸。根因是「常吃食物一键添加」insert 后无显式
+        //       save()，靠 autosave 异步落盘，那一瞬实例是临时 ID，编辑页收到临时 ID 即埋雷。
+        //       这里彻底不碰 context.model(for:)：临时 ID 一律直接返回 nil（绝不读其属性）；
+        //       永久 ID 一律走 store 层 fetch，临时/失效/已软删行在 store 查不到 → nil，天然过滤幽灵。
+        //       临时窗口由 saveFrequentFood 加 try? context.save() 从根消除（落盘即永久 ID）。
+        // 回退：改回 context.model(for:) + modelContext===context + !syncDeleted 守卫。
+        guard id.storeIdentifier != nil else { return nil }
+        let all = (try? context.fetch(FetchDescriptor<FoodEntry>())) ?? []
+        return all.first { $0.persistentModelID == id }
+        // <<< CHANGE-[2026-08-27 13:05:00]-[临时ID幽灵实例崩溃] 结束
     }
 
     /// 草稿模式：把识别 payload 反推成每 100g 营养与日期，回填 @State（与 FoodRowCard.commitEntry 算法一致）。
@@ -267,7 +278,12 @@ struct EditFoodView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
                 }
-                .scrollDismissesKeyboard(.immediately)
+                // >>> CHANGE-[2026-08-27 11:35:24]-[编辑页点输入框弹窗闪退] 开始
+                // 原因：系统为露出输入框自动把 ScrollView 上滚，.immediately 把这次自动滚动当成
+                //       "用户滚动"→立刻收键盘→布局回弹→弹窗判定消失又重弹。改 .interactively
+                //       仅用户手动拖拽才收键盘，系统自动滚动不触发，弹窗不再闪退。
+                // <<< CHANGE-[2026-08-27 11:35:24]-[编辑页点输入框弹窗闪退] 结束
+                .scrollDismissesKeyboard(.interactively)
             }
     }
     // <<< CHANGE-[2026-08-17 20:15:00]-[body 拆分降类型推导深度] 结束
@@ -1058,15 +1074,6 @@ struct EditFoodView: View {
 
     /// 把当前 @State 字段写入给定 FoodEntry（草稿新建 & 已保存实例两种路径复用）。
     private func applyState(to entry: FoodEntry) {
-        // >>> CHANGE-[2026-08-26 12:14:09]-[待确认卡保存崩溃加固] 开始
-        // 防御：传入的 entry 若 backing 已失效(幽灵对象/未就绪)，
-        //       写属性会触发 SwiftData _InvalidFutureBackingData 断言崩(EXC_BREAKPOINT)。
-        //       草稿新建实例 insert 后 storeIdentifier 非 nil、modelContext 非 nil；
-        //       已保存实例经 resolveEntry 取回时同样校验，避免崩。
-        guard entry.persistentModelID.storeIdentifier != nil else { return }
-        guard entry.modelContext != nil else { return }
-        guard !entry.syncDeleted else { return }
-        // <<< CHANGE-[2026-08-26 12:14:09]-[待确认卡保存崩溃加固] 结束
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         entry.name = trimmed.isEmpty ? entry.name : trimmed
         entry.meal = meal
@@ -1359,7 +1366,12 @@ struct EditBillView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
                     }
-                    .scrollDismissesKeyboard(.immediately)
+                    // >>> CHANGE-[2026-08-27 11:35:24]-[编辑页点输入框弹窗闪退] 开始
+                // 原因：系统为露出输入框自动把 ScrollView 上滚，.immediately 把这次自动滚动当成
+                //       "用户滚动"→立刻收键盘→布局回弹→弹窗判定消失又重弹。改 .interactively
+                //       仅用户手动拖拽才收键盘，系统自动滚动不触发，弹窗不再闪退。
+                // <<< CHANGE-[2026-08-27 11:35:24]-[编辑页点输入框弹窗闪退] 结束
+                .scrollDismissesKeyboard(.interactively)
                 }
                 // >>> CHANGE-[2026-08-17 15:00:00]-[编辑页大图改ZStack overlay] 开始
                 // 原因: fullScreenCover 挂在 NavigationStack 上 present 首帧易撞 NavigationStack 多轮重算断言被强制 dismiss，
@@ -2352,7 +2364,12 @@ struct EditTodoView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
                 }
-                .scrollDismissesKeyboard(.immediately)
+                // >>> CHANGE-[2026-08-27 11:35:24]-[编辑页点输入框弹窗闪退] 开始
+                // 原因：系统为露出输入框自动把 ScrollView 上滚，.immediately 把这次自动滚动当成
+                //       "用户滚动"→立刻收键盘→布局回弹→弹窗判定消失又重弹。改 .interactively
+                //       仅用户手动拖拽才收键盘，系统自动滚动不触发，弹窗不再闪退。
+                // <<< CHANGE-[2026-08-27 11:35:24]-[编辑页点输入框弹窗闪退] 结束
+                .scrollDismissesKeyboard(.interactively)
             }
             // >>> CHANGE-[2026-08-17 15:00:00]-[编辑页大图改ZStack overlay] 开始
             // 原因: fullScreenCover 挂在 NavigationStack 上 present 首帧易撞 NavigationStack 多轮重算断言被强制 dismiss,
@@ -3460,7 +3477,12 @@ struct EditHealthView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
                 }
-                .scrollDismissesKeyboard(.immediately)
+                // >>> CHANGE-[2026-08-27 11:35:24]-[编辑页点输入框弹窗闪退] 开始
+                // 原因：系统为露出输入框自动把 ScrollView 上滚，.immediately 把这次自动滚动当成
+                //       "用户滚动"→立刻收键盘→布局回弹→弹窗判定消失又重弹。改 .interactively
+                //       仅用户手动拖拽才收键盘，系统自动滚动不触发，弹窗不再闪退。
+                // <<< CHANGE-[2026-08-27 11:35:24]-[编辑页点输入框弹窗闪退] 结束
+                .scrollDismissesKeyboard(.interactively)
                 // >>> CHANGE-[2026-08-17 15:00:00]-[编辑页大图改ZStack overlay] 开始
                 // 原因: fullScreenCover 挂在 NavigationStack 上 present 首帧易撞 NavigationStack 多轮重算断言被强制 dismiss,
                 //      表现点小图白屏后自动回编辑页。改为 ZStack 内条件渲染绕开系统转场。

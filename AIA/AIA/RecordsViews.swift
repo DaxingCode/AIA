@@ -629,7 +629,14 @@ struct FoodListView: View {
             baseSugar: ref?.sugar,
             baseSodium: ref?.sodium
         )
-        context.insert(entry)   // SwiftData autosave 自动持久化，无需手动 save()
+        context.insert(entry)
+        // >>> CHANGE-[2026-08-27 13:05:00]-[常吃食物临时ID编辑崩溃] 开始
+        // 原因：insert 后无显式 save()，靠 SwiftData autosave 异步落盘，那一瞬 entry 是 temporaryIdentifier。
+        //       若此时点编辑，编辑页收到临时 ID，body 重渲染读其属性 → fatal("model instance was
+        //       invalidated... temporary identifier")。立即落盘让实例变永久 ID，从根消除临时窗口。
+        // 回退：删除本行，恢复仅靠 autosave。
+        try? context.save()
+        // <<< CHANGE-[2026-08-27 13:05:00]-[常吃食物临时ID编辑崩溃] 结束
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         // 手动新增饮食记录后触发增量同步，尽快推上云端，绑定后小程序可见
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
