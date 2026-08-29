@@ -771,6 +771,13 @@ struct ContentView: View {
             consumeSiriHighlightModule()
             // 截图无感识别：无论是否有快捷操作 pending，只要后台留了识别结果就弹确认页
             Task { await checkScreenshotPending() }
+            // >>> CHANGE-[2026-08-28 18:34:20]-[五星好评与分享App] 开始
+            // 五星好评引导：在首帧重算风暴后（1.5s）再触发，避免与首帧导航断言/CPU 抢占冲突。
+            // 时机条件（登录≥3天 + 记录≥5条 + 未弹过）在 AppStoreReviewManager.maybeRequestReview 内部判定。
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                AppStoreReviewManager.shared.maybeRequestReview()
+            }
+            // <<< CHANGE-[2026-08-28 18:34:20]-[五星好评与分享App] 结束
             // 回到前台兜底：编辑态中途切后台/被杀再回来时，非 Pro 用户的改动可能已落库在 UserDefaults，
             // 这里回滚进入编辑前的快照，防止「关 App 再回来布局被改了」。（杀 App 前 didEnterBackground 已先回滚一次）
             _ = rollbackNonProEditIfNeeded()

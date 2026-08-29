@@ -28,6 +28,11 @@ final class AuthManager: ObservableObject {
         if let name, !name.isEmpty { self.userName = name }
         self.loginProvider = provider.rawValue
         self.isLoggedIn = true
+        // >>> CHANGE-[2026-08-28 18:34:20]-[五星好评与分享App] 开始
+        // 记录登录时间戳，供「登录≥3天」好评引导判定（见 AppStoreReviewManager）。
+        // 用 UserDefaults 直接写，AppStoreReviewManager 以 @AppStorage("aia.loginAt") 读取，等价同步。
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "aia.loginAt")
+        // <<< CHANGE-[2026-08-28 18:34:20]-[五星好评与分享App] 结束
         UsageAnalytics.log("login_success", meta: ["provider": provider.rawValue])
         // 持久化身份到 Keychain：删除 App / 重装后仍保留，可在启动时静默恢复登录态。
         KeychainHelper.set(userId, for: KeychainHelper.kUserId)
@@ -81,6 +86,10 @@ final class AuthManager: ObservableObject {
         shared.userPhone = KeychainHelper.get(KeychainHelper.kPhone) ?? ""
         shared.userName = KeychainHelper.get(KeychainHelper.kName) ?? ""
         shared.isLoggedIn = true
+        // >>> CHANGE-[2026-08-28 18:34:20]-[五星好评与分享App] 开始
+        // 静默恢复登录也视作一次登录起点，写入时间戳供好评引导「登录≥3天」判定。
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "aia.loginAt")
+        // <<< CHANGE-[2026-08-28 18:34:20]-[五星好评与分享App] 结束
         return true
     }
 

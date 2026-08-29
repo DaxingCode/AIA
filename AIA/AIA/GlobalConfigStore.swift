@@ -40,6 +40,8 @@ final class GlobalConfigStore: ObservableObject {
     @Published var userAgreementUrl: URL?
     // 首页顶栏「App 功能介绍」灯泡按钮链接（云端下发，普通用户无入口，留空=App 内置默认）
     @Published var featureIntroUrl: URL?
+    // App Store 下载/评价链接（云端下发，留空=AppURLs 代码兜底占位）。好评与分享共用。
+    @Published var appStoreUrl: URL?
 
     private let agentKey = "aia.agentEnabled"
     private let modelKey = "aia.modelProvider"
@@ -56,6 +58,7 @@ final class GlobalConfigStore: ObservableObject {
     private let privacyKey = "aia.privacyPolicyUrl"
     private let agreementKey = "aia.userAgreementUrl"
     private let featureIntroKey = "aia.featureIntroUrl"
+    private let appStoreKey = "aia.appStoreUrl"
 
     private init() {
         let ud = UserDefaults.standard
@@ -75,6 +78,7 @@ final class GlobalConfigStore: ObservableObject {
         self.privacyPolicyUrl = ud.string(forKey: privacyKey).flatMap { URL(string: $0) }
         self.userAgreementUrl = ud.string(forKey: agreementKey).flatMap { URL(string: $0) }
         self.featureIntroUrl = ud.string(forKey: featureIntroKey).flatMap { URL(string: $0) }
+        self.appStoreUrl = ud.string(forKey: appStoreKey).flatMap { URL(string: $0) }
     }
 
     /// 从云端拉取全局配置，写回本地缓存。公开接口，所有用户均可调用。
@@ -112,6 +116,10 @@ final class GlobalConfigStore: ObservableObject {
             let featureIntro = resp.keys.contains("featureIntroUrl")
                 ? (resp["featureIntroUrl"] as? String).flatMap { URL(string: $0) } ?? self.featureIntroUrl
                 : self.featureIntroUrl
+            // App Store 链接，云端缺字段时保持本地值（防清零）。好评与分享共用。
+            let appStore = resp.keys.contains("appStoreUrl")
+                ? (resp["appStoreUrl"] as? String).flatMap { URL(string: $0) } ?? self.appStoreUrl
+                : self.appStoreUrl
             // 仅当配置真正变化时才打印，避免每次拉取都刷日志（启动/回前台拉取为常态）。
             if applyToLocal(agentEnabled: agent, modelProvider: model, visionModelProvider: vision,
                             freeQuotaEnabled: fqEnabled, freeQuotaPerMonth: fqPerMonth, freeQuotaWeights: fqWeights,
@@ -119,7 +127,7 @@ final class GlobalConfigStore: ObservableObject {
                             freeQuotaGlobalUsed: fqGlobalUsed, freeQuotaGlobalRemaining: fqGlobalRemain,
                             trialDays: trialDays,
                             announcement: ann, privacyPolicyUrl: privacy, userAgreementUrl: agreement,
-                            featureIntroUrl: featureIntro) {
+                            featureIntroUrl: featureIntro, appStoreUrl: appStore) {
                 print("[GlobalConfig] 已同步云端配置 agent=\(agent) model=\(model) vision=\(vision) freeQuota=\(fqEnabled)/\(fqPerMonth) trialDays=\(trialDays)")
             }
         } catch {
@@ -296,6 +304,36 @@ final class GlobalConfigStore: ObservableObject {
         }
     }
 
+    /// 开发者写入 App Store 链接（需口令）。空串=沿用 App 端兜底默认值。返回是否成功。
+    /// 该链接同时用于「五星好评跳转写评价」与「设置页分享 App」。云端下发优先于 AppURLs 代码兜底。
+    func saveAppStoreUrl(_ url: String) async -> Bool {
+        do {
+            let resp = try await postAdsJSON([
+                "action": "setConfig",
+                "devToken": DeveloperGate.devToken ?? "",
+                "appStoreUrl": url
+            ])
+            guard resp["ok"] as? Bool == true else {
+                NSLog("[GlobalConfig] saveAppStoreUrl 云端返回失败: \(resp)")
+                return false
+            }
+            let newUrl = url.nonEmpty.flatMap { URL(string: $0) }
+            _ = applyToLocal(agentEnabled: self.agentEnabled, modelProvider: self.modelProvider, visionModelProvider: self.visionModelProvider,
+                             freeQuotaEnabled: self.freeQuotaEnabled, freeQuotaPerMonth: self.freeQuotaPerMonth,
+                             freeQuotaWeights: self.freeQuotaWeights, freeQuotaDailyCap: self.freeQuotaDailyCap,
+                             freeQuotaGlobalMonthly: self.freeQuotaGlobalMonthly,
+                             freeQuotaGlobalUsed: self.freeQuotaGlobalUsed, freeQuotaGlobalRemaining: self.freeQuotaGlobalRemaining,
+                             announcement: self.announcement, privacyPolicyUrl: self.privacyPolicyUrl,
+                             userAgreementUrl: self.userAgreementUrl, featureIntroUrl: self.featureIntroUrl,
+                             appStoreUrl: newUrl)
+            NSLog("[GlobalConfig] 已写入 App Store 链接: \(url)")
+            return true
+        } catch {
+            NSLog("[GlobalConfig] saveAppStoreUrl 失败: \(error)")
+            return false
+        }
+    }
+
     /// 写回本地缓存并刷新发布属性（供 @ObservedObject 视图即时响应）。
     /// 返回值：配置是否相比本地发生变化（供调用方决定是否需要打印/广播）。
     private func applyToLocal(agentEnabled: Bool, modelProvider: String, visionModelProvider: String,
@@ -306,7 +344,7 @@ final class GlobalConfigStore: ObservableObject {
                               trialDays: Int? = nil,
                               announcement: AnnouncementPayload? = nil,
                               privacyPolicyUrl: URL? = nil, userAgreementUrl: URL? = nil,
-                              featureIntroUrl: URL? = nil) -> Bool {
+                              featureIntroUrl: URL? = nil, appStoreUrl: URL? = nil) -> Bool {
         let changed = agentEnabled != self.agentEnabled
                     || modelProvider != self.modelProvider
                     || visionModelProvider != self.visionModelProvider
@@ -321,6 +359,7 @@ final class GlobalConfigStore: ObservableObject {
                     || privacyPolicyUrl != self.privacyPolicyUrl
                     || userAgreementUrl != self.userAgreementUrl
                     || featureIntroUrl != self.featureIntroUrl
+                    || appStoreUrl != self.appStoreUrl
         let ud = UserDefaults.standard
         ud.set(agentEnabled, forKey: agentKey)
         ud.set(modelProvider, forKey: modelKey)
@@ -354,6 +393,8 @@ final class GlobalConfigStore: ObservableObject {
         self.userAgreementUrl = userAgreementUrl
         ud.set(featureIntroUrl?.absoluteString, forKey: featureIntroKey)
         self.featureIntroUrl = featureIntroUrl
+        ud.set(appStoreUrl?.absoluteString, forKey: appStoreKey)
+        self.appStoreUrl = appStoreUrl
         return changed
     }
 }
