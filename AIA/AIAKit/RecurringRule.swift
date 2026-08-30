@@ -54,7 +54,7 @@ public enum RecurrenceUnit: String, Codable, CaseIterable, Identifiable {
     public var category: String        // 分类，如 住房/娱乐
     public var note: String            // 备注（生成到账单后带「·自动」后缀）
     public var isIncome: Bool          // 是否收入（如理财利息；默认 false 为支出）
-    /// 每月/季/年中的生成日（1...28，避免 2 月没有 29-31 日导致永不触发）。
+    /// 每月/季/年中的生成日（1...31；若目标月份没有这一天，生成时自动取该月最后一天，避免永不触发）。
     public var dayOfMonth: Int
     /// 规则生效起始日期：首次生成不早于此日。
     public var startDate: Date
@@ -97,7 +97,7 @@ public enum RecurrenceUnit: String, Codable, CaseIterable, Identifiable {
         self.category = category
         self.note = note
         self.isIncome = isIncome
-        self.dayOfMonth = min(max(dayOfMonth, 1), 28)
+        self.dayOfMonth = min(max(dayOfMonth, 1), 31)
         self.startDate = startDate
         self.lastGeneratedAt = lastGeneratedAt
         self.cycleRaw = cycleRaw

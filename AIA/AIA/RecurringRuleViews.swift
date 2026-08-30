@@ -309,7 +309,7 @@ struct RecurringRuleEditView: View {
 
                             ruleRow(title: "生成日", icon: "calendar") {
                                 Picker("", selection: $dayOfMonth) {
-                                    ForEach(1...28, id: \.self) { Text("\($0) 日").tag($0) }
+                                    ForEach(1...31, id: \.self) { Text("\($0) 日").tag($0) }
                                 }
                                 .pickerStyle(.menu)
                                 .font(AIATheme.Font.subhead.weight(.medium))
@@ -571,3 +571,30 @@ struct RecurringRuleEditView: View {
         dismiss()
     }
 }
+
+// >>> CHANGE-[2026-08-30 13:43:27]-[编辑页周期开关] 开始
+extension RecurringRule {
+    /// 从「账单字段 + 周期配置」构造一条周期规则并插入 context。
+    /// 与 RecurringRuleEditor.save() 同源，供编辑账单页开关打开时调用。
+    @discardableResult
+    static func make(from merchant: String, amount: Double, category: String,
+                     isIncome: Bool, note: String,
+                     cycleRaw: String, dayOfMonth: Int,
+                     customValue: Int, customUnitRaw: String,
+                     startDate: Date, context: ModelContext) -> RecurringRule {
+        let rule = RecurringRule()
+        rule.merchant = merchant
+        rule.amount = amount
+        rule.category = category
+        rule.isIncome = isIncome
+        rule.note = note
+        rule.dayOfMonth = dayOfMonth
+        rule.startDate = startDate
+        rule.cycleRaw = cycleRaw
+        rule.customValue = customValue
+        rule.customUnitRaw = customUnitRaw
+        context.insert(rule)
+        return rule
+    }
+}
+// <<< CHANGE-[2026-08-30 13:43:27]-[编辑页周期开关] 结束
