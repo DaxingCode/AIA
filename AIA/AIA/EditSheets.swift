@@ -1488,9 +1488,14 @@ struct EditBillView: View {
 
     /// 未保存草稿卡：独立可编辑表单 + 底部"保存 / 删除"
     private func draftForm(_ draft: Binding<BillDraft>, proxy: ScrollViewProxy) -> some View {
+        // >>> CHANGE-[2026-08-30 11:31:10]-[草稿账单卡模块间距] 开始
+        // 原因：草稿版账单表单（添加页）外层 VStack(spacing:0)，基本信息/收入开关/备注图片 3 张卡紧贴无呼吸感。
+        // 修复：仅放大模块（卡片）间距，与待办添加页统一为 16；模块内部行 padding 一律不动。
+        // 回退：spacing 改回 0 即可。
         ZStack {
+            VStack(spacing: 16) {
             VStack(spacing: 0) {
-            VStack(spacing: 0) {
+        // <<< CHANGE-[2026-08-30 11:31:10]-[草稿账单卡模块间距] 结束
                 billRow(icon: "building.2.fill", label: "商户 / 对象", text: draft.merchant, placeholder: "如 星巴克")
                 Divider().padding(.leading, 46)
                 HStack(spacing: 12) {
@@ -2950,8 +2955,13 @@ struct EditTodoView: View {
 
     /// 未保存草稿卡：独立可编辑表单 + 底部"删除"（仅多于 1 张时显示）
     private func todoForm(_ draft: Binding<TodoDraft>, showDelete: Bool, proxy: ScrollViewProxy) -> some View {
+        // >>> CHANGE-[2026-08-30 11:26:41]-[草稿待办卡模块间距对齐编辑页] 开始
+        // 原因：草稿版待办表单（添加页）外层 VStack(spacing:0)，4 张 .card() 紧贴无呼吸感；
+        //       编辑页（EditTodoView）同位置为 spacing:16，视觉更松。仅放大模块间距、内部行 padding 不动。
+        // 回退：spacing 改回 0 即可。
         ZStack {
-            VStack(spacing: 0) {
+            VStack(spacing: 16) {
+        // <<< CHANGE-[2026-08-30 11:26:41]-[草稿待办卡模块间距对齐编辑页] 结束
             // 内容
             VStack(alignment: .leading, spacing: 8) {
                 Text("内容")
