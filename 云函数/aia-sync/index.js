@@ -523,8 +523,8 @@ async function handleListDevices(req) {
 
 // 全局配置（智能问答开关 + AI 模型）。权威来源在云端，开发者可写、所有用户只读跟随。
 // 入参（POST JSON）：
-//   { action: "getConfig" }              -> 公开，返回全局配置 { agentEnabled, modelProvider, visionModelProvider, privacyPolicyUrl, userAgreementUrl, featureIntroUrl }
-//   { action: "setConfig", passcode, agentEnabled, modelProvider, visionModelProvider, privacyPolicyUrl, userAgreementUrl, featureIntroUrl } -> 开发者写入
+//   { action: "getConfig" }              -> 公开，返回全局配置 { agentEnabled, modelProvider, visionModelProvider, privacyPolicyUrl, userAgreementUrl, featureIntroUrl, appStoreUrl, latestVersion }
+//   { action: "setConfig", passcode, agentEnabled, modelProvider, visionModelProvider, privacyPolicyUrl, userAgreementUrl, featureIntroUrl, appStoreUrl, latestVersion } -> 开发者写入
 async function handleConfig(req) {
   const { action } = req
 
@@ -551,11 +551,15 @@ async function handleConfig(req) {
         privacyPolicyUrl: typeof cfg.privacyPolicyUrl === 'string' ? cfg.privacyPolicyUrl : '',
         userAgreementUrl: typeof cfg.userAgreementUrl === 'string' ? cfg.userAgreementUrl : '',
         // 首页灯泡按钮「App 功能介绍」链接（缺字段时返回空串，App 端回退默认微信文章）
-        featureIntroUrl: typeof cfg.featureIntroUrl === 'string' ? cfg.featureIntroUrl : ''
+        featureIntroUrl: typeof cfg.featureIntroUrl === 'string' ? cfg.featureIntroUrl : '',
+        // —— App Store 下载页链接（云端下发，App 端带本地兜底；缺字段返回空串）——
+        appStoreUrl: typeof cfg.appStoreUrl === 'string' ? cfg.appStoreUrl : '',
+        // —— 建议更新版本号（云端下发；低于此版本且未被用户忽略时 App 弹更新提示；缺字段返回空串）——
+        latestVersion: typeof cfg.latestVersion === 'string' ? cfg.latestVersion : ''
       }
     } catch (e) {
       // 文档不存在时返回默认配置（不视为错误，保证首次启动 App 不崩）
-      return { ok: true, agentEnabled: false, modelProvider: 'glm', visionModelProvider: 'glm', freeQuotaEnabled: false, freeQuotaPerMonth: 0, freeQuotaWeights: {}, freeQuotaDailyCap: 0, freeQuotaGlobalMonthly: 0, trialDays: 7, announcement: null, privacyPolicyUrl: '', userAgreementUrl: '', featureIntroUrl: '' }
+      return { ok: true, agentEnabled: false, modelProvider: 'glm', visionModelProvider: 'glm', freeQuotaEnabled: false, freeQuotaPerMonth: 0, freeQuotaWeights: {}, freeQuotaDailyCap: 0, freeQuotaGlobalMonthly: 0, trialDays: 7, announcement: null, privacyPolicyUrl: '', userAgreementUrl: '', featureIntroUrl: '', appStoreUrl: '', latestVersion: '' }
     }
   }
 
@@ -581,7 +585,11 @@ async function handleConfig(req) {
       privacyPolicyUrl: typeof req.privacyPolicyUrl === 'string' ? req.privacyPolicyUrl : '',
       userAgreementUrl: typeof req.userAgreementUrl === 'string' ? req.userAgreementUrl : '',
       // 首页灯泡「App 功能介绍」链接（空串表示沿用 App 端兜底默认值）
-      featureIntroUrl: typeof req.featureIntroUrl === 'string' ? req.featureIntroUrl : ''
+      featureIntroUrl: typeof req.featureIntroUrl === 'string' ? req.featureIntroUrl : '',
+      // —— App Store 下载页链接（空串表示沿用 App 端兜底默认值）——
+      appStoreUrl: typeof req.appStoreUrl === 'string' ? req.appStoreUrl : '',
+      // —— 建议更新版本号（空串表示不提示更新）——
+      latestVersion: typeof req.latestVersion === 'string' ? req.latestVersion : ''
     }
     try {
       const exist = await db.collection(CONFIG_COLLECTION).doc(CONFIG_DOC_ID).get().catch(() => null)

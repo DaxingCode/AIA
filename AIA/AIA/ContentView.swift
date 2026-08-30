@@ -135,6 +135,10 @@ struct ContentView: View {
     @State private var showTrialExpiredPrompt = false
     /// 顶部 Pro 胶囊的订阅剩余天文字符串（由 onReceive(SubscriptionManager.shared.$expiresAt) 写入）。
     @State private var subscriptionExpiryText: String? = nil
+    // >>> CHANGE-[2026-08-30 14:06:01]-[版本更新弹窗] 开始
+    /// 云端 latestVersion 高于本地版本时弹出的「建议更新」提示。
+    @State private var showUpdateAlert = false
+    // <<< CHANGE-[2026-08-30 14:06:01]-[版本更新弹窗] 结束
     /// 进入首页布局编辑态瞬间拍下的布局快照；非 Pro 用户退出编辑时回滚到此，
     /// 因为 setHidden/relocate 在编辑操作瞬间就已写入 UserDefaults，必须用进入前的快照才能还原。
     @State private var preEditLayout: HomeLayoutStore.Snapshot? = nil
@@ -577,6 +581,15 @@ struct ContentView: View {
         // 全局配置首拉：开发者切换智能问答/AI模型后，所有用户自动跟随（云端权威，本地缓存）。
         // 最低优先级，可在后台慢慢拉。
         Task(priority: .background) { await GlobalConfigStore.shared.fetchConfig() }
+        // >>> CHANGE-[2026-08-30 14:06:01]-[版本更新弹窗] 开始
+        // 借 fetchConfig 完成后，延迟 0.6s（避开首帧风暴）比对版本，命中则弹「建议更新」。
+        Task(priority: .background) {
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            if VersionUpdateChecker.shouldSuggestUpdate() {
+                await MainActor.run { showUpdateAlert = true }
+            }
+        }
+        // <<< CHANGE-[2026-08-30 14:06:01]-[版本更新弹窗] 结束
         // 冷启动同步指示器：仅当已登录 **且** 云同步真的会跑（开关 + 会员都放行）才亮起。
         // 否则「自动同步已关闭」时根本不会进 sync()、isSyncing 永远是 false，
         // FirstSyncIndicator 永远没机会关条——会看到「正在同步数据」误终身挂着。
@@ -786,6 +799,15 @@ struct ContentView: View {
             // 全局配置回前台拉取：开发者切换智能问答/AI模型后，用户切回 App 即自动跟随云端
             // （低频，生命周期驱动，不再常驻轮询占用云函数额度）
             Task { await GlobalConfigStore.shared.fetchConfig() }
+            // >>> CHANGE-[2026-08-30 14:06:01]-[版本更新弹窗] 开始
+            // 回前台也借 fetchConfig 完成后比对版本，延迟 0.6s 避开首帧风暴，命中则弹「建议更新」。
+            Task(priority: .background) {
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                if VersionUpdateChecker.shouldSuggestUpdate() {
+                    await MainActor.run { showUpdateAlert = true }
+                }
+            }
+            // <<< CHANGE-[2026-08-30 14:06:01]-[版本更新弹窗] 结束
             // 回前台云端同步统一交给 AppDelegate.sceneDidBecomeActive（系统 UISceneDelegate 保证触发，
             // 且受 autoSync + isLoggedIn 双重守卫）。此处删除可避免与 AppDelegate 重复 spawn 同步 Task，
             // 并修正「关掉 autoSync 的用户回前台仍被同步」的语义歧义。
@@ -940,6 +962,21 @@ struct ContentView: View {
         GlobalToastOverlay()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .zIndex(2000)
+        // >>> CHANGE-[2026-08-30 14:06:01]-[版本更新弹窗] 开始
+        // 建议更新提示：云端 latestVersion 高于本地版本且未被「暂不」忽略时弹出。
+        // 美化独立弹窗（VersionUpdateAlertView）：App 图标 + 标题 + 副标题 + 上下大按钮。
+        // 主按钮跳 App Store；次按钮/点遮罩记 skipVersion 后关闭（本次不再弹）。
+        .versionUpdateAlert(
+            latestVersion: GlobalConfigStore.shared.latestVersion ?? "",
+            isPresented: $showUpdateAlert,
+            onUpdate: {
+                UIApplication.shared.open(AppURLs.appStore)
+            },
+            onSkip: {
+                VersionUpdateChecker.markSkipped()
+            }
+        )
+        // <<< CHANGE-[2026-08-30 14:06:01]-[版本更新弹窗] 结束
         }   // ZStack 结束
     }   // body 结束
 

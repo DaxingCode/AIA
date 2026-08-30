@@ -83,6 +83,7 @@ struct DeveloperCenterView: View {
                 freeSimulateCard
                 resetNewUserCard
                 billTestEntry
+                versionUpdateCard
                 // 后续新增开发者功能在这里加卡片即可
             }
             .padding(.horizontal, 16)
@@ -772,6 +773,58 @@ struct DeveloperCenterView: View {
         .card()
     }
     // <<< CHANGE-[2026-08-19 20:55:27]-试用天数云端化 结束
+
+    // >>> CHANGE-[2026-08-30 14:06:01]-[版本更新弹窗] 开始
+    // MARK: - 版本更新提示配置（云端全局下发，所有用户跟随）
+    @State private var updateVersionText: String = ""
+    @State private var updateSaveMsg: String?
+
+    private var versionUpdateCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("版本更新提示")
+                    .font(AIATheme.Font.subhead.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+                if let cur = global.latestVersion, !cur.isEmpty {
+                    Text("当前 \(cur)")
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.blue)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(AIATheme.blue.opacity(0.12))
+                        .clipShape(Capsule())
+                }
+            }
+            Text("填一个高于用户当前版本的版本号（如 1.0.2），所有低于该版本且未点「暂不」的用户，启动/回到 App 时会收到「建议更新」弹窗。留空表示不提示任何更新。")
+                .font(AIATheme.Font.micro)
+                .foregroundStyle(AIATheme.muted)
+                .lineSpacing(2)
+            HStack {
+                TextField("例如 1.0.2", text: $updateVersionText)
+                    .textFieldStyle(.roundedBorder)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("保存到云端") {
+                    Task {
+                        let v = updateVersionText.trimmingCharacters(in: .whitespaces)
+                        let ok = await global.saveLatestVersion(v)
+                        updateSaveMsg = ok ? (v.isEmpty ? "已关闭版本更新提示" : "已保存，版本号 \(v)") : "保存失败，检查口令/网络"
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(updateVersionText.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            if let msg = updateSaveMsg {
+                Text(msg).font(AIATheme.Font.micro).foregroundStyle(AIATheme.health)
+            }
+        }
+        .padding(14)
+        .card()
+        .onAppear {
+            updateVersionText = global.latestVersion ?? ""
+        }
+    }
+    // <<< CHANGE-[2026-08-30 14:06:01]-[版本更新弹窗] 结束
 
     // MARK: - 免费体验调试
     /// 集中操控试用起点（Keychain trial_start_at），方便在「试用中 / 临界 / 已过期」间随时切换，无需真实等 N 天或重装。

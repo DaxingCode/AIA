@@ -42,6 +42,9 @@ final class GlobalConfigStore: ObservableObject {
     @Published var featureIntroUrl: URL?
     // App Store 下载/评价链接（云端下发，留空=AppURLs 代码兜底占位）。好评与分享共用。
     @Published var appStoreUrl: URL?
+    // —— 建议更新版本号（云端下发，普通用户无入口）。低于此版本且未被用户「暂不」忽略时，App 弹更新提示。
+    // 留空（nil）表示不提示任何版本更新。仅作「建议更新」，不强制拦截。
+    @Published var latestVersion: String?
 
     private let agentKey = "aia.agentEnabled"
     private let modelKey = "aia.modelProvider"
@@ -59,6 +62,7 @@ final class GlobalConfigStore: ObservableObject {
     private let agreementKey = "aia.userAgreementUrl"
     private let featureIntroKey = "aia.featureIntroUrl"
     private let appStoreKey = "aia.appStoreUrl"
+    private let latestVersionKey = "aia.latestVersion"
 
     private init() {
         let ud = UserDefaults.standard
@@ -79,6 +83,7 @@ final class GlobalConfigStore: ObservableObject {
         self.userAgreementUrl = ud.string(forKey: agreementKey).flatMap { URL(string: $0) }
         self.featureIntroUrl = ud.string(forKey: featureIntroKey).flatMap { URL(string: $0) }
         self.appStoreUrl = ud.string(forKey: appStoreKey).flatMap { URL(string: $0) }
+        self.latestVersion = ud.string(forKey: latestVersionKey).flatMap { $0.nonEmpty }
     }
 
     /// 从云端拉取全局配置，写回本地缓存。公开接口，所有用户均可调用。
@@ -120,6 +125,10 @@ final class GlobalConfigStore: ObservableObject {
             let appStore = resp.keys.contains("appStoreUrl")
                 ? (resp["appStoreUrl"] as? String).flatMap { URL(string: $0) } ?? self.appStoreUrl
                 : self.appStoreUrl
+            // 建议更新版本号，云端缺字段时保持本地值（防清零）。仅作建议更新，不强制。
+            let latest = resp.keys.contains("latestVersion")
+                ? (resp["latestVersion"] as? String).flatMap { $0.nonEmpty } ?? self.latestVersion
+                : self.latestVersion
             // 仅当配置真正变化时才打印，避免每次拉取都刷日志（启动/回前台拉取为常态）。
             if applyToLocal(agentEnabled: agent, modelProvider: model, visionModelProvider: vision,
                             freeQuotaEnabled: fqEnabled, freeQuotaPerMonth: fqPerMonth, freeQuotaWeights: fqWeights,
@@ -127,7 +136,7 @@ final class GlobalConfigStore: ObservableObject {
                             freeQuotaGlobalUsed: fqGlobalUsed, freeQuotaGlobalRemaining: fqGlobalRemain,
                             trialDays: trialDays,
                             announcement: ann, privacyPolicyUrl: privacy, userAgreementUrl: agreement,
-                            featureIntroUrl: featureIntro, appStoreUrl: appStore) {
+                            featureIntroUrl: featureIntro, appStoreUrl: appStore, latestVersion: latest) {
                 print("[GlobalConfig] 已同步云端配置 agent=\(agent) model=\(model) vision=\(vision) freeQuota=\(fqEnabled)/\(fqPerMonth) trialDays=\(trialDays)")
             }
         } catch {
@@ -334,6 +343,38 @@ final class GlobalConfigStore: ObservableObject {
         }
     }
 
+    // >>> CHANGE-[2026-08-30 14:06:01]-[版本更新弹窗] 开始
+    /// 开发者写入「建议更新」版本号（需口令）。空串表示不提示更新。返回是否成功。
+    /// 低于该版本且未被用户「暂不」忽略时，App 启动/回前台弹更新提示。
+    func saveLatestVersion(_ version: String) async -> Bool {
+        let trimmed = version.trimmingCharacters(in: .whitespaces)
+        do {
+            let resp = try await postAdsJSON([
+                "action": "setConfig",
+                "devToken": DeveloperGate.devToken ?? "",
+                "latestVersion": trimmed
+            ])
+            guard resp["ok"] as? Bool == true else {
+                NSLog("[GlobalConfig] saveLatestVersion 云端返回失败: \(resp)")
+                return false
+            }
+            _ = applyToLocal(agentEnabled: self.agentEnabled, modelProvider: self.modelProvider, visionModelProvider: self.visionModelProvider,
+                             freeQuotaEnabled: self.freeQuotaEnabled, freeQuotaPerMonth: self.freeQuotaPerMonth,
+                             freeQuotaWeights: self.freeQuotaWeights, freeQuotaDailyCap: self.freeQuotaDailyCap,
+                             freeQuotaGlobalMonthly: self.freeQuotaGlobalMonthly,
+                             freeQuotaGlobalUsed: self.freeQuotaGlobalUsed, freeQuotaGlobalRemaining: self.freeQuotaGlobalRemaining,
+                             announcement: self.announcement, privacyPolicyUrl: self.privacyPolicyUrl,
+                             userAgreementUrl: self.userAgreementUrl, featureIntroUrl: self.featureIntroUrl,
+                             appStoreUrl: self.appStoreUrl, latestVersion: trimmed.nonEmpty)
+            NSLog("[GlobalConfig] 已写入建议更新版本号: \(trimmed)")
+            return true
+        } catch {
+            NSLog("[GlobalConfig] saveLatestVersion 失败: \(error)")
+            return false
+        }
+    }
+    // <<< CHANGE-[2026-08-30 14:06:01]-[版本更新弹窗] 结束
+
     /// 写回本地缓存并刷新发布属性（供 @ObservedObject 视图即时响应）。
     /// 返回值：配置是否相比本地发生变化（供调用方决定是否需要打印/广播）。
     private func applyToLocal(agentEnabled: Bool, modelProvider: String, visionModelProvider: String,
@@ -344,7 +385,8 @@ final class GlobalConfigStore: ObservableObject {
                               trialDays: Int? = nil,
                               announcement: AnnouncementPayload? = nil,
                               privacyPolicyUrl: URL? = nil, userAgreementUrl: URL? = nil,
-                              featureIntroUrl: URL? = nil, appStoreUrl: URL? = nil) -> Bool {
+                              featureIntroUrl: URL? = nil, appStoreUrl: URL? = nil,
+                              latestVersion: String? = nil) -> Bool {
         let changed = agentEnabled != self.agentEnabled
                     || modelProvider != self.modelProvider
                     || visionModelProvider != self.visionModelProvider
@@ -360,6 +402,7 @@ final class GlobalConfigStore: ObservableObject {
                     || userAgreementUrl != self.userAgreementUrl
                     || featureIntroUrl != self.featureIntroUrl
                     || appStoreUrl != self.appStoreUrl
+                    || latestVersion != self.latestVersion
         let ud = UserDefaults.standard
         ud.set(agentEnabled, forKey: agentKey)
         ud.set(modelProvider, forKey: modelKey)
@@ -395,6 +438,8 @@ final class GlobalConfigStore: ObservableObject {
         self.featureIntroUrl = featureIntroUrl
         ud.set(appStoreUrl?.absoluteString, forKey: appStoreKey)
         self.appStoreUrl = appStoreUrl
+        ud.set(latestVersion, forKey: latestVersionKey)
+        self.latestVersion = latestVersion
         return changed
     }
 }
