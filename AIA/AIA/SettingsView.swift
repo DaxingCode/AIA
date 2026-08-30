@@ -781,7 +781,7 @@ struct SettingsView: View {
                     .font(AIATheme.Font.callout.weight(.medium))
                     .foregroundStyle(.primary)
                 Spacer()
-                Text("好记AI 1.0.0")
+                Text("好记AI 1.0.1")
                     .font(AIATheme.Font.footnote)
                     .foregroundStyle(AIATheme.muted)
             }
