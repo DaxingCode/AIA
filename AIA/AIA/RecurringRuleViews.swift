@@ -11,7 +11,17 @@ private let recurringCategories = ["住房", "娱乐", "餐饮", "交通", "购�
 
 struct RecurringRuleListView: View {
     @Environment(\.modelContext) private var context
-    @Query(sort: \RecurringRule.merchant) private var rules: [RecurringRule]
+    // >>> CHANGE-[2026-08-31 23:34:46]-[周期规则按下次生成日期排序] 开始
+    // 排序不能在 @Query 里做（下次生成日期是动态计算的），改为查询后按 nextDueDate 升序：
+    // 越快到期的越靠前（方案 A，用户拍板）。不再按商户名排。
+    @Query private var rules: [RecurringRule]
+
+    private var sortedRules: [RecurringRule] {
+        rules.sorted {
+            RecurringBillManager.nextDueDate(for: $0) < RecurringBillManager.nextDueDate(for: $1)
+        }
+    }
+    // <<< CHANGE-[2026-08-31 23:34:46]-[周期规则按下次生成日期排序] 结束
 
     // 包装一层，给每次弹窗一个独立身份，避免 SwiftUI 复用旧弹窗导致编辑时不显示已有内容
     private struct EditSheet: Identifiable {
@@ -34,7 +44,9 @@ struct RecurringRuleListView: View {
                 if rules.isEmpty {
                     emptyState
                 } else {
-                    ForEach(rules) { rule in
+                    // >>> CHANGE-[2026-08-31 23:34:46]-[周期规则按下次生成日期排序] 开始
+                    ForEach(sortedRules) { rule in
+                    // <<< CHANGE-[2026-08-31 23:34:46]-[周期规则按下次生成日期排序] 结束
                         ruleCard(rule)
                             .onLongPressGesture(minimumDuration: 0.5) {
                                 editSheet = EditSheet(rule: rule)
