@@ -1845,7 +1845,12 @@ struct EditBillView: View {
                 startDate: savedBill.time,
                 context: context
             )
-            RecurringBillManager.generateDue(context: context)
+            // >>> CHANGE-[2026-08-31 22:44:09]-[周期账单重复记录] 开始
+            // 删除原因：persistDraft 上方已把首期账单手动 insert 进库（else 分支 context.insert(b)），
+            //          再调 generateDue 会按这条新规则把「首期」再生成一次，
+            //          导致账单列表出现两条完全相同的记录（用户实锤）。
+            //          周期规则只负责「之后的账期」，首期这条由用户手动添加的那笔承担。
+            // <<< CHANGE-[2026-08-31 22:44:09]-[周期账单重复记录] 结束
         }
         // <<< CHANGE-[2026-08-30 13:43:27]-[编辑页周期开关] 结束
         d.saved = true
@@ -2385,7 +2390,11 @@ struct EditBillView: View {
                 startDate: bill.time,
                 context: context
             )
-            RecurringBillManager.generateDue(context: context)
+            // >>> CHANGE-[2026-08-31 22:44:09]-[周期账单重复记录] 开始
+            // 删除原因：编辑模式保存这笔账单时，首期就是用户正在编辑的这笔本身，
+            //          再调 generateDue 会按规则把「本期」再生成一次，出现两条相同记录。
+            //          周期规则只负责「之后的账期」，本期由用户正在保存的这笔承担。
+            // <<< CHANGE-[2026-08-31 22:44:09]-[周期账单重复记录] 结束
         }
         // <<< CHANGE-[2026-08-30 13:43:27]-[编辑页周期开关] 结束
         if isAdding {
