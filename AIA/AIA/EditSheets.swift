@@ -1257,6 +1257,11 @@ private struct BillDraft: Identifiable {
     var recurCustomValue: Int = 1
     var recurCustomUnitRaw: String = RecurrenceUnit.month.rawValue
     // <<< CHANGE-[2026-08-30 13:43:27]-[编辑页周期开关] 结束
+    // >>> CHANGE-[2026-09-01 10:45:00]-[账单页周期生成日默认收起] 开始
+    // 与独立周期规则页同款：生成日等细项默认收起，折叠态用账单日期(首次生成)的号数作生成日；
+    // 自定义周期因必须指定间隔，强制展开。每张草稿独立记录展开状态。
+    var showAdvancedRecur = false
+    // <<< CHANGE-[2026-09-01 10:45:00]-[账单页周期生成日默认收起] 结束
     // 每卡独立 UI 状态
     var showCategoryPicker = false
     var showImageSourceDialog = false
@@ -1323,6 +1328,10 @@ struct EditBillView: View {
     @State private var recurCustomValue: Int = 1
     @State private var recurCustomUnitRaw: String = RecurrenceUnit.month.rawValue
     // <<< CHANGE-[2026-08-30 13:43:27]-[编辑页周期开关] 结束
+    // >>> CHANGE-[2026-09-01 10:45:00]-[账单页周期生成日默认收起] 开始
+    // 生成日等细项默认收起；自定义周期强制展开间隔（与独立规则页一致）
+    @State private var showAdvancedRecur = false
+    // <<< CHANGE-[2026-09-01 10:45:00]-[账单页周期生成日默认收起] 结束
     // >>> CHANGE-[2026-08-17 11:20:00]-[账单编辑大图白屏] 开始
     @State private var selectedImage: UIImage? = nil
     // <<< CHANGE-[2026-08-17 11:20:00]-[账单编辑大图白屏] 结束
@@ -1505,6 +1514,12 @@ struct EditBillView: View {
                 recurDayOfMonth = rule.dayOfMonth
                 recurCustomValue = rule.customValue ?? 1
                 recurCustomUnitRaw = rule.customUnitRaw ?? RecurrenceUnit.month.rawValue
+                // >>> CHANGE-[2026-09-01 10:45:00]-[账单页周期生成日默认收起] 开始
+                // 若原规则生成日 ≠ 账单日期(首次生成)的号数，说明用户曾手动改过 → 自动展开高级项，
+                // 避免折叠态保存时被「取账单日期号数」覆盖。
+                let billDay = Calendar.current.component(.day, from: bill.time)
+                showAdvancedRecur = (rule.dayOfMonth != billDay)
+                // <<< CHANGE-[2026-09-01 10:45:00]-[账单页周期生成日默认收起] 结束
             }
             // <<< CHANGE-[2026-08-31 23:30:00]-[周期账单来源关联] 结束
             // <<< CHANGE-[2026-08-31 23:10:00]-[周期开关状态持久化] 结束
@@ -1892,6 +1907,12 @@ struct EditBillView: View {
                 sourceRule = fetched?.first
             }
             if d.isRecurring {
+                // >>> CHANGE-[2026-09-01 10:45:00]-[账单页周期生成日默认收起] 开始
+                // 与编辑页同款：折叠态下生成日取账单日期(首次生成)的号数
+                if !d.showAdvancedRecur {
+                    d.recurDayOfMonth = Calendar.current.component(.day, from: savedBill.time)
+                }
+                // <<< CHANGE-[2026-09-01 10:45:00]-[账单页周期生成日默认收起] 结束
                 if let r = sourceRule {
                     r.merchant = savedBill.merchant
                     r.amount = savedBill.amount
@@ -2171,57 +2192,93 @@ struct EditBillView: View {
                 .padding(.horizontal, 14)
 
                 let cycle = RecurrenceCycle(rawValue: recurCycleRaw) ?? .monthly
-                if cycle == .monthly || cycle == .quarterly || cycle == .yearly {
-                    Divider().padding(.leading, 46)
-                    HStack(spacing: 12) {
-                        Image(systemName: "calendar")
-                            .font(AIATheme.Font.subhead)
-                            .foregroundStyle(AIATheme.muted)
-                            .frame(width: 20, alignment: .center)
-                        Text("生成日")
-                            .font(AIATheme.Font.callout)
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        Picker("", selection: $recurDayOfMonth) {
-                            ForEach(1...31, id: \.self) { Text("\($0) 日").tag($0) }
-                        }
-                        .pickerStyle(.menu)
-                        .font(AIATheme.Font.subhead.weight(.medium))
-                        .frame(maxWidth: 100, alignment: .trailing)
-                    }
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 14)
-                } else if cycle == .custom {
-                    Divider().padding(.leading, 46)
-                    HStack(spacing: 4) {
-                        Image(systemName: "gearshape")
-                            .font(AIATheme.Font.subhead)
-                            .foregroundStyle(AIATheme.muted)
-                            .frame(width: 20, alignment: .center)
-                        Text("间隔")
-                            .font(AIATheme.Font.callout)
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        Text("每")
-                            .font(AIATheme.Font.subhead)
-                            .foregroundStyle(AIATheme.sub)
-                        TextField("", value: $recurCustomValue, format: .number)
-                            .keyboardType(.numberPad)
-                            .font(AIATheme.Font.body.weight(.semibold))
-                            .multilineTextAlignment(.center)
-                            .frame(width: 44)
-                        Picker("", selection: $recurCustomUnitRaw) {
-                            ForEach(RecurrenceUnit.allCases) { u in
-                                Text(u.title).tag(u.rawValue)
+                // >>> CHANGE-[2026-09-01 10:45:00]-[账单页周期生成日默认收起] 开始
+                // 生成日默认收起；自定义周期必须指定间隔 → 强制展开（advancedVisible）
+                let advancedVisible = showAdvancedRecur || cycle == .custom
+                if advancedVisible {
+                    if cycle == .monthly || cycle == .quarterly || cycle == .yearly {
+                        Divider().padding(.leading, 46)
+                        HStack(spacing: 12) {
+                            Image(systemName: "calendar")
+                                .font(AIATheme.Font.subhead)
+                                .foregroundStyle(AIATheme.muted)
+                                .frame(width: 20, alignment: .center)
+                            Text("生成日")
+                                .font(AIATheme.Font.callout)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Picker("", selection: $recurDayOfMonth) {
+                                ForEach(1...31, id: \.self) { Text("\($0) 日").tag($0) }
                             }
+                            .pickerStyle(.menu)
+                            .font(AIATheme.Font.subhead.weight(.medium))
+                            .frame(maxWidth: 100, alignment: .trailing)
                         }
-                        .pickerStyle(.menu)
-                        .font(AIATheme.Font.subhead.weight(.medium))
-                        .frame(maxWidth: 70, alignment: .trailing)
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 14)
+                    } else if cycle == .custom {
+                        Divider().padding(.leading, 46)
+                        HStack(spacing: 4) {
+                            Image(systemName: "gearshape")
+                                .font(AIATheme.Font.subhead)
+                                .foregroundStyle(AIATheme.muted)
+                                .frame(width: 20, alignment: .center)
+                            Text("间隔")
+                                .font(AIATheme.Font.callout)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text("每")
+                                .font(AIATheme.Font.subhead)
+                                .foregroundStyle(AIATheme.sub)
+                            TextField("", value: $recurCustomValue, format: .number)
+                                .keyboardType(.numberPad)
+                                .font(AIATheme.Font.body.weight(.semibold))
+                                .multilineTextAlignment(.center)
+                                .frame(width: 44)
+                            Picker("", selection: $recurCustomUnitRaw) {
+                                ForEach(RecurrenceUnit.allCases) { u in
+                                    Text(u.title).tag(u.rawValue)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .font(AIATheme.Font.subhead.weight(.medium))
+                            .frame(maxWidth: 70, alignment: .trailing)
+                        }
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 14)
                     }
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 14)
                 }
+
+                // 高级入口：自定义周期下间隔已强制可见，无需该入口
+                if cycle != .custom {
+                    Divider().padding(.leading, 46)
+                    Button {
+                        showAdvancedRecur.toggle()
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(AIATheme.Font.subhead)
+                                .foregroundStyle(AIATheme.muted)
+                                .frame(width: 20, alignment: .center)
+                            Text("高级：自定义生成日")
+                                .font(AIATheme.Font.callout)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text(showAdvancedRecur ? "收起" : "展开")
+                                .font(AIATheme.Font.micro)
+                                .foregroundStyle(AIATheme.muted)
+                            Image(systemName: "chevron.right")
+                                .font(AIATheme.Font.caption.weight(.semibold))
+                                .foregroundStyle(AIATheme.muted)
+                                .rotationEffect(.degrees(showAdvancedRecur ? 90 : 0))
+                        }
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 14)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                // <<< CHANGE-[2026-09-01 10:45:00]-[账单页周期生成日默认收起] 结束
 
                 Divider().padding(.leading, 46)
                 HStack(spacing: 12) {
@@ -2299,57 +2356,93 @@ struct EditBillView: View {
                 .padding(.horizontal, 14)
 
                 let cycle = RecurrenceCycle(rawValue: draft.recurCycleRaw.wrappedValue) ?? .monthly
-                if cycle == .monthly || cycle == .quarterly || cycle == .yearly {
-                    Divider().padding(.leading, 46)
-                    HStack(spacing: 12) {
-                        Image(systemName: "calendar")
-                            .font(AIATheme.Font.subhead)
-                            .foregroundStyle(AIATheme.muted)
-                            .frame(width: 20, alignment: .center)
-                        Text("生成日")
-                            .font(AIATheme.Font.callout)
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        Picker("", selection: draft.recurDayOfMonth) {
-                            ForEach(1...31, id: \.self) { Text("\($0) 日").tag($0) }
-                        }
-                        .pickerStyle(.menu)
-                        .font(AIATheme.Font.subhead.weight(.medium))
-                        .frame(maxWidth: 100, alignment: .trailing)
-                    }
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 14)
-                } else if cycle == .custom {
-                    Divider().padding(.leading, 46)
-                    HStack(spacing: 4) {
-                        Image(systemName: "gearshape")
-                            .font(AIATheme.Font.subhead)
-                            .foregroundStyle(AIATheme.muted)
-                            .frame(width: 20, alignment: .center)
-                        Text("间隔")
-                            .font(AIATheme.Font.callout)
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        Text("每")
-                            .font(AIATheme.Font.subhead)
-                            .foregroundStyle(AIATheme.sub)
-                        TextField("", value: draft.recurCustomValue, format: .number)
-                            .keyboardType(.numberPad)
-                            .font(AIATheme.Font.body.weight(.semibold))
-                            .multilineTextAlignment(.center)
-                            .frame(width: 44)
-                        Picker("", selection: draft.recurCustomUnitRaw) {
-                            ForEach(RecurrenceUnit.allCases) { u in
-                                Text(u.title).tag(u.rawValue)
+                // >>> CHANGE-[2026-09-01 10:45:00]-[账单页周期生成日默认收起] 开始
+                // 与编辑页同款：生成日默认收起；自定义周期强制展开间隔
+                let advancedVisible = draft.showAdvancedRecur.wrappedValue || cycle == .custom
+                if advancedVisible {
+                    if cycle == .monthly || cycle == .quarterly || cycle == .yearly {
+                        Divider().padding(.leading, 46)
+                        HStack(spacing: 12) {
+                            Image(systemName: "calendar")
+                                .font(AIATheme.Font.subhead)
+                                .foregroundStyle(AIATheme.muted)
+                                .frame(width: 20, alignment: .center)
+                            Text("生成日")
+                                .font(AIATheme.Font.callout)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Picker("", selection: draft.recurDayOfMonth) {
+                                ForEach(1...31, id: \.self) { Text("\($0) 日").tag($0) }
                             }
+                            .pickerStyle(.menu)
+                            .font(AIATheme.Font.subhead.weight(.medium))
+                            .frame(maxWidth: 100, alignment: .trailing)
                         }
-                        .pickerStyle(.menu)
-                        .font(AIATheme.Font.subhead.weight(.medium))
-                        .frame(maxWidth: 70, alignment: .trailing)
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 14)
+                    } else if cycle == .custom {
+                        Divider().padding(.leading, 46)
+                        HStack(spacing: 4) {
+                            Image(systemName: "gearshape")
+                                .font(AIATheme.Font.subhead)
+                                .foregroundStyle(AIATheme.muted)
+                                .frame(width: 20, alignment: .center)
+                            Text("间隔")
+                                .font(AIATheme.Font.callout)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text("每")
+                                .font(AIATheme.Font.subhead)
+                                .foregroundStyle(AIATheme.sub)
+                            TextField("", value: draft.recurCustomValue, format: .number)
+                                .keyboardType(.numberPad)
+                                .font(AIATheme.Font.body.weight(.semibold))
+                                .multilineTextAlignment(.center)
+                                .frame(width: 44)
+                            Picker("", selection: draft.recurCustomUnitRaw) {
+                                ForEach(RecurrenceUnit.allCases) { u in
+                                    Text(u.title).tag(u.rawValue)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .font(AIATheme.Font.subhead.weight(.medium))
+                            .frame(maxWidth: 70, alignment: .trailing)
+                        }
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 14)
                     }
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 14)
                 }
+
+                // 高级入口：自定义周期下间隔已强制可见，无需该入口
+                if cycle != .custom {
+                    Divider().padding(.leading, 46)
+                    Button {
+                        draft.showAdvancedRecur.wrappedValue.toggle()
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(AIATheme.Font.subhead)
+                                .foregroundStyle(AIATheme.muted)
+                                .frame(width: 20, alignment: .center)
+                            Text("高级：自定义生成日")
+                                .font(AIATheme.Font.callout)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text(draft.showAdvancedRecur.wrappedValue ? "收起" : "展开")
+                                .font(AIATheme.Font.micro)
+                                .foregroundStyle(AIATheme.muted)
+                            Image(systemName: "chevron.right")
+                                .font(AIATheme.Font.caption.weight(.semibold))
+                                .foregroundStyle(AIATheme.muted)
+                                .rotationEffect(.degrees(draft.showAdvancedRecur.wrappedValue ? 90 : 0))
+                        }
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 14)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                // <<< CHANGE-[2026-09-01 10:45:00]-[账单页周期生成日默认收起] 结束
 
                 Divider().padding(.leading, 46)
                 HStack(spacing: 12) {
@@ -2471,6 +2564,13 @@ struct EditBillView: View {
             }
             return linkedRules.first
         }()
+        // >>> CHANGE-[2026-09-01 10:45:00]-[账单页周期生成日默认收起] 开始
+        // 折叠态下，「生成日」取账单日期(首次生成)的号数，确保按账单日期延续周期；
+        // 展开态保留用户手动设定的生成日。
+        if !showAdvancedRecur {
+            recurDayOfMonth = Calendar.current.component(.day, from: bill.time)
+        }
+        // <<< CHANGE-[2026-09-01 10:45:00]-[账单页周期生成日默认收起] 结束
         if let existing = rule {
             if isRecurring {
                 existing.merchant = bill.merchant
