@@ -64,6 +64,8 @@ struct ChatView: View {
     }
     /// 是否还有更早的消息未加载（由 fetchCount 决定，驱动「加载更早」入口显隐，避免无限加载）。
     @State private var hasMoreMessages = false
+    /// 是否已加载到最老消息（登顶）：用于切换「加载」入口文案为「登顶成功」，且停止再触发加载。
+    @State private var reachedTop = false
     /// 防止下拉自动加载时因视图反复进入视口而重复触发的锁。
     @State private var isLoadingEarlier = false
     @StateObject private var health = HealthManager.shared
@@ -627,7 +629,7 @@ struct ChatView: View {
             let showDivider = ChatView.dividerFlags(for: list)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    if hasMoreMessages {
+                    if hasMoreMessages || reachedTop {
                         earlierLoader(proxy: proxy)
                     }
                     ForEach(Array(list.enumerated()),
@@ -825,21 +827,30 @@ struct ChatView: View {
     /// 顶部「下拉自动加载更早的消息」：指示器滚入视口即自动扩大分页上限并重建查询，
     /// 加载后锚定此前的首条保持可视位置；加载期间显示 spinner 并用 `isLoadingEarlier` 锁防重复触发。
     private func earlierLoader(proxy: ScrollViewProxy) -> some View {
-        HStack(spacing: 6) {
-            if isLoadingEarlier {
-                ProgressView()
-                    .controlSize(.small)
-                Text("加载中…")
-                    .font(AIATheme.Font.subhead)
-            } else {
-                Image(systemName: "arrow.up.circle.dotted")
-                Text("下拉加载更早的消息")
-                    .font(AIATheme.Font.subhead)
+        Button {
+            loadEarlier(proxy: proxy)
+        } label: {
+            HStack(spacing: 6) {
+                if isLoadingEarlier {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("加载中…")
+                        .font(AIATheme.Font.subhead)
+                } else if hasMoreMessages {
+                    Image(systemName: "arrow.up.circle.dotted")
+                    Text("点此加载更早的消息")
+                        .font(AIATheme.Font.subhead)
+                } else {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text("登顶成功，已没有更早的消息")
+                        .font(AIATheme.Font.subhead)
+                }
             }
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, 6)
         }
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, alignment: .center)
-        .padding(.vertical, 6)
+        .buttonStyle(.plain)
         .onAppear { loadEarlier(proxy: proxy) }
     }
 
@@ -853,6 +864,8 @@ struct ChatView: View {
         let oldest = loaded.min(by: { $0.createdAt < $1.createdAt })?.createdAt
         loadEarlierMessages()
         refreshHasMoreMessages(earliest: oldest)
+        // 本次加载后若已无更早消息，标记登顶，提示条文案切换为「登顶成功」且不再触发加载。
+        if !hasMoreMessages { reachedTop = true }
         if let firstID {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 var tx = Transaction()
