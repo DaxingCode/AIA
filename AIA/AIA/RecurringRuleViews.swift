@@ -386,7 +386,7 @@ struct RecurringRuleEditView: View {
                                     .padding(.leading, 42)
                                     .background(AIATheme.hairline)
 
-                                ruleRow(title: "每周", icon: "calendar.week") {
+                                ruleRow(title: "每周", icon: "calendar") {
                                     Text("星期 \(weekdayText(from: startDate))")
                                         .font(AIATheme.Font.subhead.weight(.medium))
                                         .foregroundStyle(AIATheme.sub)
