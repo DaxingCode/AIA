@@ -21,9 +21,12 @@ struct RecurringRuleListView: View {
 
     @State private var editSheet: EditSheet? = nil
 
+    // >>> CHANGE-[2026-08-31 23:29:43]-[周期规则日期显示补齐] 开始
+    // 列表「下次生成」带上年份，如「2027 年 8 月 31 日」（此前只有月日，跨年看不出哪一年）
     private let dateFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "M月d日"; return f
+        let f = DateFormatter(); f.dateFormat = "yyyy年M月d日"; return f
     }()
+    // <<< CHANGE-[2026-08-31 23:29:43]-[周期规则日期显示补齐] 结束
 
     var body: some View {
         ScrollView {
@@ -207,9 +210,12 @@ struct RecurringRuleEditView: View {
     @State private var customUnitRaw: String
     @State private var showDeleteConfirm = false
 
+    // >>> CHANGE-[2026-08-31 23:29:43]-[周期规则日期显示补齐] 开始
+    // 编辑页「首次生成」同样带年份，与列表「下次生成」格式一致
     private let dateFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "M月d日"; return f
+        let f = DateFormatter(); f.dateFormat = "yyyy年M月d日"; return f
     }()
+    // <<< CHANGE-[2026-08-31 23:29:43]-[周期规则日期显示补齐] 结束
 
     init(rule: RecurringRule?) {
         self.existing = rule

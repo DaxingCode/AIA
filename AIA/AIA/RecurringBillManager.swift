@@ -231,7 +231,11 @@ enum RecurringBillManager {
         case .quarterly:
             return "每季 \(rule.dayOfMonth) 日"
         case .yearly:
-            return "每年 \(rule.dayOfMonth) 日"
+            // >>> CHANGE-[2026-08-31 23:29:43]-[周期规则日期显示补齐] 开始
+            // 年周期不能丢月份：从 startDate 取月份，如「每年 8 月 31 日」
+            let yearMonth = Calendar.current.component(.month, from: rule.startDate)
+            return "每年 \(yearMonth) 月 \(rule.dayOfMonth) 日"
+            // <<< CHANGE-[2026-08-31 23:29:43]-[周期规则日期显示补齐] 结束
         case .custom:
             return "每 \(rule.customValue ?? 1) \(rule.customUnit.title)"
         @unknown default:
