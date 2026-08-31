@@ -3708,7 +3708,8 @@ struct ChatView: View {
                                     // （已保存/待确认三态卡片），由气泡承担本次回复，不再插入纯文本。
                                     let outcome = await RecognitionSaver.processRecognition(
                                         result: result, rawText: t, image: nil,
-                                        context: context, source: .cloud, entryOrigin: "text")
+                                        context: context, source: .cloud, entryOrigin: "text",
+                                        marksHomeHighlight: true)
                                     switch outcome {
                                     case .inserted:
                                         chatBubbleInserted = true
@@ -3752,7 +3753,8 @@ struct ChatView: View {
     private func routeRecognition(_ result: RecognitionResult, rawText: String) async -> Bool {
         let outcome = await RecognitionSaver.processRecognition(
             result: result, rawText: rawText, image: nil,
-            context: context, source: .local, entryOrigin: "text")
+            context: context, source: .local, entryOrigin: "text",
+            marksHomeHighlight: true)
         switch outcome {
         case .nothing:
             return false
