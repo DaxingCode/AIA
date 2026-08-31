@@ -869,7 +869,36 @@ struct ChatView: View {
     @ViewBuilder
     private func messageRow(_ m: ChatMessage) -> some View {
         if let greeting = greetingMessage, m === greeting {
-            greetingBubble(m.text)
+            // >>> CHANGE-[2026-08-31 19:31:53]-[恢复招呼下使用攻略按钮] 开始
+            // 原因：提交 83c361f「首屏示例文案池重构」重构招呼区时，把原来嵌在招呼气泡下方的
+            //        「好记AI使用攻略」按钮（及使用引导）一并删除，导致对话页看不到攻略入口。
+            //        按方案 A 恢复：按钮与 greetingBubble 平级（外层 VStack 兄弟层），遵守"禁止嵌套 Button"铁律；
+            //        链接复用统一入口 AppURLs.featureIntro（默认即微信文章，云端可改），用 UIKit present 版 SFSafariViewController
+            //        绕开首页 body 重算吞 sheet。
+            // 回退：删掉 VStack 包裹与 Button 块，恢复成单行 greetingBubble(m.text)。
+            VStack(alignment: .leading, spacing: 8) {
+                greetingBubble(m.text)
+                Button {
+                    presentInAppBrowser(AppURLs.featureIntro)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "book.fill")
+                            .font(.system(size: 12))
+                        Text("好记AI使用攻略")
+                            .font(AIATheme.Font.micro)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10))
+                    }
+                    .foregroundStyle(AIATheme.blue)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(AIATheme.blue.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 40)
+            }
+            // <<< CHANGE-[2026-08-31 19:31:53]-[恢复招呼下使用攻略按钮] 结束
         } else if let imgName = decodeUserImageName(m.text) {
             // 用户发出的图片（拍照/相册/文件/截屏）：像微信一样先出现你发的图，小记随后回识别卡片
             UserImageBubble(
