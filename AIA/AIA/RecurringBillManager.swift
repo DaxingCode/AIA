@@ -57,6 +57,10 @@ enum RecurringBillManager {
                         confirmed: false,
                         isIncome: rule.isIncome,
                         imageName: nil)
+        // >>> CHANGE-[2026-08-31 23:30:00]-[周期账单来源关联] 开始
+        // 记录来源规则 syncId：账单编辑页靠它回填「设为周期账单」开关为打开状态。
+        bill.sourceRecurringRuleSyncId = rule.syncId
+        // <<< CHANGE-[2026-08-31 23:30:00]-[周期账单来源关联] 结束
         context.insert(bill)
     }
 

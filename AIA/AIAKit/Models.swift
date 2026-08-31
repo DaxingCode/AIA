@@ -85,6 +85,14 @@ import SwiftData
     // 导入批次关联（仅本地，不参与云同步）。nil 表示非导入产生的账单。
     public var importBatchId: UUID?
 
+    // >>> CHANGE-[2026-08-31 23:30:00]-[周期账单来源关联] 开始
+    // 来源周期规则 syncId（仅本地，不参与云同步）：标记「本账单由 RecurringBillManager 从某条周期规则自动生成」。
+    // 关联规则用 RecurringRule.syncId（该模型不上云，syncId 兼作本地关联键）。
+    // nil = 手动/识别/导入产生的普通账单。账单编辑页靠它回填「设为周期账单」开关为打开状态。
+    // 可选字段默认 nil，lightweight 迁移安全（与 importBatchId 同款先例 v15）。
+    public var sourceRecurringRuleSyncId: UUID?
+    // <<< CHANGE-[2026-08-31 23:30:00]-[周期账单来源关联] 结束
+
     // 云同步字段（新增，带默认值：轻量迁移，不会破坏旧库）
     public var syncId: UUID            // 全局唯一 id，用于跨设备 upsert
     public var syncUpdatedAt: Date     // 最后修改时间，冲突时后写胜出
@@ -95,6 +103,7 @@ import SwiftData
          isIncome: Bool = false,
          imageName: String? = nil,
          importBatchId: UUID? = nil,
+         sourceRecurringRuleSyncId: UUID? = nil,
          syncId: UUID = UUID(), syncUpdatedAt: Date = .now, syncDeleted: Bool = false) {
         self.merchant = merchant
         self.amount = amount
@@ -106,6 +115,7 @@ import SwiftData
         self.isIncome = isIncome
         self.imageName = imageName
         self.importBatchId = importBatchId
+        self.sourceRecurringRuleSyncId = sourceRecurringRuleSyncId
         self.syncId = syncId
         self.syncUpdatedAt = syncUpdatedAt
         self.syncDeleted = syncDeleted

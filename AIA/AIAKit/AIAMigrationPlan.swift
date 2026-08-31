@@ -817,9 +817,53 @@ enum SchemaVersion17: VersionedSchema {
 // 回退：删除本 VersionedSchema + 撤销 schemas/stages 中的 v18 引用 + AppPersistence 改回 v17。
 enum SchemaVersion18: VersionedSchema {
     static var versionIdentifier: Schema.Version = Schema.Version(18, 0, 0)
+
+    // >>> CHANGE-[2026-08-31 23:30:00]-[周期账单来源关联] 开始
+    // v18 时刻的 Bill：尚无 sourceRecurringRuleSyncId 字段（v19 才加）。
+    // 必须内嵌旧 shape 类，避免引用外层已变异的 Bill 导致与 v19 schema checksum 重复
+    // （v1~v17 均直接引用外层 Bill.self，因为 Bill shape 从未变过；本次 Bill 首次加字段，
+    //  故 v18 必须转为内嵌旧类、v19 引用外层新类——同 ChatMessage v17/v18 模式）。
+    @Model final class Bill {
+        public var merchant: String
+        public var amount: Double
+        public var currency: String
+        public var category: String
+        public var time: Date
+        public var note: String
+        public var confirmed: Bool
+        public var isIncome: Bool
+        public var imageName: String?
+        public var importBatchId: UUID?
+        public var syncId: UUID
+        public var syncUpdatedAt: Date
+        public var syncDeleted: Bool
+
+        init(merchant: String, amount: Double, currency: String = "CNY",
+             category: String, time: Date, note: String = "", confirmed: Bool = false,
+             isIncome: Bool = false,
+             imageName: String? = nil,
+             importBatchId: UUID? = nil,
+             syncId: UUID = UUID(), syncUpdatedAt: Date = .now, syncDeleted: Bool = false) {
+            self.merchant = merchant
+            self.amount = amount
+            self.currency = currency
+            self.category = category
+            self.time = time
+            self.note = note
+            self.confirmed = confirmed
+            self.isIncome = isIncome
+            self.imageName = imageName
+            self.importBatchId = importBatchId
+            self.syncId = syncId
+            self.syncUpdatedAt = syncUpdatedAt
+            self.syncDeleted = syncDeleted
+        }
+    }
+    // <<< CHANGE-[2026-08-31 23:30:00]-[周期账单来源关联] 结束
+
     static var models: [any PersistentModel.Type] {
         [
-            Bill.self,
+            Bill.self,                   // v18 内嵌旧 shape（无 sourceRecurringRuleSyncId）
             Reminder.self,
             FoodEntry.self,
             HealthMetric.self,
@@ -841,6 +885,38 @@ enum SchemaVersion18: VersionedSchema {
 }
 // <<< CHANGE-[2026-08-31 17:40:00]-[补齐schemaV18] 结束
 
+// >>> CHANGE-[2026-08-31 23:30:00]-[周期账单来源关联] 开始
+// 原因：Bill 新增可选字段 sourceRecurringRuleSyncId（默认 nil，lightweight 迁移安全，
+//       纯新增可选字段，v18→v19 自动填充默认值 nil）。v18 已内嵌旧 Bill shape（无新字段），
+//       本版本引用【外层 Bill.self】——运行时业务代码用外层 Bill.self fetch/cast，
+//       内嵌类会 cast 失败崩溃。与 ChatMessage v17→v18、RecurringRule v8→v9 同模式。
+// 回退：删除本 VersionedSchema + 撤销 schemas/stages 中的 v19 引用 + AppPersistence 改回 v18。
+enum SchemaVersion19: VersionedSchema {
+    static var versionIdentifier: Schema.Version = Schema.Version(19, 0, 0)
+    static var models: [any PersistentModel.Type] {
+        [
+            Bill.self,                   // 外层新版（含 sourceRecurringRuleSyncId）
+            Reminder.self,
+            FoodEntry.self,
+            HealthMetric.self,
+            RecognitionRecord.self,
+            ChatMessage.self,
+            RecurringRule.self,
+            MerchantMeta.self,
+            FoodMeta.self,
+            WaterLog.self,
+            FoodNote.self,
+            ReminderNote.self,
+            FoodSource.self,
+            HealthNote.self,
+            ImportBatch.self,
+            SleepSession.self,
+            DailyHealthMetric.self
+        ]
+    }
+}
+// <<< CHANGE-[2026-08-31 23:30:00]-[周期账单来源关联] 结束
+
 // MARK: - 迁移计划：v1 → v3 仅新增 MerchantMeta 表；v3 → v4 为 RecurringRule 新增 3 个字段；
 //           v4 → v5 为 FoodEntry 新增 5 个可选字段；v5 → v6 新增 FoodMeta 表；
 //           v6 → v7 为 MerchantMeta 新增 3 个 sync 字段；v7 → v8 为 FoodEntry 新增 7 个字段；
@@ -851,8 +927,8 @@ enum SchemaVersion18: VersionedSchema {
 //           其 schema checksum 会与 v1 重复，导致 SwiftData 报
 //           "Duplicate version checksums across stages detected"，故不保留同构中间版本。
 enum AIAMigrationPlan: SchemaMigrationPlan {
-    static var schemas: [VersionedSchema.Type] { [SchemaVersion1.self, SchemaVersion3.self, SchemaVersion4.self, SchemaVersion5.self, SchemaVersion6.self, SchemaVersion7.self, SchemaVersion8.self, SchemaVersion9.self, SchemaVersion10.self, SchemaVersion11.self, SchemaVersion12.self, SchemaVersion13.self, SchemaVersion14.self, SchemaVersion15.self, SchemaVersion16.self, SchemaVersion17.self, SchemaVersion18.self] }
-    static var stages: [MigrationStage] { [migrateV1toV3, migrateV3toV4, migrateV4toV5, migrateV5toV6, migrateV6toV7, migrateV7toV8, migrateV8toV9, migrateV9toV10, migrateV10toV11, migrateV11toV12, migrateV12toV13, migrateV13toV14, migrateV14toV15, migrateV15toV16, migrateV16toV17, migrateV17toV18] }
+    static var schemas: [VersionedSchema.Type] { [SchemaVersion1.self, SchemaVersion3.self, SchemaVersion4.self, SchemaVersion5.self, SchemaVersion6.self, SchemaVersion7.self, SchemaVersion8.self, SchemaVersion9.self, SchemaVersion10.self, SchemaVersion11.self, SchemaVersion12.self, SchemaVersion13.self, SchemaVersion14.self, SchemaVersion15.self, SchemaVersion16.self, SchemaVersion17.self, SchemaVersion18.self, SchemaVersion19.self] }
+    static var stages: [MigrationStage] { [migrateV1toV3, migrateV3toV4, migrateV4toV5, migrateV5toV6, migrateV6toV7, migrateV7toV8, migrateV8toV9, migrateV9toV10, migrateV10toV11, migrateV11toV12, migrateV12toV13, migrateV13toV14, migrateV14toV15, migrateV15toV16, migrateV16toV17, migrateV17toV18, migrateV18toV19] }
 
     static let migrateV1toV3 = MigrationStage.lightweight(
         fromVersion: SchemaVersion1.self,
@@ -939,4 +1015,12 @@ enum AIAMigrationPlan: SchemaMigrationPlan {
         toVersion: SchemaVersion18.self
     )
     // <<< CHANGE-[2026-08-31 17:40:00]-[补齐schemaV18] 结束
+
+    // >>> CHANGE-[2026-08-31 23:30:00]-[周期账单来源关联] 开始
+    // v18 → v19：Bill 新增可选字段 sourceRecurringRuleSyncId（默认 nil，lightweight 安全）。
+    static let migrateV18toV19 = MigrationStage.lightweight(
+        fromVersion: SchemaVersion18.self,
+        toVersion: SchemaVersion19.self
+    )
+    // <<< CHANGE-[2026-08-31 23:30:00]-[周期账单来源关联] 结束
 }
