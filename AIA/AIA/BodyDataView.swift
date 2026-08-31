@@ -510,7 +510,11 @@ private struct BodyDataAddSheet: View {
                 .frame(maxWidth: 100)
                 .font(AIATheme.Font.title3.weight(.semibold))
                 .monospacedDigit()
-            Text(unit).font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
+            // >>> CHANGE-[2026-08-20 14:00:00]-[深色模式文字色整改] 开始
+            // 原因: 单位小字用 sub(dark 0xa1a1a6) 深色下偏暗; 改 reading(dark 0xd1d1d6) 清晰
+            // 回退: 改回 AIATheme.sub
+            Text(unit).font(AIATheme.Font.micro).foregroundStyle(AIATheme.reading)
+            // <<< CHANGE-[2026-08-20 14:00:00]-[深色模式文字色整改] 结束
         }
         .padding(12)
         .background(AIATheme.surface)

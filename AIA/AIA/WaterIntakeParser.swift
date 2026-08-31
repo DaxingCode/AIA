@@ -3,6 +3,7 @@ import Foundation
 /// 饮水解析与防重复去重。
 /// 聊天（`ChatView`）与 Siri/快捷指令（`TellAIAIntent`）共用，保证两条入口记录饮水的行为一致：
 /// 解析规则、餐次推断、去重窗口完全一致，避免「用好记AI记 喝了300毫升水」与 App 内语音记水结果不一致。
+@MainActor
 enum WaterIntakeParser {
 
     // MARK: - 解析
@@ -16,7 +17,7 @@ enum WaterIntakeParser {
     ///   "喝了两杯水"     → (200,  "2杯水")
     ///   "喝了 1.5 升水"  → (1500, "1.5升水")
     ///   "喝水"           → (100,  "1杯水")
-    static func parse(_ text: String) -> (ml: Double, display: String)? {
+    nonisolated static func parse(_ text: String) -> (ml: Double, display: String)? {
         // 必须含「水」+ 喝类动词
         let hasWater = text.contains("水") || text.contains("汤") // 汤也走这条罕见 case
         let hasDrinkVerb = text.contains("喝") || text.contains("饮") || text.contains("灌")
@@ -65,7 +66,7 @@ enum WaterIntakeParser {
     }
 
     /// 从文本推断餐次（早餐/午餐/晚餐/加餐），无则 nil。
-    static func mealFromText(_ text: String) -> String? {
+    nonisolated static func mealFromText(_ text: String) -> String? {
         let lowered = text.lowercased()
         if lowered.contains("早餐") || lowered.contains("早饭") || lowered.contains("早上") || lowered.contains("今早") { return "早餐" }
         if lowered.contains("午餐") || lowered.contains("午饭") || lowered.contains("中午") || lowered.contains("正午") { return "午餐" }

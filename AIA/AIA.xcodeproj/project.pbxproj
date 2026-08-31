@@ -699,7 +699,6 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = AIA/AIA.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				DEAD_CODE_STRIPPING = YES;
@@ -714,11 +713,7 @@
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "好记会把你记录的热量、体重等同步到「健康」App，方便你在一处查看，也能让推荐更贴合你。";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "好记需要麦克风权限来听你说的话，并把语音实时转成文字。";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "好记需要相册权限来把识别原图保存到你的相册。";
-				/* >>> CHANGE-[2026-08-19 15:10:50]-补NSPhotoLibraryUsageDescription 开始
-				   原因: ITMS-90683 缺相册"读取"用途说明(ScreenshotIntent.latestScreenshotData 用 PHPhotoLibrary/PHAsset 读最近截屏)
-				   回退: 删除本行 INFOPLIST_KEY_NSPhotoLibraryUsageDescription 与上下注释即可 */
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "用于读取最近一张截屏，自动识别账单、食物、待办和健康内容。";
-				/* <<< CHANGE-[2026-08-19 15:10:50]-补NSPhotoLibraryUsageDescription 结束 */
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "好记会把你说的话转成文字，用于记录饮食、账单、待办和健康数据。";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -747,11 +742,7 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				/* >>> CHANGE-[2026-08-19 17:21:12]-仅支持iPhone 开始
-				   原因: 用户决定只支持 iPhone, 不提供 iPad/visionOS(7)
-				   回退: TARGETED_DEVICE_FAMILY 改回 "1,2,7" */
-				TARGETED_DEVICE_FAMILY = "1";
-				/* <<< CHANGE-[2026-08-19 17:21:12]-仅支持iPhone 结束 */
+				TARGETED_DEVICE_FAMILY = 1;
 				XROS_DEPLOYMENT_TARGET = 26.5;
 			};
 			name = Debug;
@@ -762,7 +753,6 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = AIA/AIA.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				DEAD_CODE_STRIPPING = YES;
@@ -777,11 +767,7 @@
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "好记会把你记录的热量、体重等同步到「健康」App，方便你在一处查看，也能让推荐更贴合你。";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "好记需要麦克风权限来听你说的话，并把语音实时转成文字。";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "好记需要相册权限来把识别原图保存到你的相册。";
-				/* >>> CHANGE-[2026-08-19 15:10:50]-补NSPhotoLibraryUsageDescription 开始
-				   原因: ITMS-90683 缺相册"读取"用途说明(ScreenshotIntent.latestScreenshotData 用 PHPhotoLibrary/PHAsset 读最近截屏)
-				   回退: 删除本行 INFOPLIST_KEY_NSPhotoLibraryUsageDescription 与上下注释即可 */
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "用于读取最近一张截屏，自动识别账单、食物、待办和健康内容。";
-				/* <<< CHANGE-[2026-08-19 15:10:50]-补NSPhotoLibraryUsageDescription 结束 */
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "好记会把你说的话转成文字，用于记录饮食、账单、待办和健康数据。";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -810,11 +796,7 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				/* >>> CHANGE-[2026-08-19 17:21:12]-仅支持iPhone 开始
-				   原因: 用户决定只支持 iPhone, 不提供 iPad(2)
-				   回退: TARGETED_DEVICE_FAMILY 改回 "1,2" */
-				TARGETED_DEVICE_FAMILY = "1";
-				/* <<< CHANGE-[2026-08-19 17:21:12]-仅支持iPhone 结束 */
+				TARGETED_DEVICE_FAMILY = 1;
 				XROS_DEPLOYMENT_TARGET = 1.0;
 			};
 			name = Release;
@@ -969,7 +951,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_LANGUAGE = en;
@@ -1002,7 +983,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_LANGUAGE = en;

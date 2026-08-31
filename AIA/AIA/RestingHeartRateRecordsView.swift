@@ -81,9 +81,13 @@ struct RestingHeartRateRecordsView: View {
                     }
                 }
                 Spacer(minLength: 0)
+                // >>> CHANGE-[2026-08-20 14:00:00]-[深色模式文字色整改] 开始
+                // 原因: 数值用 ink(dark 0x2c2c2e) 深色下与底同色看不见; 改 reading(dark 0xd1d1d6) 清晰; "—"占位同步亮化
+                // 回退: 改回 AIATheme.ink : AIATheme.muted
                 Text(v.bpm > 0 ? "\(v.bpm) bpm" : "—")
                     .font(AIATheme.Font.body.weight(.medium))
-                    .foregroundStyle(v.bpm > 0 ? AIATheme.ink : AIATheme.muted)
+                    .foregroundStyle(AIATheme.reading)
+                // <<< CHANGE-[2026-08-20 14:00:00]-[深色模式文字色整改] 结束
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)

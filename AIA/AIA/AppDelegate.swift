@@ -71,16 +71,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         print("[QuickAction] didFinishLaunching, hasShortcut=\(launchOptions?[.shortcutItem] != nil)")
         #endif
 
-        // 通知：设置代理（让 App 在前台时也能弹横幅）并申请授权。
-        // 本地通知（UNUserNotificationCenter）不需要付费开发者账号，免费账号真机即可测试。
+        // 通知：设置代理（让 App 在前台时也能弹横幅）。
+        // 授权申请（requestAuthorization）与 APNs token 注册已挪到 ContentView.runDeferredStartup，
+        // 等新人引导页看完后再弹，避免首装时授权框与引导页抢时序。
+        // >>> CHANGE-[2026-08-20 15:30:13]-[授权弹窗延后到新人引导后] 开始
+        // 原因：用户要求「消息提醒/HealthKit 授权弹窗在看完新人提示页后再出现」。
+        // 原 ReminderNotificationManager.requestAuthorization() + registerForRemoteNotifications()
+        // 在 didFinishLaunching 无条件触发，比新人引导页还早（引导页要等 ContentView 挂载后才 push）。
+        // 现统一挪到 ContentView.runDeferredStartup（首装 = 引导关闭后才跑；老用户 = 直接进首页）。
+        // 回退：把下方 runDeferredStartup 内的「通知授权 + APNs」「HealthKit 授权」两段搬回本处即可。
+        // <<< CHANGE-[2026-08-20 15:30:13]-[授权弹窗延后到新人引导后] 结束
         UNUserNotificationCenter.current().delegate = self
-        ReminderNotificationManager.requestAuthorization()
-
-        // 远程推送（APNs）：注册设备 token（方案 A 群发通知）。
-        // 模拟器无 APNs 能力，守卫避免报错；真机/TestFlight 才真正注册。
-        #if !targetEnvironment(simulator)
-        application.registerForRemoteNotifications()
-        #endif
 
         // >>> CHANGE-[2026-08-16 21:30:00]-健康目标提醒默认值 开始
         // 原因: 用户要求「步数/饮水目标提醒」默认打开且默认时间 19:00；

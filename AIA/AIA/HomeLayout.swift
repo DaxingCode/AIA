@@ -57,7 +57,7 @@ enum HomeModule: String, CaseIterable, Identifiable, Hashable, Codable {
 
     /// 识别结果类型（food/bill/health/todo）映射到首页模块（diet/bill/health/todo）。
     /// Siri/快捷指令记完后写共享暂存、首页据此高亮对应卡片（识别类型用 food，首页模块用 diet）。
-    init?(recognitionType: String) {
+    nonisolated init?(recognitionType: String) {
         switch recognitionType {
         case "food":      self = .diet
         case "bill":      self = .bill

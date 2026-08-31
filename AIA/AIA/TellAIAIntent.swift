@@ -44,7 +44,7 @@ struct TellAIAIntent: AppIntent {
 
             // 数据写入独立容器后，主线程广播让前台 @Query 刷新（跨容器不自动合并）。三处写路径共用。
             let notifySiriSaved = {
-                Task { @MainActor in
+                _ = Task { @MainActor in
                     NotificationCenter.default.post(name: .siriDidSaveData, object: nil)
                 }
             }
@@ -57,7 +57,8 @@ struct TellAIAIntent: AppIntent {
             // 纯饮水句：WaterIntakeParser 命中 且 本地快析无任何账单/食物/待办/健康类型
             // → 直接记水并退出，不劳云端，行为最稳（消除「喝了100毫升水」被云端误记成账单）。
             if let (ml, display) = waterParsed, localResult == nil {
-                if WaterIntakeParser.checkDuplicateAndRegister(phrase, type: "water") {
+                let dup = await MainActor.run { WaterIntakeParser.checkDuplicateAndRegister(phrase, type: "water") }
+                if dup {
                     return "这杯水我刚记过啦～"
                 }
                 let meal = WaterIntakeParser.mealFromText(phrase) ?? RecognitionSaver.defaultMeal(for: .now)
@@ -79,7 +80,8 @@ struct TellAIAIntent: AppIntent {
             // 复合句里的水（如「喝了水，午饭35元」）：记水但不提前退出，下面与账单一起返回。
             var waterSummary: String?
             if let (ml, display) = waterParsed, localResult != nil {
-                if !WaterIntakeParser.checkDuplicateAndRegister(phrase, type: "water") {
+                let dup = await MainActor.run { WaterIntakeParser.checkDuplicateAndRegister(phrase, type: "water") }
+                if !dup {
                     let meal = WaterIntakeParser.mealFromText(phrase) ?? RecognitionSaver.defaultMeal(for: .now)
                     let entry = FoodEntry(
                         name: "饮用水",

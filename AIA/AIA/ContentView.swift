@@ -15,7 +15,7 @@ import UniformTypeIdentifiers
 
 /// 首页可跳转的目的地。统一枚举 → 单个 navigationDestination，规避多 destination 冲突。
 enum HomeRoute: Hashable {
-    case diet, health, bill, billTools, todo, todoTools, chat, chatVoice, settings, autoSetup, myAccount
+    case diet, health, bill, billTools, todo, todoTools, chat, chatVoice, settings, autoSetup, myAccount, proBenefits
     // 详情/编辑页：用 associated value 携带记录引用，让 .navigationDestination(for: HomeRoute.self) 统一处理
     // 所有 push 目标。**严禁**用 SelectableCard 的闭包式 destination 嵌入本路径——会触发
     // SwiftUI.AnyNavigationPath.Error.comparisonTypeMismatch try! 强解崩溃（2026-07-24 踩坑）。
@@ -126,6 +126,8 @@ struct ContentView: View {
     @State private var showPaywall = false
     /// 免费试用期结束后弹出的引导弹窗（带「订阅 Pro 版」按钮，点击跳转到订阅页）。
     @State private var showTrialExpiredPrompt = false
+    /// 顶部 Pro 胶囊的订阅剩余天文字符串（由 onReceive(SubscriptionManager.shared.$expiresAt) 写入）。
+    @State private var subscriptionExpiryText: String? = nil
     /// 进入首页布局编辑态瞬间拍下的布局快照；非 Pro 用户退出编辑时回滚到此，
     /// 因为 setHidden/relocate 在编辑操作瞬间就已写入 UserDefaults，必须用进入前的快照才能还原。
     @State private var preEditLayout: HomeLayoutStore.Snapshot? = nil
@@ -374,6 +376,7 @@ struct ContentView: View {
         case .settings:     SettingsView()
         case .autoSetup:    AutoRecognitionSetupView()
         case .myAccount:    MyAccountView()
+        case .proBenefits:  ProBenefitsView()
         case .healthDetail(let m):
             HealthDetailView(metric: m)
         case .billDetail(let b):
@@ -442,13 +445,14 @@ struct ContentView: View {
         #if DEBUG
         print("[ContentView] onAppear, pending=\(quickAction.pending?.rawValue ?? "nil")")
         #endif
-        // HealthKit 授权：无条件触发，不依赖引导页关闭或 runDeferredStartup。
-        // 2026-08-11 把它塞进 runDeferredStartup 后，重装首开若走引导页分支会被推迟，
-        // 且引导页关闭的 onChange 偶发不命中 → 授权框不弹。提到此处保证每次进首页都尝试一次
-        // （内部有守卫不会重复弹，且仍是 0.6s 延后发系统 modal + 异步查询，不会卡老机型）。
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            HealthManager.shared.requestAuthorization()
-        }
+        // HealthKit 授权已挪到 runDeferredStartup（见该函数内调用）：引导页看完后才弹。
+        // >>> CHANGE-[2026-08-20 15:30:13]-[授权弹窗延后到新人引导后] 开始
+        // 原因：用户要求 HealthKit 授权弹窗在看完新人提示页后再出现。
+        // 原写法在 performOnAppear 顶层无条件触发（0.6s 延迟），引导页刚 push 就可能弹。
+        // 现挪到 runDeferredStartup —— 首装由「引导页关闭 onChange」触发，老用户直接进首页即触发，
+        // 两路都卡在引导页之后；requestAuthorization 系统幂等，已授权/已拒绝用户不会重复弹。
+        // 回退：把 runDeferredStartup 内的「HealthKit 授权」段搬回本处即可。
+        // <<< CHANGE-[2026-08-20 15:30:13]-[授权弹窗延后到新人引导后] 结束
         // >>> CHANGE-[2026-08-18 09:31:07]-[XS Max进度条无生长动画修复-冷启动补homeEnterToken] 开始
         // 原因：原注释主张「冷启动不再补 homeEnterToken，交给 MiniBar 自己 onAppear 自播」。
         // 但 XS Max(A12) 上该自播时序不稳常被吞（首帧 body 多轮重算 + 数据异步）→ 冷启动无生长动画。
@@ -524,6 +528,21 @@ struct ContentView: View {
     @MainActor
     private func runDeferredStartup() {
         Task(priority: .background) { await checkScreenshotPending() }
+        // >>> CHANGE-[2026-08-20 15:30:13]-[授权弹窗延后到新人引导后] 开始
+        // 原因：用户要求「消息提醒/HealthKit 授权弹窗在看完新人提示页后再出现」。
+        // runDeferredStartup 只在「引导页关闭后（首装）」或「直接进首页（老用户）」执行，
+        // 两路都卡在引导页之后，正好满足诉求。requestAuthorization 系统幂等，不会重复弹。
+        // 通知授权 + APNs token：原在 AppDelegate.didFinishLaunching，现挪到此。
+        ReminderNotificationManager.requestAuthorization()
+        #if !targetEnvironment(simulator)
+        UIApplication.shared.registerForRemoteNotifications()
+        #endif
+        // HealthKit 授权：原在 performOnAppear 顶层无条件触发，现挪到此，0.6s 延迟错峰
+        // （内部守卫：已授权/已拒绝/autoAuthEnabled=false 时静默返回，不反复弹）。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            HealthManager.shared.requestAuthorization()
+        }
+        // <<< CHANGE-[2026-08-20 15:30:13]-[授权弹窗延后到新人引导后] 结束
         // 睡眠遮罩恢复：交给 restoreSleepMaskOnStartup()，由根 .onAppear 无条件调用兜底，
         // 这里再调一次双保险（runDeferredStartup 在 .onAppear 之后由引导关闭/非首启触发）。
         // 两次都开 8s 窗口但第二次 isOpen 已被首次置 true，restoreSleepMaskIfNeeded 幂等，无害。
@@ -535,7 +554,6 @@ struct ContentView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             RecurringBillManager.generateDue(context: context)
         }
-        // HealthKit 授权已提到 performOnAppear 顶层无条件触发（见上），此处不再重复调用，避免非首启重复发起。
         // 冷启动首拉：延到 0.5s 让云端睡眠等数据更早回来，配合 8s 睡眠遮罩恢复窗口更稳。
         // （首帧空态已由 runDeferredStartup 延后调度保证，0.5s 不会与周期账单/HealthKit 撞窗。）
         coldStartSync(delay: 0.5)
@@ -629,6 +647,13 @@ struct ContentView: View {
                     showTrialExpiredPrompt = true
                     ent.presentTrialExpiredPrompt = false
                 }
+            }
+            // 订阅到期时间变化时（购买/降级/退款），重算顶部 Pro 胶囊天数字符串，
+            // 避免单例用 let 不订阅导致返回首页后文案不刷新。
+            .onReceive(SubscriptionManager.shared.$expiresAt) { exp in
+                guard let exp, exp > Date() else { subscriptionExpiryText = nil; return }
+                let days = max(0, Int(ceil(exp.timeIntervalSinceNow / 86400)))
+                subscriptionExpiryText = "剩余 \(days) 天"
             }
             // 去除 NavigationBar 底部分隔线（iOS 系统默认 shadow line）
             .toolbarBackground(.hidden, for: .navigationBar)
@@ -917,6 +942,10 @@ struct ContentView: View {
         guard !isCheckingScreenshotPending, pendingPresent == nil else { return }
         guard let p = ScreenshotStore.loadPending() else { return }
         isCheckingScreenshotPending = true
+        // >>> 分享扩展来源：无论 App 是被系统接力唤起还是用户手动点图标冷启动，
+        // 都跳对话页看识别结果（手动点图标冷启动时没有 aia://chat 这个 URL，必须靠分享图本身的存在来跳）。
+        let shouldNavigate = navigateToChat || p.fromShareExtension
+        // <<<
         let img = ScreenshotStore.loadPendingImage()
         // 招呼气泡定位锚点：必须打在插入「你发的图」气泡之前，
         // 否则 ChatView.onAppear 会把这张截屏算成历史，招呼气泡排到图片后面。
@@ -924,6 +953,21 @@ struct ContentView: View {
         // 像微信一样：这张截屏先作为「你发的图」进对话流，好记AI随后在同一段对话里回识别卡片。
         // 返回的文件名给识别结果复用，同一张图不落盘两次。
         let presavedName = appendUserImageMessage(image: img, context: context)
+
+        // >>> 分享扩展来源：图片已进对话页，识别交给主 App 在对话页内完成（显示「好记AI正在识别…」加载条）。
+        // 不再读扩展端 result，统一复用拍照/相册那条成熟识别链路，避免两端各写一份识别。
+        if p.fromShareExtension {
+            ScreenshotStore.clearPending()
+            isCheckingScreenshotPending = false
+            if let img {
+                runImageRecognition(image: img, context: context,
+                                    errorMessage: Binding<String?>.constant(nil),
+                                    navigateToChat: shouldNavigate,
+                                    presavedImageName: presavedName)
+            }
+            return
+        }
+        // <<< 分享扩展来源结束
 
         // 付费墙拦截分支：后台识别被免费版权益拦截（无云端视觉 + 本地覆盖不到），
         // 不当作普通识别结果处理，而是回插「升级 Pro」引导气泡——与对话页付费墙做法一致。
@@ -966,7 +1010,7 @@ struct ContentView: View {
         let hasPending = !forceSave && known.contains { ImageAutoRecogSettings.mode(for: $0, source: "image") == .pending }
 
         if hasPending {
-            pendingNavigate = navigateToChat
+            pendingNavigate = shouldNavigate
             pendingPresent = .pending(p.result, rawText: p.rawText,
                                       image: img, source: p.source ?? .cloud,
                                       presavedImageName: presavedName,
@@ -993,7 +1037,7 @@ struct ContentView: View {
                     context.insert(ChatMessage(role: .ai, text: "这张图我没识别到可记录的内容～可以在「设置 → 识别结果保存方式设置」里调整保存策略。"))
                 }
             }
-            if navigateToChat {
+            if shouldNavigate {
                 DispatchQueue.main.async {
                     NavigationRouter.shared.navigate(.chat)
                 }
@@ -1020,16 +1064,41 @@ struct ContentView: View {
             Text("\(greeting)，\(userNickname) \(Self.greetingEmoji)")
                 .font(AIATheme.Font.title2.weight(.semibold))
             Spacer()
-            if pendingCount > 0 {
-                Text("\(pendingCount) 项待处理")
-                    .font(AIATheme.Font.micro.weight(.medium))
-                    .foregroundStyle(AIATheme.warn)
-                    .padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(AIATheme.warn.opacity(0.12))
-                    .clipShape(Capsule())
+            Button {
+                router.navigate(.proBenefits)
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "crown.fill")
+                        .font(AIATheme.Font.micro.weight(.semibold))
+                    Text(proCapsuleText)
+                }
+                .font(AIATheme.Font.micro.weight(.medium))
+                .foregroundStyle(AIATheme.amber)
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background(AIATheme.amber.opacity(0.12))
+                .clipShape(Capsule())
             }
+            .buttonStyle(.plain)
         }
         .padding(.leading, 2)
+    }
+
+    /// 右上角 Pro 胶囊文案（三态，Pro 仅首字母大写）：
+    /// 已订阅/7天试用 → "Pro 剩余 X 天"；10分钟体验 → "Pro 体验中"；非 Pro → "立即升级Pro"。
+    private var proCapsuleText: String {
+        if ent.isFullAccess {
+            if SubscriptionManager.shared.expiresAt != nil, subscriptionExpiryText != nil {
+                return "Pro \(subscriptionExpiryText!)"
+            }
+            if ent.trialActive {
+                return "Pro 剩余 \(ent.trialRemainingDays) 天"
+            }
+            return "Pro 已订阅"
+        }
+        if ent.isTempPro {
+            return "Pro 体验中"
+        }
+        return "立即升级Pro"
     }
 
     /// 问候语随机 emoji（每次启动从池中随机选一个，不随界面刷新变化）
@@ -2835,8 +2904,6 @@ struct ContentView: View {
         }
         return " · \(datePrefix) \(time)"
     }
-    // MARK: - 顶部待处理总数（今日待办）
-    private var pendingCount: Int { todayTodos.count }
 }
 
 // MARK: - 首同步指示器子视图（局部订阅 CloudSyncManager，避免根视图订阅）

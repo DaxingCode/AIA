@@ -13,6 +13,18 @@ import UIKit
 import AIAKit
 
 enum ScreenshotStore {
+    // >>> CHANGE-[2026-08-21 10:00:00]-[分享扩展打通] 开始
+    // 兼容读取：分享扩展把结果写进 App Group（pendingRecognitionV2），无感截图写主 App Documents。
+    // 主 App 启动时先读 App Group，再回退读 Documents，两条来源互不干扰。
+    private static let appGroupId = "group.com.daxing.aia"
+    private static let appGroupPendingKey = "pendingRecognitionV2"
+    private static let appGroupContainer: URL = {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupId)
+            ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }()
+    private static let appGroupAttachmentsDir = appGroupContainer.appendingPathComponent("attachments")
+    // <<< CHANGE-[2026-08-21 10:00:00]-[分享扩展打通] 结束
+
     private static let docDir = FileManager.default
         .urls(for: .documentDirectory, in: .userDomainMask)[0]
     private static let pendingFile = docDir.appendingPathComponent("pendingRecognition.json")
@@ -70,19 +82,36 @@ enum ScreenshotStore {
     }
 
     static func loadPending() -> PendingRecognition? {
+        // 先读 App Group（分享扩展来源）
+        if let data = UserDefaults(suiteName: appGroupId)?.data(forKey: appGroupPendingKey),
+           let p = try? JSONDecoder().decode(PendingRecognition.self, from: data) {
+            return p
+        }
+        // 再读主 App Documents（无感截图来源）
         guard let data = try? Data(contentsOf: pendingFile) else { return nil }
         return try? JSONDecoder().decode(PendingRecognition.self, from: data)
     }
 
-    /// 读取 pending 关联的原图（确认页展示用）。
+    /// 读取 pending 关联的原图（确认页展示用）。App Group 与 Documents 两个位置都试。
     static func loadPendingImage() -> UIImage? {
         guard let name = loadPending()?.imageName else { return nil }
+        if let img = UIImage(contentsOfFile: appGroupAttachmentsDir.appendingPathComponent(name).path) {
+            return img
+        }
         let url = attachmentsDir.appendingPathComponent(name)
         return UIImage(contentsOfFile: url.path)
     }
 
     static func clearPending() {
         let name = loadPending()?.imageName
+        // 清 App Group
+        let defaults = UserDefaults(suiteName: appGroupId)
+        defaults?.removeObject(forKey: appGroupPendingKey)
+        defaults?.removeObject(forKey: appGroupPendingKey + "At")
+        if let name {
+            try? FileManager.default.removeItem(at: appGroupAttachmentsDir.appendingPathComponent(name))
+        }
+        // 清 Documents（无感截图来源）
         try? FileManager.default.removeItem(at: pendingFile)
         if let name {
             try? FileManager.default.removeItem(at: attachmentsDir.appendingPathComponent(name))
@@ -102,6 +131,9 @@ enum ScreenshotStore {
         /// 普通识别失败标记（非权益类：本地解析/网络/云端异常），主 App 打开时回插友好提示，
         /// 不误导已开通 Pro 的用户去升级。
         var isRecognizeFailed: Bool = false
+        /// 来自相册分享扩展：图片已存好，但识别不在扩展端做，交给主 App 对话页内 runImageRecognition 完成。
+        /// checkScreenshotPending 看到此标记时，不读 result、而是把图交给对话页识别链路。
+        var fromShareExtension: Bool = false
         // 计算属性作 id，不进入 Codable，避免破坏 JSON 编解码。
         var id: String { (imageName ?? "none") + "@" + at.timeIntervalSince1970.description }
     }

@@ -23,16 +23,13 @@ struct OnboardingView: View {
                            startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
             VStack(spacing: 0) {
-                // 顶部跳过
-                HStack {
-                    Spacer()
-                    if page < total - 1 {
-                        Button { onFinish() } label: {
-                            Text("跳过").font(AIATheme.Font.subhead.weight(.medium)).foregroundStyle(AIATheme.sub)
-                        }
-                        .padding(.trailing, 18).padding(.top, 14)
-                    }
-                }
+                // >>> CHANGE-[2026-08-20 16:12:46]-[新人引导去掉右上角跳过按钮] 开始
+                // 原因：用户要求去掉引导页右上角「跳过」按钮，让用户完整看完 12 页引导。
+                //       去掉后退出引导的唯一方式 = 底部「下一步」逐页推进到最后一页「开始使用」。
+                //       不影响上架审核：苹果无「引导必须可跳过」规定；且引导页一次性（onboardingDone=true 后不再出现），
+                //       用户仍可在首页右上角 ✨ 重新查看。左右滑动 + 底部「上一步」仍在，翻页体验完整。
+                // 回退：恢复下方被删的 HStack（Spacer + 非最后一页时的「跳过」Button）。
+                // <<< CHANGE-[2026-08-20 16:12:46]-[新人引导去掉右上角跳过按钮] 结束
 
                 // 只渲染当前页，避免 TabView.page 一次性构建全部 12 页导致的首帧渲染死锁（老机型黑屏卡死）。
                 // 外层包 DragGesture 实现手指左右滑动翻页；第 10 页（shortcutsPage 内含纵向 ScrollView）
@@ -359,7 +356,9 @@ struct OnboardingView: View {
                 .foregroundStyle(AIATheme.sub)
                 .lineSpacing(3)
 
+            // >>> CHANGE-[2026-08-22 08:09:11]-[引导页/设置页主次按钮对调] 开始
             VStack(spacing: 12) {
+                // 次按钮：去添加
                 Button {
                     openShortcutImport { _, msg in
                         if let msg { showToast(msg) }
@@ -369,16 +368,16 @@ struct OnboardingView: View {
                         Image(systemName: "plus.circle.fill")
                         Text("去添加")
                     }
-                    .font(AIATheme.Font.callout.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .font(AIATheme.Font.subhead.weight(.medium))
+                    .foregroundStyle(AIATheme.blue)
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity)
-                    .background(LinearGradient.techAccent)
+                    .background(AIATheme.blue.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
                 }
                 .buttonStyle(.plain)
 
-                // 次按钮：查看视频教程
+                // 主按钮：查看视频教程
                 Button {
                     if let url = URL(string: "https://mp.weixin.qq.com/s/l0Gw35TCMUGgkYf18F73XA") {
                         presentInAppBrowser(url)
@@ -388,11 +387,11 @@ struct OnboardingView: View {
                         Image(systemName: "play.circle.fill")
                         Text("查看视频教程")
                     }
-                    .font(AIATheme.Font.subhead.weight(.medium))
-                    .foregroundStyle(AIATheme.blue)
+                    .font(AIATheme.Font.callout.weight(.semibold))
+                    .foregroundStyle(.white)
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity)
-                    .background(AIATheme.blue.opacity(0.08))
+                    .background(LinearGradient.techAccent)
                     .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
                 }
                 .buttonStyle(.plain)
@@ -481,11 +480,12 @@ struct OnboardingView: View {
                             Image(systemName: "gearshape.fill")
                             Text("打开系统设置")
                         }
-                        .font(AIATheme.Font.subhead.weight(.semibold))
-                        .foregroundStyle(.white)
+                        // <<< CHANGE-[2026-08-22 08:09:11]-[引导页/设置页主次按钮对调] 结束
+                        .font(AIATheme.Font.subhead.weight(.medium))
+                        .foregroundStyle(AIATheme.blue)
                         .padding(.vertical, 12)
                         .frame(maxWidth: .infinity)
-                        .background(LinearGradient.techAccent)
+                        .background(AIATheme.blue.opacity(0.08))
                         .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
                     }
                     .buttonStyle(.plain)
@@ -501,11 +501,11 @@ struct OnboardingView: View {
                                 Image(systemName: "play.circle.fill")
                                 Text("查看视频教程")
                             }
-                            .font(AIATheme.Font.subhead.weight(.medium))
-                            .foregroundStyle(AIATheme.blue)
-                            .padding(.vertical, 10)
+                            .font(AIATheme.Font.callout.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.vertical, 12)
                             .frame(maxWidth: .infinity)
-                            .background(AIATheme.blue.opacity(0.08))
+                            .background(LinearGradient.techAccent)
                             .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
                         }
                         .buttonStyle(.plain)

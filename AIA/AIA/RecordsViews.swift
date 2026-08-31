@@ -1364,7 +1364,11 @@ struct HealthListView: View {
     }
     /// 净热量颜色：医学营养界习惯——盈余(正)红、缺口(负)绿；无数据中性
     private var netCalorieColor: Color {
-        if todayCalories.isZero { return AIATheme.ink }
+        // >>> CHANGE-[2026-08-20 14:00:00]-[深色模式文字色整改] 开始
+        // 原因: 无数据"—"用 ink(dark 0x2c2c2e) 深色下与 StatCard 底同色看不见; 改 reading(dark 0xd1d1d6)
+        // 回退: 改回 AIATheme.ink
+        if todayCalories.isZero { return AIATheme.reading }
+        // <<< CHANGE-[2026-08-20 14:00:00]-[深色模式文字色整改] 结束
         return netCalorie >= 0 ? AIATheme.over : AIATheme.income
     }
     // <<< CHANGE-[2026-08-19 12:36:16]-[健康目标页净热量方块] 结束

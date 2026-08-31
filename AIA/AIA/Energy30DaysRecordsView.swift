@@ -133,9 +133,13 @@ struct Energy30DaysRecordsView: View {
     private func metricCell(value: Int, hasData: Bool, color: Color, signed: Bool) -> some View {
         VStack(spacing: 0) {
             if !hasData {
+                // >>> CHANGE-[2026-08-20 14:00:00]-[深色模式文字色整改] 开始
+                // 原因: 空态"—"用 muted(dark 0x8e8e93) 深色下模糊; 改 reading(dark 0xd1d1d6) 清晰
+                // 回退: 改回 AIATheme.muted
                 Text("—")
                     .font(AIATheme.Font.body.weight(.medium))
-                    .foregroundStyle(AIATheme.muted)
+                    .foregroundStyle(AIATheme.reading)
+                // <<< CHANGE-[2026-08-20 14:00:00]-[深色模式文字色整改] 结束
             } else {
                 Text(signed ? (value > 0 ? "+\(value)" : "\(value)") : "\(value)")
                     .font(AIATheme.Font.body.weight(.medium))
