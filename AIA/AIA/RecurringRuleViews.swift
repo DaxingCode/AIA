@@ -216,7 +216,15 @@ struct RecurringRuleEditView: View {
         _merchant = State(initialValue: rule?.merchant ?? "")
         _amountText = State(initialValue: rule?.amount ?? 0 > 0 ? String(format: "%g", rule?.amount ?? 0) : "")
         _category = State(initialValue: rule?.category ?? "住房")
-        _dayOfMonth = State(initialValue: rule?.dayOfMonth ?? 1)
+        // >>> CHANGE-[2026-08-31 23:18:54]-[新增周期账单生成日默认为今天] 开始
+        // 新增模式下生成日默认 = 今天几号（与「首次生成」日期的当日保持一致，免去手动改），
+        // 编辑已有规则仍按其原值。
+        if let r = rule {
+            _dayOfMonth = State(initialValue: r.dayOfMonth)
+        } else {
+            _dayOfMonth = State(initialValue: Calendar.current.component(.day, from: .now))
+        }
+        // <<< CHANGE-[2026-08-31 23:18:54]-[新增周期账单生成日默认为今天] 结束
         _isIncome = State(initialValue: rule?.isIncome ?? false)
         _note = State(initialValue: rule?.note ?? "")
         _cycleRaw = State(initialValue: rule?.cycleRaw ?? RecurrenceCycle.monthly.rawValue)
