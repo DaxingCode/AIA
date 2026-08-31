@@ -108,6 +108,12 @@ public enum AppPersistence {
         //    用户数据在云端，重装 App 登录即恢复；本次降级仅用于避免崩溃 + 给出提示。
         print("❌ [AppPersistence] 迁移计划失败，磁盘 store 版本与当前 schema(v\(currentSchemaVersion)) 不匹配，备份并降级内存存储")
         backupStore(from: storeURL)
+        // >>> CHANGE-[2026-08-31 18:25:53]-[降级库改名隔离] 开始
+        // 防死循环：只备份不改名，原坏库仍留在原位 → 下次冷启动又会打开它 → 又降级 → 又备份，
+        // 每启一次就重复一次。这里把原库（含 -wal/-shm）改名为 AIA.store.incompatible.<时间戳>
+        // 移出原位，下次启动 storeURL 不存在 → 正常建新库，不再反复降级。
+        quarantineStoreFiles(from: storeURL)
+        // <<< CHANGE-[2026-08-31 18:25:53]-[降级库改名隔离] 结束
         // 标记：本次启动走了「非持久化降级」，供 UI 层提示用户「数据需从云端恢复 / 重装 App」。
         UserDefaults.standard.set(true, forKey: "aia.storeDegradedToMemory")
         // 3. 最终兜底：内存存储，保证不白屏
@@ -248,5 +254,35 @@ public enum AppPersistence {
 
         try? fm.copyItem(at: url, to: backupURL)
         print("[AppPersistence] 旧库已备份到 \(backupURL)")
+    }
+
+    /// 降级后把原库整组（store / -wal / -shm）改名为 *.incompatible.<时间戳> 移出原位，
+    /// 防止下次冷启动再次打开同一个坏库 → 无限「降级→备份→再降级」循环。
+    private static func quarantineStoreFiles(from url: URL) {
+        let fm = FileManager.default
+        let baseDir = url.deletingLastPathComponent()
+        let stem = url.lastPathComponent
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyyMMdd_HHmmss"
+        let stamp = fmt.string(from: Date())
+        // 已存在同名隔离文件时追加 -N 后缀，保证幂等不覆盖
+        var suffix = stamp
+        var n = 1
+        while fm.fileExists(atPath: baseDir.appendingPathComponent("\(stem).incompatible.\(suffix)").path) {
+            suffix = "\(stamp)-\(n)"
+            n += 1
+        }
+        for name in [stem, stem + "-wal", stem + "-shm"] {
+            let src = baseDir.appendingPathComponent(name)
+            guard fm.fileExists(atPath: src.path) else { continue }
+            let dst = baseDir.appendingPathComponent("\(name).incompatible.\(suffix)")
+            do {
+                try fm.moveItem(at: src, to: dst)
+                print("[AppPersistence] 原库已改名隔离: \(name) → \(dst.lastPathComponent)")
+            } catch {
+                // 改名失败不阻断降级流程，仅打印日志，Backups/ 已有兜底备份。
+                print("[AppPersistence] 原库改名失败（保留原位，已依赖 Backups/ 备份）: \(error)")
+            }
+        }
     }
 }
