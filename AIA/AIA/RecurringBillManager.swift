@@ -92,25 +92,35 @@ enum RecurringBillManager {
         return nil
     }
 
+    // >>> CHANGE-[2026-08-30 13:43:27]-[生成日1到31] 开始
+    /// 取某年某月的"目标日"；若那个月没有这一天（如 2 月 30 日），返回该月最后一天。
+    private static func safeDay(year: Int, month: Int, day: Int, calendar: Calendar) -> Date? {
+        let clamped = min(max(day, 1), 31)
+        let comps = DateComponents(year: year, month: month, day: clamped)
+        if let d = calendar.date(from: comps) { return d }
+        // 该月不存在这一天 → 取下个月 0 日 = 当月最后一天
+        return calendar.date(from: DateComponents(year: year, month: month + 1, day: 0))
+    }
+    // <<< CHANGE-[2026-08-30 13:43:27]-[生成日1到31] 结束
+
     private static func nextMonthly(after: Date, rule: RecurringRule) -> Date? {
         let cal = Calendar.current
-        let day = min(max(rule.dayOfMonth, 1), 28)
+        let day = min(max(rule.dayOfMonth, 1), 31)
         var comps = cal.dateComponents([.year, .month, .day], from: after)
-        comps.day = day
-        if let candidate = cal.date(from: comps), candidate > after {
+        if let candidate = Self.safeDay(year: comps.year ?? 0, month: comps.month ?? 1, day: day, calendar: cal),
+           candidate > after {
             return candidate
         }
         guard let monthStart = cal.date(from: DateComponents(year: comps.year, month: comps.month, day: 1)),
               let nextMonth = cal.date(byAdding: .month, value: 1, to: monthStart) else { return nil }
-        var nextComps = cal.dateComponents([.year, .month], from: nextMonth)
-        nextComps.day = day
-        return cal.date(from: nextComps)
+        let nextComps = cal.dateComponents([.year, .month], from: nextMonth)
+        return Self.safeDay(year: nextComps.year ?? 0, month: nextComps.month ?? 1, day: day, calendar: cal)
     }
 
     private static func nextQuarterly(after: Date, rule: RecurringRule) -> Date? {
         let cal = Calendar.current
         let startMonth = cal.component(.month, from: rule.startDate)
-        let day = min(max(rule.dayOfMonth, 1), 28)
+        let day = min(max(rule.dayOfMonth, 1), 31)
 
         // 季度月份：startMonth, startMonth+3, startMonth+6, startMonth+9（均归一化到 1...12）
         var quarterMonths = (0...3).map { i in
@@ -125,29 +135,29 @@ enum RecurringBillManager {
 
         for qm in quarterMonths {
             if qm > month || (qm == month && dayAfter < day) {
-                if let d = cal.date(from: DateComponents(year: year, month: qm, day: day)) {
+                if let d = Self.safeDay(year: year, month: qm, day: day, calendar: cal) {
                     return d
                 }
             }
         }
 
         // 跨年：用下一个年度的第一个季度月
-        return cal.date(from: DateComponents(year: year + 1, month: quarterMonths[0], day: day))
+        return Self.safeDay(year: year + 1, month: quarterMonths[0], day: day, calendar: cal)
     }
 
     private static func nextYearly(after: Date, rule: RecurringRule) -> Date? {
         let cal = Calendar.current
         let month = cal.component(.month, from: rule.startDate)
-        let day = min(max(rule.dayOfMonth, 1), 28)
+        let day = min(max(rule.dayOfMonth, 1), 31)
         let comps = cal.dateComponents([.year, .month, .day], from: after)
         let year = comps.year ?? 0
         let currentMonth = comps.month ?? 1
         let currentDay = comps.day ?? 0
 
         if currentMonth < month || (currentMonth == month && currentDay < day) {
-            return cal.date(from: DateComponents(year: year, month: month, day: day))
+            return Self.safeDay(year: year, month: month, day: day, calendar: cal)
         }
-        return cal.date(from: DateComponents(year: year + 1, month: month, day: day))
+        return Self.safeDay(year: year + 1, month: month, day: day, calendar: cal)
     }
 
     private static func nextCustom(after: Date, rule: RecurringRule) -> Date? {
@@ -183,11 +193,10 @@ enum RecurringBillManager {
             // 找到 base 当周或下周的同一个 weekday
             return rule.startDate
         case .monthly, .quarterly, .yearly:
-            let day = min(max(rule.dayOfMonth, 1), 28)
+            let day = min(max(rule.dayOfMonth, 1), 31)
             let cal = Calendar.current
-            var comps = cal.dateComponents([.year, .month], from: base)
-            comps.day = day
-            return cal.date(from: comps) ?? base
+            let comps = cal.dateComponents([.year, .month], from: base)
+            return Self.safeDay(year: comps.year ?? 0, month: comps.month ?? 1, day: day, calendar: cal) ?? base
         case .custom:
             return rule.startDate
         @unknown default:

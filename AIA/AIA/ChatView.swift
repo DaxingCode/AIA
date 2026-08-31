@@ -3453,6 +3453,50 @@ struct ChatView: View {
             }
         }
 
+        // >>> CHANGE-[2026-08-30 10:54:26]-[每月N号循环待办日期解析] 开始
+        // 原因：用户说「每月1号提醒我领移动的代金券」「每月1日…」时，上方 datePattern
+        //       要求「N月N日」才匹配（如「9月1号」），而「每月1号」的「月」属于「每·月」、
+        //       前面不是数字 → 匹配失败，dateFound 保持 false。
+        //       随后走到下方「无具体日期的周期待办」兜底，把 due 设成「今天此刻」，
+        //       导致循环锚点变成「每月今天」（8月30号说 → 每月30号），而非用户要的每月1号。
+        // 修复：仅在「已识别到 monthly 周期词且尚未解析出日期」时，单独提取
+        //       「每月/每个月/每一月 + N号/N日」里的 N 作为每月循环日：
+        //       · 取当月 N 日；N 超过当月天数时（如「每月31号」遇 2 月）钳到当月最后一天，防溢出下月；
+        //       · 该日已过去（按 startOfDay 比较，今天不算过去）→ 顺延到下个月同日；
+        //       · 具体时刻不在此处设置，交由下方统一「默认 8:00」逻辑处理。
+        // 回退：删除本标记之间的代码块即可恢复原行为。
+        if !dateFound, let rule = repeatRule, rule == "monthly" {
+            let monthlyDayPattern = "(?:每(?:个|一)?月)\\s*(\\d{1,2})\\s*[日号]"
+            if let regex = try? NSRegularExpression(pattern: monthlyDayPattern),
+               let match = regex.firstMatch(in: text, range: NSRange(location: 0, length: text.utf16.count)) {
+                let dayStr = (text as NSString).substring(with: match.range(at: 1))
+                if let day = Int(dayStr), (1...31).contains(day) {
+                    // 当月该日（超出当月天数时钳到最后一天，避免 Calendar 溢出到下月）
+                    let dayInMonth = min(day, cal.range(of: .day, in: .month, for: now)?.count ?? day)
+                    var comps = DateComponents()
+                    comps.year = cal.component(.year, from: now)
+                    comps.month = cal.component(.month, from: now)
+                    comps.day = dayInMonth
+                    if let target = cal.date(from: comps) {
+                        if cal.startOfDay(for: target) < cal.startOfDay(for: now) {
+                            // 当月这一天已过 → 顺延到下个月同日（同样钳到当月最后一天）
+                            if let nextMonth = cal.date(byAdding: .month, value: 1, to: target) {
+                                var nextComps = cal.dateComponents([.year, .month], from: nextMonth)
+                                nextComps.day = min(day, cal.range(of: .day, in: .month, for: nextMonth)?.count ?? day)
+                                due = cal.date(from: nextComps) ?? nextMonth
+                            } else {
+                                due = target
+                            }
+                        } else {
+                            due = target
+                        }
+                        dateFound = true
+                    }
+                }
+            }
+        }
+        // <<< CHANGE-[2026-08-30 10:54:26]-[每月N号循环待办日期解析] 结束
+
         if !dateFound {
             if lower.contains("后天") {
                 due = cal.date(byAdding: .day, value: 2, to: now) ?? now

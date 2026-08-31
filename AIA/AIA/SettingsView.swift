@@ -195,6 +195,10 @@ struct SettingsView: View {
     @State private var showPaywall = false
     @State private var showFeedbackMail = false
     @State private var feedbackMailUnavailable = false
+    // >>> CHANGE-[2026-08-28 18:34:20]-[五星好评与分享App] 开始
+    @StateObject private var review = AppStoreReviewManager.shared
+    @State private var showShareSheet = false
+    // <<< CHANGE-[2026-08-28 18:34:20]-[五星好评与分享App] 结束
 
     var body: some View {
         // 注意：本页由首页 navigationDestination(for:) push 进来，
@@ -310,6 +314,34 @@ struct SettingsView: View {
                        onSecondary: {
                            UIPasteboard.general.string = "754727942@qq.com"
                        })
+        // >>> CHANGE-[2026-08-28 18:34:20]-[五星好评与分享App] 开始
+        .sheet(isPresented: $showShareSheet) {
+            ShareSheet(items: [
+                "好记AI - 智能记录你的账单、待办、饮食和健康，让生活更有条理 👉",
+                AppURLs.appStore
+            ])
+        }
+        // 低分(1-3星)引导应用内反馈：监听 AppStoreReviewManager 发出的通知，复用本页 MailComposer 通道
+        .onReceive(NotificationCenter.default.publisher(for: .openFeedbackMail)) { _ in
+            if MFMailComposeViewController.canSendMail() {
+                showFeedbackMail = true
+            } else {
+                feedbackMailUnavailable = true
+            }
+        }
+        // 五星好评选择弹窗（overlay 浮层，参考 CenteredAlertCard 视觉）
+        .overlay(
+            Group {
+                if review.showStarPrompt {
+                    StarReviewPrompt(
+                        selected: $review.selectedStars,
+                        onChoose: { stars in review.chooseStars(stars) },
+                        onDismiss: { review.dismissPrompt() }
+                    )
+                }
+            }
+        )
+        // <<< CHANGE-[2026-08-28 18:34:20]-[五星好评与分享App] 结束
     }
 
     // MARK: - 我的账号入口（聚合昵称 + 账号信息 + 退出登录）
@@ -704,12 +736,52 @@ struct SettingsView: View {
 
             Divider().padding(.leading, 14).background(AIATheme.hairline)
 
+            // >>> CHANGE-[2026-08-28 18:34:20]-[五星好评与分享App] 开始
+            Button {
+                UIApplication.shared.open(AppURLs.appStoreReview)
+            } label: {
+                HStack {
+                    Label("给个五星好评", systemImage: "star.fill")
+                        .font(AIATheme.Font.callout.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Image(systemName: "arrow.up.right.square")
+                        .font(AIATheme.Font.caption.weight(.semibold))
+                        .foregroundStyle(AIATheme.muted)
+                }
+                .padding(14)
+                .background(AIATheme.surface)
+            }
+            .buttonStyle(.plain)
+
+            Divider().padding(.leading, 14).background(AIATheme.hairline)
+
+            Button {
+                showShareSheet = true
+            } label: {
+                HStack {
+                    Label("分享给朋友", systemImage: "square.and.arrow.up.fill")
+                        .font(AIATheme.Font.callout.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Image(systemName: "arrow.up.right.square")
+                        .font(AIATheme.Font.caption.weight(.semibold))
+                        .foregroundStyle(AIATheme.muted)
+                }
+                .padding(14)
+                .background(AIATheme.surface)
+            }
+            .buttonStyle(.plain)
+            // <<< CHANGE-[2026-08-28 18:34:20]-[五星好评与分享App] 结束
+
+            Divider().padding(.leading, 14).background(AIATheme.hairline)
+
             HStack {
                 Label("版本", systemImage: "info.circle")
                     .font(AIATheme.Font.callout.weight(.medium))
                     .foregroundStyle(.primary)
                 Spacer()
-                Text("好记AI 1.0.0")
+                Text("好记AI 1.0.1")
                     .font(AIATheme.Font.footnote)
                     .foregroundStyle(AIATheme.muted)
             }

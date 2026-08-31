@@ -420,7 +420,21 @@ struct MembershipCompareView: View {
         if sub.isSubscribed { return "管理订阅" }
         return "立即订阅Pro版"
     }
-    private var ctaPrice: String { "¥8.8元/月丨¥88元/年" }
+    // >>> CHANGE-[2026-08-29 22:13:01]-订阅价格按地区本地化 开始
+    // 原因: 原 ctaPrice 写死 "¥8.8元/月丨¥88元/年"，外币用户看到人民币符号与中文单位；
+    //       改为走 StoreKit 本地化价格（货币符号+金额+周期单位均跟随用户 App Store 地区）。
+    // 回退: 还原本行 `private var ctaPrice: String { "¥8.8元/月丨¥88元/年" }` 即可。
+    private var ctaPrice: String {
+        let m = sub.formattedPricePeriod(for: .monthly)
+        let y = sub.formattedPricePeriod(for: .yearly)
+        switch (m, y) {
+        case let (m?, y?): return "\(m)丨\(y)"
+        case let (m?, nil): return m
+        case let (nil, y?): return y
+        default: return "订阅解锁 Pro"
+        }
+    }
+    // <<< CHANGE-[2026-08-29 22:13:01]-订阅价格按地区本地化 结束
 
     // MARK: - 复制账号标识（白名单录入用）
     private func copyAccountId(_ value: String) {

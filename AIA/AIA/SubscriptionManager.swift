@@ -48,13 +48,7 @@ enum SubscriptionProduct: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// 折算月均（仅年付展示）
-    var perMonthText: String? {
-        switch self {
-        case .monthly: return nil
-        case .yearly:  return "约 ¥7.3 / 月"
-        }
-    }
+    /// 折算月均文案已迁至 SubscriptionManager.formattedPerMonth(for:)（按地区本地化，不再写死货币）。
 
     /// 相对月付的省钱幅度（88 / (8.8*12=105.6) ≈ 省 17%）
     var savingBadge: String? {
@@ -113,6 +107,48 @@ final class SubscriptionManager: ObservableObject {
     func priceText(for item: SubscriptionProduct) -> String {
         product(for: item)?.displayPrice ?? item.fallbackPrice
     }
+
+    // >>> CHANGE-[2026-08-29 22:13:01]-订阅价格按地区本地化 开始
+    /// 本地化「价格 + 周期」文本（如中文 "¥88/年"、英文 "$0.99/mo"）。
+    /// 金额用 StoreKit 的 displayPrice（自动跟随用户 App Store 地区切货币符号）；
+    /// 周期单位用 DateComponentsFormatter 本地化（中文→"年/月"、英文→"yr/mo" 等）。
+    /// 商品未加载完成时返回 nil，由调用方展示占位（避免外币用户看到中文硬编码兜底）。
+    func formattedPricePeriod(for item: SubscriptionProduct) -> String? {
+        guard let p = product(for: item), let period = p.subscription?.subscriptionPeriod else { return nil }
+        return p.displayPrice + SubscriptionManager.localizedPeriod(period)
+    }
+
+    /// 年付折算月均价（仅年付有值），同样走本地化，不写死货币与单位。
+    /// 商品未加载完成返回 nil（调用方不展示，避免 "约 ¥7.3/月" 与外币冲突）。
+    func formattedPerMonth(for item: SubscriptionProduct) -> String? {
+        guard item == .yearly, let p = product(for: item) else { return nil }
+        let monthly = p.price / 12
+        let amount = p.priceFormatStyle.format(monthly)
+        return "约 " + amount + SubscriptionManager.localizedPeriodUnit(.month)
+    }
+
+    /// 把订阅周期翻译成用户所在地区的本地化单位后缀（如 "/年"、"/mo"）。
+    /// 当前档位 value 均为 1，故只保留单位、去掉数字前缀，贴合 "¥88/年" 习惯写法。
+    private static func localizedPeriod(_ period: Product.SubscriptionPeriod) -> String {
+        localizedPeriodUnit(period.unit)
+    }
+
+    private static func localizedPeriodUnit(_ unit: Product.SubscriptionPeriod.Unit) -> String {
+        let comps: DateComponents
+        switch unit {
+        case .day:   comps = DateComponents(day: 1)
+        case .week:  comps = DateComponents(weekOfMonth: 1)
+        case .month: comps = DateComponents(month: 1)
+        case .year:  comps = DateComponents(year: 1)
+        @unknown default: comps = DateComponents(month: 1)
+        }
+        let raw = DateComponentsFormatter.localizedString(from: comps, unitsStyle: .short) ?? ""
+        let unitOnly = raw.replacingOccurrences(of: #"^\d+\s*"#,
+                                                with: "",
+                                                options: String.CompareOptions.regularExpression)
+        return "/" + unitOnly
+    }
+    // <<< CHANGE-[2026-08-29 22:13:01]-订阅价格按地区本地化 结束
 
     // MARK: - 启动入口
     /// App 启动调用：加载商品 + 校验当前权益 + 开始监听交易更新。

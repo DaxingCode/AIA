@@ -161,7 +161,7 @@ struct PaywallView: View {
                                 .clipShape(Capsule())
                         }
                     }
-                    if let per = item.perMonthText {
+                    if let per = sub.formattedPerMonth(for: item) {
                         Text(per)
                             .font(AIATheme.Font.micro)
                             .foregroundStyle(AIATheme.muted)
@@ -221,7 +221,7 @@ struct PaywallView: View {
                         if sub.purchasingId != nil {
                             ProgressView().tint(.white)
                         }
-                        Text(sub.purchasingId != nil ? "处理中…" : "立即订阅 · \(sub.priceText(for: selected))\(selected == .yearly ? "/年" : "/月")")
+                        Text(sub.purchasingId != nil ? "处理中…" : "立即订阅 · \(sub.formattedPricePeriod(for: selected) ?? sub.priceText(for: selected))")
                             .font(AIATheme.Font.callout.weight(.semibold))
                             .foregroundStyle(.white)
                             .lineLimit(1)
