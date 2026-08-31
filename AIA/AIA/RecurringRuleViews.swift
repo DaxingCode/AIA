@@ -218,6 +218,11 @@ struct RecurringRuleEditView: View {
     // >>> CHANGE-[2026-08-31 23:52:00]-[周期账单分类改下拉选择] 开始
     @State private var showCategoryPicker = false
     // <<< CHANGE-[2026-08-31 23:52:00]-[周期账单分类改下拉选择] 结束
+    // >>> CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 开始
+    // 默认收起「生成日」等细项：日常只填周期 + 首次生成即可，
+    // 系统用「首次生成」的号数作为默认生成日；需要精确控制再展开高级选项。
+    @State private var showAdvancedCycle = false
+    // <<< CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 结束
     @State private var showDeleteConfirm = false
 
     // >>> CHANGE-[2026-08-31 23:29:43]-[周期规则日期显示补齐] 开始
@@ -251,7 +256,27 @@ struct RecurringRuleEditView: View {
         } else {
             _startDate = State(initialValue: .now)
         }
+        // >>> CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 开始
+        // 编辑已有规则时，若「生成日」与「首次生成」的号数不一致（用户曾手动改过），
+        // 自动展开高级选项以保留其设定；否则默认收起，用首次生成的号数作为生成日。
+        if let r = rule {
+            let startDay = Calendar.current.component(.day, from: r.startDate)
+            _showAdvancedCycle = State(initialValue: r.dayOfMonth != startDay)
+        } else {
+            _showAdvancedCycle = State(initialValue: false)
+        }
+        // <<< CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 结束
     }
+
+    // >>> CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 开始
+    /// 折叠态下，「生成日」应等于「首次生成」的号数。保存前同步一次，
+    /// 确保未展开高级选项时也能按首次生成日正确延续周期。
+    private func syncDayFromStartIfCollapsed() {
+        guard !showAdvancedCycle else { return }
+        let startDay = Calendar.current.component(.day, from: startDate)
+        dayOfMonth = startDay
+    }
+    // <<< CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 结束
 
     private var amountValue: Double { Double(amountText) ?? 0 }
     private var canSave: Bool { !merchant.isEmpty && amountValue > 0 }
@@ -329,57 +354,62 @@ struct RecurringRuleEditView: View {
                             .frame(maxWidth: 120, alignment: .trailing)
                         }
 
-                        // 根据周期类型显示对应的参数行
-                        if cycle == .monthly || cycle == .quarterly || cycle == .yearly {
-                            Divider()
-                                .padding(.leading, 42)
-                                .background(AIATheme.hairline)
+                        // >>> CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 开始
+                        // 高级选项折叠：默认隐藏「生成日 / 每周 / 间隔」，
+                        // 折叠态下用 startDate 的号数(或星期/间隔)作为默认生成依据。
+                        if showAdvancedCycle {
+                            if cycle == .monthly || cycle == .quarterly || cycle == .yearly {
+                                Divider()
+                                    .padding(.leading, 42)
+                                    .background(AIATheme.hairline)
 
-                            ruleRow(title: "生成日", icon: "calendar") {
-                                Picker("", selection: $dayOfMonth) {
-                                    ForEach(1...31, id: \.self) { Text("\($0) 日").tag($0) }
-                                }
-                                .pickerStyle(.menu)
-                                .font(AIATheme.Font.subhead.weight(.medium))
-                                .frame(maxWidth: 100, alignment: .trailing)
-                            }
-                        } else if cycle == .weekly {
-                            Divider()
-                                .padding(.leading, 42)
-                                .background(AIATheme.hairline)
-
-                            ruleRow(title: "每周", icon: "calendar.week") {
-                                Text("星期 \(weekdayText(from: startDate))")
-                                    .font(AIATheme.Font.subhead.weight(.medium))
-                                    .foregroundStyle(AIATheme.sub)
-                            }
-                        } else if cycle == .custom {
-                            Divider()
-                                .padding(.leading, 42)
-                                .background(AIATheme.hairline)
-
-                            ruleRow(title: "间隔", icon: "gearshape") {
-                                HStack(spacing: 4) {
-                                    Text("每")
-                                        .font(AIATheme.Font.subhead)
-                                        .foregroundStyle(AIATheme.sub)
-                                    TextField("", value: $customValue, format: .number)
-                                        .keyboardType(.numberPad)
-                                        .font(AIATheme.Font.body.weight(.semibold))
-                                        .foregroundStyle(.primary)
-                                        .multilineTextAlignment(.center)
-                                        .frame(width: 44)
-                                    Picker("", selection: $customUnitRaw) {
-                                        ForEach(RecurrenceUnit.allCases) { u in
-                                            Text(u.title).tag(u.rawValue)
-                                        }
+                                ruleRow(title: "生成日", icon: "calendar") {
+                                    Picker("", selection: $dayOfMonth) {
+                                        ForEach(1...31, id: \.self) { Text("\($0) 日").tag($0) }
                                     }
                                     .pickerStyle(.menu)
                                     .font(AIATheme.Font.subhead.weight(.medium))
-                                    .frame(maxWidth: 70, alignment: .trailing)
+                                    .frame(maxWidth: 100, alignment: .trailing)
+                                }
+                            } else if cycle == .weekly {
+                                Divider()
+                                    .padding(.leading, 42)
+                                    .background(AIATheme.hairline)
+
+                                ruleRow(title: "每周", icon: "calendar.week") {
+                                    Text("星期 \(weekdayText(from: startDate))")
+                                        .font(AIATheme.Font.subhead.weight(.medium))
+                                        .foregroundStyle(AIATheme.sub)
+                                }
+                            } else if cycle == .custom {
+                                Divider()
+                                    .padding(.leading, 42)
+                                    .background(AIATheme.hairline)
+
+                                ruleRow(title: "间隔", icon: "gearshape") {
+                                    HStack(spacing: 4) {
+                                        Text("每")
+                                            .font(AIATheme.Font.subhead)
+                                            .foregroundStyle(AIATheme.sub)
+                                        TextField("", value: $customValue, format: .number)
+                                            .keyboardType(.numberPad)
+                                            .font(AIATheme.Font.body.weight(.semibold))
+                                            .foregroundStyle(.primary)
+                                            .multilineTextAlignment(.center)
+                                            .frame(width: 44)
+                                        Picker("", selection: $customUnitRaw) {
+                                            ForEach(RecurrenceUnit.allCases) { u in
+                                                Text(u.title).tag(u.rawValue)
+                                            }
+                                        }
+                                        .pickerStyle(.menu)
+                                        .font(AIATheme.Font.subhead.weight(.medium))
+                                        .frame(maxWidth: 70, alignment: .trailing)
+                                    }
                                 }
                             }
                         }
+                        // <<< CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 结束
 
                         Divider()
                             .padding(.leading, 42)
@@ -392,6 +422,43 @@ struct RecurringRuleEditView: View {
                                 .environment(\.locale, Locale(identifier: "zh_Hans_CN"))
                                 .frame(maxWidth: 110, alignment: .trailing)
                         }
+
+                        // >>> CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 开始
+                        // 高级选项入口：点击展开「生成日 / 每周 / 间隔」手动调整。
+                        // 编辑已有规则且与原默认(取自首次生成)不符时，自动展开以保留用户设定。
+                        Divider()
+                            .padding(.leading, 42)
+                            .background(AIATheme.hairline)
+
+                        Button {
+                            showAdvancedCycle.toggle()
+                        } label: {
+                            HStack(spacing: 12) {
+                                ZStack {
+                                    Circle()
+                                        .fill(AIATheme.bill.opacity(0.12))
+                                        .frame(width: 30, height: 30)
+                                    Image(systemName: "slider.horizontal.3")
+                                        .font(AIATheme.Font.footnote.weight(.medium))
+                                        .foregroundStyle(AIATheme.bill)
+                                }
+                                Text("高级：自定义生成日")
+                                    .font(AIATheme.Font.callout.weight(.medium))
+                                    .foregroundStyle(.primary)
+                                Spacer(minLength: 0)
+                                Text(showAdvancedCycle ? "收起" : "展开")
+                                    .font(AIATheme.Font.micro)
+                                    .foregroundStyle(AIATheme.muted)
+                                Image(systemName: "chevron.right")
+                                    .font(AIATheme.Font.caption.weight(.semibold))
+                                    .foregroundStyle(AIATheme.muted)
+                                    .rotationEffect(.degrees(showAdvancedCycle ? 90 : 0))
+                            }
+                            .padding(12)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressableCardStyle())
+                        // <<< CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 结束
                     }
                     .card()
 
@@ -399,10 +466,15 @@ struct RecurringRuleEditView: View {
                         Image(systemName: "info.circle.fill")
                             .font(AIATheme.Font.micro)
                             .foregroundStyle(AIATheme.muted)
-                        Text("首次生成：\(dateFmt.string(from: startDate))，之后\(cycleHint)自动入账")
+                        // >>> CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 开始
+                        // 折叠态提示「生成日 = 首次生成日号数」；展开态提示用户可自定义。
+                        Text(showAdvancedCycle
+                             ? "首次生成：\(dateFmt.string(from: startDate))，之后\(cycleHint)自动入账"
+                             : "首次生成：\(dateFmt.string(from: startDate))，之后每月\(Calendar.current.component(.day, from: startDate))日自动入账")
                             .font(AIATheme.Font.micro)
                             .foregroundStyle(AIATheme.muted)
                             .fixedSize(horizontal: false, vertical: true)
+                        // <<< CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 结束
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 4)
@@ -597,6 +669,11 @@ struct RecurringRuleEditView: View {
         rule.category = category
         rule.note = note
         rule.isIncome = isIncome
+        // >>> CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 开始
+        // 折叠态下用「首次生成」号数覆盖 dayOfMonth，保证按首次生成日延续；
+        // 展开态下保留用户手动设定的生成日。
+        syncDayFromStartIfCollapsed()
+        // <<< CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 结束
         rule.dayOfMonth = dayOfMonth
         rule.startDate = startDate
         rule.cycleRaw = cycleRaw
