@@ -576,13 +576,18 @@ struct RecurringRuleEditView: View {
 extension RecurringRule {
     /// 从「账单字段 + 周期配置」构造一条周期规则并插入 context。
     /// 与 RecurringRuleEditor.save() 同源，供编辑账单页开关打开时调用。
+    /// - Parameter billSyncId: 来源账单的 syncId。规则用自身 syncId 存这份关联
+    ///   （RecurringRule 不上云，syncId 仅作本地关联键），编辑账单页靠它回填开关状态、
+    ///   保存时做「有则更新、无则新建」去重。独立规则编辑页（RecurringRuleEditor）不传，
+    ///   走默认 UUID()，不与任何账单挂钩。
     @discardableResult
     static func make(from merchant: String, amount: Double, category: String,
                      isIncome: Bool, note: String,
                      cycleRaw: String, dayOfMonth: Int,
                      customValue: Int, customUnitRaw: String,
-                     startDate: Date, context: ModelContext) -> RecurringRule {
-        let rule = RecurringRule()
+                     startDate: Date, context: ModelContext,
+                     billSyncId: UUID? = nil) -> RecurringRule {
+        let rule = RecurringRule(syncId: billSyncId ?? UUID())
         rule.merchant = merchant
         rule.amount = amount
         rule.category = category

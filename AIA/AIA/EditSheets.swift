@@ -1299,6 +1299,11 @@ struct EditBillView: View {
     @Environment(\.dismiss) private var dismiss
     /// 识别引擎来源标记（1:1 关联 Bill.syncId）
     @Query private var recogSources: [RecogSource]
+    /// 关联的周期规则（RecurringRule.syncId == Bill.syncId；RecurringRule 不上云，syncId 仅作本地关联键）。
+    /// 用于：①编辑模式 onAppear 回填开关状态与周期配置；②save 时「有则更新、无则新建、关开关则删」。
+    @Query private var linkedRules: [RecurringRule]
+    /// 首次 onAppear 已回填标记：防止多次 onAppear 把用户编辑中的开关/配置覆盖回原值
+    @State private var didLoadRecurring = false
 
     @State private var merchant: String
     @State private var amountText: String
@@ -1348,6 +1353,11 @@ struct EditBillView: View {
         _imageName = State(initialValue: bill.imageName)
         let sid = bill.syncId
         _recogSources = Query(filter: #Predicate<RecogSource> { $0.syncId == sid })
+        // >>> CHANGE-[2026-08-31 23:10:00]-[周期开关状态持久化] 开始
+        // 关联周期规则：RecurringRule.syncId == Bill.syncId（RecurringRule 不上云，syncId 兼作本地关联键）。
+        // 编辑模式打开页面时能查到 → 开关默认打开并回填配置；独立创建的规则 syncId 与任何账单不同 → 不显示。
+        _linkedRules = Query(filter: #Predicate<RecurringRule> { $0.syncId == sid })
+        // <<< CHANGE-[2026-08-31 23:10:00]-[周期开关状态持久化] 结束
         // 添加模式：用 caller 传入的软删草稿 Bill 初始化第一张卡
         if isAdding {
             _drafts = State(initialValue: [BillDraft(bill: bill)])
@@ -1467,6 +1477,19 @@ struct EditBillView: View {
                     imageName = name
                 }
             }
+            // >>> CHANGE-[2026-08-31 23:10:00]-[周期开关状态持久化] 开始
+            // 编辑模式：首次进入时按关联规则回填开关与周期配置，让「上次设为周期账单」保存后再次进入仍保持打开。
+            // 仅编辑模式需要；添加模式的草稿开关各自独立（BillDraft 初始化即关）。
+            .onAppear {
+                guard !isAdding, !didLoadRecurring, let rule = linkedRules.first else { return }
+                didLoadRecurring = true
+                isRecurring = true
+                recurCycleRaw = rule.cycleRaw ?? RecurrenceCycle.monthly.rawValue
+                recurDayOfMonth = rule.dayOfMonth
+                recurCustomValue = rule.customValue ?? 1
+                recurCustomUnitRaw = rule.customUnitRaw ?? RecurrenceUnit.month.rawValue
+            }
+            // <<< CHANGE-[2026-08-31 23:10:00]-[周期开关状态持久化] 结束
             .onDisappear {
                 // 与 BillDetailView 同款：先 dismiss 回列表，等 sheet 动画完全结束后再执行删除，
                 // 避免 syncDeleted=true 触发 @Query 重 fetch 与动画叠加卡死。
@@ -1831,20 +1854,45 @@ struct EditBillView: View {
             d.savedBill = b
         }
         // >>> CHANGE-[2026-08-30 13:43:27]-[编辑页周期开关] 开始
-        if d.isRecurring, let savedBill = d.savedBill {
-            _ = RecurringRule.make(
-                from: savedBill.merchant,
-                amount: savedBill.amount,
-                category: savedBill.category,
-                isIncome: savedBill.isIncome,
-                note: savedBill.note,
-                cycleRaw: d.recurCycleRaw,
-                dayOfMonth: d.recurDayOfMonth,
-                customValue: d.recurCustomValue,
-                customUnitRaw: d.recurCustomUnitRaw,
-                startDate: savedBill.time,
-                context: context
-            )
+        // >>> CHANGE-[2026-08-31 23:10:00]-[周期开关状态持久化] 开始
+        // 添加模式同款语义：开关开 → 关联规则存在则更新、不存在才新建（syncId 记 savedBill.syncId）；
+        //                   开关关 → 删除关联规则。反复保存同一张草稿不堆重复规则。
+        if let savedBill = d.savedBill {
+            let sid = savedBill.syncId
+            let existingRule = try? context.fetch(
+                FetchDescriptor<RecurringRule>(predicate: #Predicate { $0.syncId == sid })
+            ).first
+            if d.isRecurring {
+                if let r = existingRule {
+                    r.merchant = savedBill.merchant
+                    r.amount = savedBill.amount
+                    r.category = savedBill.category
+                    r.isIncome = savedBill.isIncome
+                    r.note = savedBill.note
+                    r.cycleRaw = d.recurCycleRaw
+                    r.dayOfMonth = d.recurDayOfMonth
+                    r.customValue = max(d.recurCustomValue, 1)
+                    r.customUnitRaw = d.recurCustomUnitRaw
+                    r.startDate = savedBill.time
+                } else {
+                    _ = RecurringRule.make(
+                        from: savedBill.merchant,
+                        amount: savedBill.amount,
+                        category: savedBill.category,
+                        isIncome: savedBill.isIncome,
+                        note: savedBill.note,
+                        cycleRaw: d.recurCycleRaw,
+                        dayOfMonth: d.recurDayOfMonth,
+                        customValue: d.recurCustomValue,
+                        customUnitRaw: d.recurCustomUnitRaw,
+                        startDate: savedBill.time,
+                        context: context,
+                        billSyncId: sid
+                    )
+                }
+            } else if let r = existingRule {
+                context.delete(r)
+            }
             // >>> CHANGE-[2026-08-31 22:44:09]-[周期账单重复记录] 开始
             // 删除原因：persistDraft 上方已把首期账单手动 insert 进库（else 分支 context.insert(b)），
             //          再调 generateDue 会按这条新规则把「首期」再生成一次，
@@ -1852,6 +1900,7 @@ struct EditBillView: View {
             //          周期规则只负责「之后的账期」，首期这条由用户手动添加的那笔承担。
             // <<< CHANGE-[2026-08-31 22:44:09]-[周期账单重复记录] 结束
         }
+        // <<< CHANGE-[2026-08-31 23:10:00]-[周期开关状态持久化] 结束
         // <<< CHANGE-[2026-08-30 13:43:27]-[编辑页周期开关] 结束
         d.saved = true
         draft.wrappedValue = d
@@ -2376,7 +2425,25 @@ struct EditBillView: View {
         bill.imageName = imageName
         bill.syncUpdatedAt = .now
         // >>> CHANGE-[2026-08-30 13:43:27]-[编辑页周期开关] 开始
-        if isRecurring {
+        // >>> CHANGE-[2026-08-31 23:10:00]-[周期开关状态持久化] 开始
+        // 语义：开关开 → 关联规则存在则更新（不新建），不存在才新建（syncId 记 bill.syncId 作关联键）；
+        //       开关关 → 删除关联规则（停止周期）。反复保存不再堆重复规则。
+        if let existing = linkedRules.first {
+            if isRecurring {
+                existing.merchant = bill.merchant
+                existing.amount = bill.amount
+                existing.category = bill.category
+                existing.isIncome = bill.isIncome
+                existing.note = bill.note
+                existing.cycleRaw = recurCycleRaw
+                existing.dayOfMonth = recurDayOfMonth
+                existing.customValue = max(recurCustomValue, 1)
+                existing.customUnitRaw = recurCustomUnitRaw
+                existing.startDate = bill.time
+            } else {
+                context.delete(existing)
+            }
+        } else if isRecurring {
             _ = RecurringRule.make(
                 from: bill.merchant,
                 amount: bill.amount,
@@ -2388,14 +2455,11 @@ struct EditBillView: View {
                 customValue: recurCustomValue,
                 customUnitRaw: recurCustomUnitRaw,
                 startDate: bill.time,
-                context: context
+                context: context,
+                billSyncId: bill.syncId
             )
-            // >>> CHANGE-[2026-08-31 22:44:09]-[周期账单重复记录] 开始
-            // 删除原因：编辑模式保存这笔账单时，首期就是用户正在编辑的这笔本身，
-            //          再调 generateDue 会按规则把「本期」再生成一次，出现两条相同记录。
-            //          周期规则只负责「之后的账期」，本期由用户正在保存的这笔承担。
-            // <<< CHANGE-[2026-08-31 22:44:09]-[周期账单重复记录] 结束
         }
+        // <<< CHANGE-[2026-08-31 23:10:00]-[周期开关状态持久化] 结束
         // <<< CHANGE-[2026-08-30 13:43:27]-[编辑页周期开关] 结束
         if isAdding {
             // 草稿 Bill 在 addNewBill 时设了 syncDeleted=true（被 @Query 谓词过滤，sheet 期间背景干净）；
