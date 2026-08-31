@@ -862,13 +862,9 @@ struct ContentView: View {
         .fullScreenCover(item: $pendingPresent) { present in
             makeResultConfirmView(present,
                 onSaveAction: { session in
-                    // 「保存」→ 建真实模型实例（applyAndSave 已入库）+ 回插「已保存态」气泡
+                    // 「保存」→ 建真实模型实例（applyAndSave 已入库）+ 回插「已保存态」气泡。
+                    // 首页宫格待高亮的登记在 ResultConfirmView.applyAndSave 内部（新建入库时）完成，此处无需重复。
                     RecognitionSaver.insertSavedBubble(session: session, context: context)
-                    // >>> CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 开始
-                    // 点「保存」= 真正入库 → 登记「首页宫格待高亮」。用户若留在首页，
-                    // 确认页收起动画走完即在 performOnAppear/onAppear 路径消费；若点了通知跳对话页，
-                    // 则等返回首页时（router.path 下降沿钩子）再消费。跳转逻辑一行未改。
-                    // <<< CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 结束
                     if pendingNavigate {
                         DispatchQueue.main.async { NavigationRouter.shared.navigate(.chat) }
                     }

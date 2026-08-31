@@ -4442,6 +4442,10 @@ struct ChatView: View {
                                          kcal: baseCal, protein: basePro, carbs: baseCar, fat: baseFat,
                                          fiber: baseFiber, sugar: baseSugar, sodium: baseSodium,
                                          source: "cloud", in: context)
+                    // >>> CHANGE-[2026-08-31 19:10:00]-[对话页宫格高亮] 开始
+                    // 云端「新建饮食」动作真正入库 → 登记首页宫格待高亮（与新建路径口径统一）。
+                    HomeHighlight.mark(types: ["food"])
+                    // <<< CHANGE-[2026-08-31 19:10:00]-[对话页宫格高亮] 结束
                     summary.append("🍽 \(meal)「\(foodName)」\(Int(cal)) kcal\n  蛋白 \(String(format: "%.1f", protein))g · 碳水 \(String(format: "%.1f", carbs))g · 脂肪 \(String(format: "%.1f", fat))g · 纤维 \(String(format: "%.1f", fiber))g · 糖 \(String(format: "%.1f", sugar))g · 钠 \(String(format: "%.0f", sodium))mg\n\n结果仅供参考，如需修改可到\"饮食记录\"页面进行修改。")
                 }
             }

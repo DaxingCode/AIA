@@ -968,6 +968,11 @@ struct ResultConfirmView: View {
                                                       types: types.joined(separator: ","),
                                                       summary: RecognitionSaver.summary(of: result)))
                 }
+                // >>> CHANGE-[2026-08-31 19:10:00]-[对话页宫格高亮] 开始
+                // 全新识别首次入库（existing==nil）→ 登记首页宫格待高亮。覆盖编辑已有 session 不亮。
+                // 全屏确认页（截屏/发图）点「保存」统一走这里，覆盖各入口。
+                HomeHighlight.mark(types: types)
+                // <<< CHANGE-[2026-08-31 19:10:00]-[对话页宫格高亮] 结束
                 return s
             }
         }
