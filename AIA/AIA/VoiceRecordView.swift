@@ -295,7 +295,8 @@ struct VoiceRecordView: View {
                     // 统一走识别卡片水槽（与图片/文字一致）：已保存/待确认卡片插入对话流
                     _ = await RecognitionSaver.processRecognition(
                         result: output.result, rawText: output.rawText, image: nil,
-                        context: context, source: .local, entryOrigin: "voice")
+                        context: context, source: .local, entryOrigin: "voice",
+                        marksHomeHighlight: true)
                     isProcessing = false
                     // 卡片已插入对话页，跳转过去查看
                     NavigationRouter.shared.navigateToChat()

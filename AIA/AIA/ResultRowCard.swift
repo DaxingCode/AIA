@@ -706,6 +706,9 @@ struct BillRowCard: View {
         let bill = commitBill()
         item.syncId = bill.syncId.uuidString
         persist()
+        // >>> CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 开始
+        HomeHighlight.mark(types: [item.type.rawValue])
+        // <<< CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 结束
     }
 
     /// 待确认态「编辑」/点卡片：先按识别结果入库并切换到已保存壳，
@@ -869,6 +872,9 @@ struct TodoRowCard: View {
         let r = commitReminder()
         item.syncId = r.syncId.uuidString
         persist()
+        // >>> CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 开始
+        HomeHighlight.mark(types: [item.type.rawValue])
+        // <<< CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 结束
     }
 
     /// 待确认态「编辑」/点卡片：先入库切壳，再把弹 sheet 延后一帧，
@@ -974,6 +980,9 @@ struct FoodRowCard: View {
             EditFoodSheet(draftPayload: target.payload, imageName: target.imageName, onDraftSaved: { syncId in
                 item.syncId = syncId
                 persist()
+                // >>> CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 开始
+                HomeHighlight.mark(types: [item.type.rawValue])
+                // <<< CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 结束
             })
         }
         // <<< CHANGE-[2026-08-17 17:25:00]-[编辑食物统一EditFoodSheet] 结束
@@ -1110,6 +1119,9 @@ struct FoodRowCard: View {
         guard let f = commitEntry() else { return }
         item.syncId = f.syncId.uuidString
         persist()
+        // >>> CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 开始
+        HomeHighlight.mark(types: [item.type.rawValue])
+        // <<< CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 结束
     }
 
     /// 待确认态「编辑」：方案 B——只把识别 payload 交给编辑页做草稿，
@@ -1269,6 +1281,9 @@ struct HealthRowCard: View {
         let h = commitHealth()
         item.syncId = h.syncId.uuidString
         persist()
+        // >>> CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 开始
+        HomeHighlight.mark(types: [item.type.rawValue])
+        // <<< CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 结束
     }
 
     /// 待确认态「编辑」/点卡片：先入库切壳，再把弹 sheet 延后一帧，

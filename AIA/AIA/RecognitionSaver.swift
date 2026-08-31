@@ -585,7 +585,8 @@ enum RecognitionSaver {
                                    screenshotShortcut: Bool = false,
                                    presavedImageName: String? = nil,
                                    forceAutoSave: Bool = false,
-                                   skipCloudSync: Bool = false) async -> RecognitionOutcome {
+                                   skipCloudSync: Bool = false,
+                                   marksHomeHighlight: Bool = false) async -> RecognitionOutcome {
         let sourceKey = (entryOrigin == "image") ? "image" : "text"
         let types = result.types ?? []
         let known = ImageAutoRecogSettings.knownTypes.filter { types.contains($0) }
@@ -626,6 +627,13 @@ enum RecognitionSaver {
                                    })
             savedItems = session.savedItems
             performSilentSideEffects(session: session, savedTypes: saveTypes)
+            // >>> CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 开始
+            // 真正入库 → 登记「首页宫格待高亮」。用 saveTypes（实际入库类别），绝不用 types，
+            // 避免待确认类别被误登记。三类入口（拍照/相册/打字/语音/截屏）统一走此登记，零分支漂移。
+            if marksHomeHighlight {
+                HomeHighlight.mark(types: Array(saveTypes))
+            }
+            // <<< CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 结束
         }
 
         // 待确认类别：未入库卡片（沿用自动保存路径已落盘的原图 presavedImageName，照片进备注）

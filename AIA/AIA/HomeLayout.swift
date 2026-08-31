@@ -68,6 +68,41 @@ enum HomeModule: String, CaseIterable, Identifiable, Hashable, Codable {
     }
 }
 
+// >>> CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 开始
+/// 统一登记「首页宫格待高亮」的共享暂存。
+///
+/// 背景：Siri / 截屏快捷指令 / 对话页内记录（打字·语音·发图·拍照）/ 首页四宫格拍照相册，
+/// 只要记录**真正入库**，就登记第一个已知类别对应的宫格，用户进入/返回首页时播一次高亮扫描。
+/// 旧实现里这个 key 散落在 TellAIAIntent（硬编码 aia.siriHighlightModule）和多处 if 分支，
+/// 本次收敛到本枚举，所有生产方统一走 `HomeHighlight.mark(types:)`。
+///
+/// 消费方：ContentView.consumeSiriHighlightModule() 读取并删除（防重复触发）。
+enum HomeHighlight {
+    /// 共享暂存 key（沿用旧名，避免破坏已上线的 Siri 链路）。
+    static let key = "aia.siriHighlightModule"
+
+    /// 取 types 里第一个能映射成首页模块的类别登记（与 Siri 旧口径一致：只高亮第一个）。
+    /// types 形如 ["bill"] / ["food","health"]，识别类型用 food/bill/health/todo。
+    static func mark(types: [String]) {
+        guard let first = types.compactMap({ HomeModule(recognitionType: $0) }).first else { return }
+        UserDefaults.standard.set(first.rawValue, forKey: key)
+    }
+
+    /// 供直接传 HomeModule 的调用方（如待确认卡保存时已知 item.type）。
+    static func mark(_ module: HomeModule) {
+        UserDefaults.standard.set(module.rawValue, forKey: key)
+    }
+
+    /// 读取并消费（消费即删除，防重复触发）。无则返回 nil。
+    static func consume() -> HomeModule? {
+        guard let raw = UserDefaults.standard.string(forKey: key),
+              let m = HomeModule(rawValue: raw) else { return nil }
+        UserDefaults.standard.removeObject(forKey: key)
+        return m
+    }
+}
+// <<< CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 结束
+
 /// 支持首页编辑态的拖拽重排（.draggable + .dropDestination 需要 Transferable）。
 extension HomeModule: Transferable {
     static var transferRepresentation: some TransferRepresentation {

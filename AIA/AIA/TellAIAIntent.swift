@@ -137,11 +137,9 @@ struct TellAIAIntent: AppIntent {
             notifySiriSaved()
 
             // 记下「刚被 Siri 记的模块」到共享暂存：用户点 Siri 界面唤醒 App 后，
-            // 首页对应卡片做一次高亮/微动脉冲（柔和提示，不跳页）。主 App 与后台 Intent
-            // 同属一个 App 沙盒，UserDefaults.standard 共享、即时可见；消费即删除，无残留。
-            if let firstType = types.compactMap({ HomeModule(recognitionType: $0) }).first {
-                UserDefaults.standard.set(firstType.rawValue, forKey: "aia.siriHighlightModule")
-            }
+            // 首页对应卡片做一次高亮/微动脉冲（柔和提示，不跳页）。统一走 HomeHighlight，
+            // 与对话页/截屏链路一致（key 沿用旧名 aia.siriHighlightModule，不破坏已上线行为）。
+            HomeHighlight.mark(types: types)
 
             if let ws = waterSummary {
                 return "已记录：\(summary) · \(ws)"

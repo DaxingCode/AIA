@@ -632,6 +632,11 @@ struct ContentView: View {
             // 排除「还没跳进过子页就被重置」的退化：要求 old 非空才算一次真正的返回。
             if !old.isEmpty && new.isEmpty {
                 homeEnterToken &+= 1
+                // >>> CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 开始
+                // 从子页（对话页等）返回首页：消费「刚入库」标记，对应宫格播一次高亮扫描动画。
+                // 截屏点通知 / 确认页保存跳对话页后返回，都走这条路；跳转逻辑本身不变。
+                consumeSiriHighlightModule()
+                // <<< CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 结束
             }
         }
         // >>> CHANGE-[2026-08-18 14:54:59]-[区分冷启动/热启动进度条延迟] 开始
@@ -764,6 +769,11 @@ struct ContentView: View {
                 onSaveAction: { session in
                     // 「保存」→ 建真实模型实例（applyAndSave 已入库）+ 回插「已保存态」气泡
                     RecognitionSaver.insertSavedBubble(session: session, context: context)
+                    // >>> CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 开始
+                    // 点「保存」= 真正入库 → 登记「首页宫格待高亮」。用户若留在首页，
+                    // 确认页收起动画走完即在 performOnAppear/onAppear 路径消费；若点了通知跳对话页，
+                    // 则等返回首页时（router.path 下降沿钩子）再消费。跳转逻辑一行未改。
+                    // <<< CHANGE-[2026-08-31 17:55:00]-[对话页宫格高亮] 结束
                     if pendingNavigate {
                         DispatchQueue.main.async { NavigationRouter.shared.navigate(.chat) }
                     }
@@ -941,7 +951,8 @@ struct ContentView: View {
                                                               source: p.source ?? .cloud,
                                                               entryOrigin: "image",
                                                               screenshotShortcut: true,
-                                                              presavedImageName: presavedName)
+                                                              presavedImageName: presavedName,
+                                                              marksHomeHighlight: true)
             isCheckingScreenshotPending = false
             switch outcome {
             case .inserted:

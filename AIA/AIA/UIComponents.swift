@@ -806,7 +806,8 @@ func runImageRecognition(image: UIImage,
                 await RecognitionSaver.processRecognition(result: res, rawText: rawText, image: image,
                                                           context: context, source: output.source,
                                                           entryOrigin: "image",
-                                                          presavedImageName: presavedName)
+                                                          presavedImageName: presavedName,
+                                                          marksHomeHighlight: true)
             }.value
             await MainActor.run {
                 switch outcome {
