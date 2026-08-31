@@ -4,10 +4,11 @@
 import SwiftUI
 import SwiftData
 
-// 常用分类（与确认页一致），供一键选择
-private let recurringCategories = ["住房", "娱乐", "餐饮", "交通", "购物", "通讯",
-                                   "教育", "医疗", "服饰", "美妆", "旅行", "红包",
-                                   "工资", "其他"]
+// >>> CHANGE-[2026-08-31 23:50:48]-[周期账单分类补齐] 开始
+// 常用分类（与账单编辑页一致，完整 27 类含保险/运动/数码/云服务等），供一键选择。
+// 此前只用 14 类精简版，缺「保险」等 13 个分类，导致周期账单无法选到正确分类。
+private let recurringCategories = billCategoryOptions
+// <<< CHANGE-[2026-08-31 23:50:48]-[周期账单分类补齐] 结束
 
 struct RecurringRuleListView: View {
     @Environment(\.modelContext) private var context
