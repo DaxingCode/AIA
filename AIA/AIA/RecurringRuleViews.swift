@@ -407,14 +407,19 @@ struct RecurringRuleEditView: View {
                                             .foregroundStyle(.primary)
                                             .multilineTextAlignment(.center)
                                             .frame(width: 44)
-                                        Picker("", selection: $customUnitRaw) {
+                                        Menu {
                                             ForEach(RecurrenceUnit.allCases) { u in
-                                                Text(u.title).tag(u.rawValue)
+                                                Button(u.title) { customUnitRaw = u.rawValue }
                                             }
+                                        } label: {
+                                            HStack(spacing: 2) {
+                                                Text(RecurrenceUnit(rawValue: customUnitRaw)?.title ?? "月")
+                                                Image(systemName: "chevron.up.chevron.down")
+                                                    .font(AIATheme.Font.micro)
+                                            }
+                                            .font(AIATheme.Font.subhead.weight(.medium))
+                                            .foregroundStyle(.primary)
                                         }
-                                        .pickerStyle(.menu)
-                                        .font(AIATheme.Font.subhead.weight(.medium))
-                                        .frame(maxWidth: 70, alignment: .trailing)
                                     }
                                 }
                             }

@@ -2235,14 +2235,19 @@ struct EditBillView: View {
                                 .font(AIATheme.Font.body.weight(.semibold))
                                 .multilineTextAlignment(.center)
                                 .frame(width: 44)
-                            Picker("", selection: $recurCustomUnitRaw) {
+                            Menu {
                                 ForEach(RecurrenceUnit.allCases) { u in
-                                    Text(u.title).tag(u.rawValue)
+                                    Button(u.title) { recurCustomUnitRaw = u.rawValue }
                                 }
+                            } label: {
+                                HStack(spacing: 2) {
+                                    Text(RecurrenceUnit(rawValue: recurCustomUnitRaw)?.title ?? "月")
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .font(AIATheme.Font.micro)
+                                }
+                                .font(AIATheme.Font.subhead.weight(.medium))
+                                .foregroundStyle(.primary)
                             }
-                            .pickerStyle(.menu)
-                            .font(AIATheme.Font.subhead.weight(.medium))
-                            .frame(maxWidth: 70, alignment: .trailing)
                         }
                         .padding(.vertical, 10)
                         .padding(.horizontal, 14)
@@ -2399,14 +2404,19 @@ struct EditBillView: View {
                                 .font(AIATheme.Font.body.weight(.semibold))
                                 .multilineTextAlignment(.center)
                                 .frame(width: 44)
-                            Picker("", selection: draft.recurCustomUnitRaw) {
+                            Menu {
                                 ForEach(RecurrenceUnit.allCases) { u in
-                                    Text(u.title).tag(u.rawValue)
+                                    Button(u.title) { draft.recurCustomUnitRaw.wrappedValue = u.rawValue }
                                 }
+                            } label: {
+                                HStack(spacing: 2) {
+                                    Text(RecurrenceUnit(rawValue: draft.recurCustomUnitRaw.wrappedValue)?.title ?? "月")
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .font(AIATheme.Font.micro)
+                                }
+                                .font(AIATheme.Font.subhead.weight(.medium))
+                                .foregroundStyle(.primary)
                             }
-                            .pickerStyle(.menu)
-                            .font(AIATheme.Font.subhead.weight(.medium))
-                            .frame(maxWidth: 70, alignment: .trailing)
                         }
                         .padding(.vertical, 10)
                         .padding(.horizontal, 14)
