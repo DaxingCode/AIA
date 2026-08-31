@@ -43,14 +43,26 @@ import SwiftData
     public var syncUpdatedAt: Date
     public var syncDeleted: Bool
 
+    // >>> CHANGE-[2026-08-31 17:40:00]-[补齐schemaV18] 开始
+    // 原因：从 fix/小记查询增强_20260820 分支补齐 v18 schema。该字段存 HomeRoute 的 case 名
+    //       （如 "bill"/"todo"/"diet"/"health"/"settings"），nil 表示无跳转。
+    //       纯可选新字段（默认 nil），v17→v18 走 lightweight 迁移自动填充 nil，安全。
+    // 回退：删除本字段 + 撤销 AIAMigrationPlan 的 SchemaVersion18 + 撤销 AppPersistence.schema/currentSchemaVersion 改回 v17。
+    public var actionRouteRaw: String? = nil
+    // <<< CHANGE-[2026-08-31 17:40:00]-[补齐schemaV18] 结束
+
     public init(role: Role, text: String, createdAt: Date = .now,
-         syncId: UUID = UUID(), syncUpdatedAt: Date = .now, syncDeleted: Bool = false) {
+         syncId: UUID = UUID(), syncUpdatedAt: Date = .now, syncDeleted: Bool = false,
+         actionRouteRaw: String? = nil) {
         self.roleRaw = role.rawValue
         self.text = text
         self.createdAt = createdAt
         self.syncId = syncId
         self.syncUpdatedAt = syncUpdatedAt
         self.syncDeleted = syncDeleted
+        // >>> CHANGE-[2026-08-31 17:40:00]-[补齐schemaV18] 开始
+        self.actionRouteRaw = actionRouteRaw
+        // <<< CHANGE-[2026-08-31 17:40:00]-[补齐schemaV18] 结束
     }
 
     public var role: Role { Role(rawValue: roleRaw) ?? .ai }

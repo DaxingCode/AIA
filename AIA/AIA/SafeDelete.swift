@@ -44,18 +44,74 @@ enum SafeDelete {
     /// 仅当没有其他记录引用（即该图的所有引用记录都已被软删）时才真正删文件，
     /// 修复「一张图被多条账单共用（如一张截图里的多笔账单），删其中一条把整张图也删掉」的问题。
     /// 调用方需先把自己标记为 `syncDeleted = true`，这样查询时本记录不计入。
-    private static func deleteImageIfOrphaned<T: PersistentModel & SyncDeletable & ImageNameHaving>(
-        _ model: T, in context: ModelContext
-    ) {
+    // >>> CHANGE-[2026-08-31 12:23:50]-[删除带图记录崩溃修复] 开始
+    // 原因：原实现是泛型 `deleteImageIfOrphaned<T: PersistentModel & SyncDeletable & ImageNameHaving>`，
+    //       内部查库用 `#Predicate { $0.imageName == name && !$0.syncDeleted }`。
+    //       $0 是泛类型 T，imageName / syncDeleted 取的是 ImageNameHaving / SyncDeletable
+    //       **协议声明的 keypath**，SwiftData 拿它去映射数据表的列时查不到 →
+    //       Schema.KeyPathCache.validateAndCache → _assertionFailure → EXC_BREAKPOINT(SIGTRAP)。
+    //       崩溃栈（TestFlight 好记AI 1.0.1 (5)，2026-08-31 12:11:25）：
+    //         SafeDelete.swift:52 deleteImageIfOrphaned ← SafeDelete.swift:144 reminderByID
+    //       仅当 imageName 非空才走到 fetch，所以「手动添加（无图）的记录」删除不受影响，
+    //       表现为「截图/拍照识别出来的记录一删就崩」。
+    // 修复：拆成 5 个具体类型重载，#Predicate 的 $0 是具体模型类，keypath 能正确映射到列。
+    //       调用点（`deleteImageIfOrphaned(r, in: context)`）凭参数类型自动匹配，一行都不用改。
+    // 回退：git revert 本 commit（恢复为泛型版本）。
+    private static func deleteImageIfOrphaned(_ model: Reminder, in context: ModelContext) {
         let name = model.imageName
         guard let name, !name.isEmpty else { return }
-        let alive = (try? context.fetch(FetchDescriptor<T>(
+        let alive = (try? context.fetch(FetchDescriptor<Reminder>(
             predicate: #Predicate { $0.imageName == name && !$0.syncDeleted }
         )))?.count ?? 0
         if alive == 0 {
             LocalImageStore.delete(name)
         }
     }
+
+    private static func deleteImageIfOrphaned(_ model: Bill, in context: ModelContext) {
+        let name = model.imageName
+        guard let name, !name.isEmpty else { return }
+        let alive = (try? context.fetch(FetchDescriptor<Bill>(
+            predicate: #Predicate { $0.imageName == name && !$0.syncDeleted }
+        )))?.count ?? 0
+        if alive == 0 {
+            LocalImageStore.delete(name)
+        }
+    }
+
+    private static func deleteImageIfOrphaned(_ model: FoodEntry, in context: ModelContext) {
+        let name = model.imageName
+        guard let name, !name.isEmpty else { return }
+        let alive = (try? context.fetch(FetchDescriptor<FoodEntry>(
+            predicate: #Predicate { $0.imageName == name && !$0.syncDeleted }
+        )))?.count ?? 0
+        if alive == 0 {
+            LocalImageStore.delete(name)
+        }
+    }
+
+    private static func deleteImageIfOrphaned(_ model: HealthMetric, in context: ModelContext) {
+        let name = model.imageName
+        guard let name, !name.isEmpty else { return }
+        let alive = (try? context.fetch(FetchDescriptor<HealthMetric>(
+            predicate: #Predicate { $0.imageName == name && !$0.syncDeleted }
+        )))?.count ?? 0
+        if alive == 0 {
+            LocalImageStore.delete(name)
+        }
+    }
+
+    private static func deleteImageIfOrphaned(_ model: RecognitionRecord, in context: ModelContext) {
+        let name = model.imageName
+        guard let name, !name.isEmpty else { return }
+        let alive = (try? context.fetch(FetchDescriptor<RecognitionRecord>(
+            predicate: #Predicate { $0.imageName == name && !$0.syncDeleted }
+        )))?.count ?? 0
+        if alive == 0 {
+            LocalImageStore.delete(name)
+        }
+    }
+    // <<< CHANGE-[2026-08-31 12:23:50]-[删除带图记录崩溃修复] 结束
 
     static func reminder(_ r: Reminder, in context: ModelContext) {
         // 把所有操作推到下一帧执行，避免与父页面的 @Query 重 fetch / 转场动画
@@ -130,60 +186,126 @@ enum SafeDelete {
     /// 详情页 pop 后若没有任何视图再引用该对象，SwiftData 可能把它标记为 fault。
     /// 此时若直接访问传入对象的属性会触发 fault 异常并闪退。
     /// ID 版本在真正执行时通过 context.model(for:) 重新取活对象，避免该问题。
+    // >>> CHANGE-[2026-08-21 14:00:30]-[byID闭包内按ID现取统一根治] 开始
+    // 原因：与 foodByID 同源隐患——旧实现在闭包外取活对象并捕获进 async 闭包，release 下对象可能已 fault。
+    // 修复：notify/sync 移闭包外，闭包内按 id 现取活对象，不捕获外部引用。
+    // 回退：恢复为 guard let x = context.model(for: id) ...; xxx(x, in: context)
     static func reminderByID(_ id: PersistentIdentifier, in context: ModelContext) {
-        guard let r = context.model(for: id) as? Reminder else { return }
-        reminder(r, in: context)
         notifyWidgetReload()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        DispatchQueue.main.async {
+            guard let r = context.model(for: id) as? Reminder else { return }
+            r.syncDeleted = true
+            r.syncUpdatedAt = Date()
+            deleteImageIfOrphaned(r, in: context)
+        }
     }
 
     static func billByID(_ id: PersistentIdentifier, in context: ModelContext) {
-        guard let b = context.model(for: id) as? Bill else { return }
-        bill(b, in: context)
         notifyWidgetReload()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        DispatchQueue.main.async {
+            guard let b = context.model(for: id) as? Bill else { return }
+            b.syncDeleted = true
+            b.syncUpdatedAt = Date()
+            deleteImageIfOrphaned(b, in: context)
+        }
     }
+    // <<< CHANGE-[2026-08-21 14:00:30]-[byID闭包内按ID现取统一根治] 结束
 
+    // >>> CHANGE-[2026-08-21 14:00:00]-[foodByID闭包内按ID现取根治fault] 开始
+    // 原因：旧 foodByID 在闭包外用 context.model(for:) 取活对象后传给 food()，但 food() 把 f 捕获进
+    //       DispatchQueue.main.async 闭包；图片识别记录(有 imageName)在闭包执行时若已无视图引用，
+    //       SwiftData 会把它标 fault → 访问 f.syncDeleted/imageName 闪退。手动记录 imageName==nil 提前
+    //       return 故不崩，表现为"仅图片识别记录闪退、手动添加不闪退"，且 debug 不优化不崩、release 必崩。
+    // 修复：把 notifyWidgetReload / syncAfterLocalChange 移到闭包外(不依赖 f)，闭包内按 id 现取活对象，
+    //       不再捕获任何外部对象引用，从根上消除 fault。
+    // 回退：恢复为 guard let f = context.model(for: id) ...; food(f, in: context)
     static func foodByID(_ id: PersistentIdentifier, in context: ModelContext) {
-        guard let f = context.model(for: id) as? FoodEntry else { return }
-        food(f, in: context)
         notifyWidgetReload()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        DispatchQueue.main.async {
+            guard let f = context.model(for: id) as? FoodEntry else { return }
+            // 先同步读出需要的值，再置软删标记，避免任何后续访问触发 fault
+            let targetSyncId = f.syncId
+            f.syncDeleted = true
+            f.syncUpdatedAt = Date()
+            // 图片孤儿清理：图片记录有 imageName 才会进来；手动记录 imageName==nil 直接跳过。
+            // >>> CHANGE-[2026-08-31 12:23:50]-[删除带图记录崩溃修复] 开始
+            // 原因：这里原本内联了一份 FoodEntry 的孤儿图查询（2026-08-21 为了绕开泛型 #Predicate
+            //       崩溃而手写）。现在泛型版已拆为具体类型重载，内联副本可安全复用统一实现。
+            //       注意：必须在标记 syncDeleted 之后调用——谓词带 !syncDeleted，自己不计入存活引用。
+            // 回退：恢复为上方的内联 FetchDescriptor<FoodEntry> 写法。
+            deleteImageIfOrphaned(f, in: context)
+            // <<< CHANGE-[2026-08-31 12:23:50]-[删除带图记录崩溃修复] 结束
+            // 清理来源标记，避免 FoodSource 残留挂空
+            if let fs = (try? context.fetch(FetchDescriptor<FoodSource>(
+                    predicate: #Predicate { $0.foodSyncId == targetSyncId }
+               )))?.first {
+                context.delete(fs)
+            }
+        }
     }
+    // <<< CHANGE-[2026-08-21 14:00:00]-[foodByID闭包内按ID现取根治fault] 结束
 
     static func healthByID(_ id: PersistentIdentifier, in context: ModelContext) {
-        guard let h = context.model(for: id) as? HealthMetric else { return }
-        health(h, in: context)
         notifyWidgetReload()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        DispatchQueue.main.async {
+            guard let h = context.model(for: id) as? HealthMetric else { return }
+            h.syncDeleted = true
+            h.syncUpdatedAt = Date()
+            deleteImageIfOrphaned(h, in: context)
+        }
     }
 
     static func recognitionRecordByID(_ id: PersistentIdentifier, in context: ModelContext) {
-        guard let r = context.model(for: id) as? RecognitionRecord else { return }
-        recognitionRecord(r, in: context)
         notifyWidgetReload()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        DispatchQueue.main.async {
+            guard let r = context.model(for: id) as? RecognitionRecord else { return }
+            r.syncDeleted = true
+            r.syncUpdatedAt = Date()
+            deleteImageIfOrphaned(r, in: context)
+        }
     }
 
     static func waterLogByID(_ id: PersistentIdentifier, in context: ModelContext) {
-        guard let w = context.model(for: id) as? WaterLog else { return }
-        waterLog(w, in: context)
         notifyWidgetReload()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        DispatchQueue.main.async {
+            guard let w = context.model(for: id) as? WaterLog else { return }
+            w.syncDeleted = true
+            w.syncUpdatedAt = Date()
+        }
     }
 
     static func chatMessageByID(_ id: PersistentIdentifier, in context: ModelContext) {
-        guard let m = context.model(for: id) as? ChatMessage else { return }
-        chatMessage(m, in: context)
         notifyWidgetReload()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        // >>> CHANGE-[2026-08-22 08:33:31]-[删除消息立即生效] 开始
+        // 原因：原 DispatchQueue.main.async 把标记软删延后，与 @Query 响应式刷新竞态，
+        //       点一次删除时 @Query 尚未刷新、消息仍显示，表现为"点了没反应、要点第二次"。
+        //       改为同步标记，@Query 同一轮 diff 即过滤该消息，一次点击立即消失。
+        // 注：旧防崩补丁（fetchMessages 重拉释放引用）的前提已不存在——当前列表全走 @Query，
+        //       context.model(for:) 取的是活对象，标记 syncDeleted 仅隐藏、不释放。
+        // 回退：改回 DispatchQueue.main.async { guard let m = context.model(for: id)... }
+        guard let m = context.model(for: id) as? ChatMessage else { return }
+        m.syncDeleted = true
+        m.syncUpdatedAt = Date()
+        // save 让 SwiftData 落库并触发 @Query 结果集刷新（关键；不 save 则当前页缓存不更新，消息要退出重进才消失）
+        try? context.save()
+        // <<< CHANGE-[2026-08-22 08:33:31]-[删除消息立即生效] 结束
     }
 
     static func merchantMetaByID(_ id: PersistentIdentifier, in context: ModelContext) {
-        guard let m = context.model(for: id) as? MerchantMeta else { return }
-        merchantMeta(m, in: context)
         notifyWidgetReload()
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
+        DispatchQueue.main.async {
+            guard let m = context.model(for: id) as? MerchantMeta else { return }
+            m.syncDeleted = true
+            m.syncUpdatedAt = Date()
+        }
     }
 }
 

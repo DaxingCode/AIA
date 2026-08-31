@@ -15,9 +15,9 @@ import Foundation
 public enum AppPersistence {
     /// 当前 SwiftData schema 版本（仅用于记录，不再参与文件名）。
     /// 每次改 @Model 字段或新增模型：+1 并在 AIAMigrationPlan 加对应 Stage。
-    /// 必须与 `schema` 实际引用的 VersionedSchema（SchemaVersion15）保持一致，
+    /// 必须与 `schema` 实际引用的 VersionedSchema（SchemaVersion18）保持一致，
     /// 否则日志/排查时版本号错乱，掩盖真实的迁移失败。
-    public static let currentSchemaVersion = 17
+    public static let currentSchemaVersion = 18
 
     /// App Group 标识符：主 App / Widget / ShareExtension / Siri 都靠它共享同一份 store 文件。
     /// 关键：Widget 是独立进程，它的 applicationSupportDirectory 与
@@ -41,13 +41,18 @@ public enum AppPersistence {
             .appendingPathComponent("Backups")
     }
 
-    /// 当前 schema：从 AIAMigrationPlan 的 v17 版本化 schema 构造（含 DailyHealthMetric），
-    /// 必须与 `currentSchemaVersion`（17）保持一致，否则 DailyHealthMetric 等新增模型不在 container
+    /// 当前 schema：从 AIAMigrationPlan 的 v18 版本化 schema 构造（含 DailyHealthMetric + ChatMessage.actionRouteRaw），
+    /// 必须与 `currentSchemaVersion`（18）保持一致，否则新增模型不在 container
     /// schema 里注册 → context.insert 静默丢弃、数据不落盘（删 App 重装后尤为明显）。
-    public static var schema: Schema { Schema(versionedSchema: SchemaVersion17.self) }
+    public static var schema: Schema { Schema(versionedSchema: SchemaVersion18.self) }
 
     /// 崩溃安全：磁盘库任何原因初始化失败，回退到内存存储，保证至少能写入（不白屏）。
     public static func makeContainer() -> ModelContainer {
+        // >>> CHANGE-[2026-08-31 18:00:00]-[降级标记粘住修复] 开始
+        // 关键修复：每次启动先清除「降级内存存储」标记，使该标记只反映【本次启动】的真实状态。
+        // 旧逻辑只在失败时 set(true)、从不清除 → 标记永久粘住，即使后续库正常打开警告也一直弹。
+        UserDefaults.standard.removeObject(forKey: "aia.storeDegradedToMemory")
+        // <<< CHANGE-[2026-08-31 18:00:00]-[降级标记粘住修复] 结束
         // 🟢 无条件 print：证明函数真的被调用了。如果连这行都看不到 = 跑的是旧二进制
         print("🟢 [AppPersistence.makeContainer] 函数被调用 (build=\(Bundle.main.infoDictionary?["CFBundleVersion"] ?? "?"))")
         // 首次启用新文件名：把旧 AIA.store.v1/v2 备份并迁移到 AIA.store
@@ -73,7 +78,27 @@ public enum AppPersistence {
             print("✅ [AppPersistence] 磁盘库打开成功 store=\(storeURL.lastPathComponent) schemaVersion=\(currentSchemaVersion)")
             return c
         } catch {
-            print("❌ [AppPersistence] 磁盘库+迁移计划打开失败：\(error.localizedDescription)\n  → 失败原因通常是 schema checksum 不匹配")
+            // >>> CHANGE-[2026-08-31 18:00:00]-[降级日志打全] 开始
+            // 旧逻辑只打印 localizedDescription（常是"未能完成操作"，等于没说）。
+            // 改为打印完整 error 及底层错误，并附带 store 文件状态，便于定位
+            // 「文件损坏 / 版本太新 / schema 校验和冲突」等真实原因。
+            print("❌ [AppPersistence] 磁盘库+迁移计划打开失败：\(error)")
+            if let nsError = error as NSError? {
+                print("   → 错误域: \(nsError.domain) 码: \(nsError.code)")
+                if let reason = nsError.localizedFailureReason { print("   → 原因: \(reason)") }
+                if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
+                    print("   → 底层错误: \(underlying)")
+                }
+            }
+            if FileManager.default.fileExists(atPath: storeURL.path) {
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: storeURL.path),
+                   let size = attrs[.size] as? Int64 {
+                    print("   → 磁盘 store 存在，大小 \(size) 字节，路径：\(storeURL.path)")
+                }
+            } else {
+                print("   → 磁盘 store 不存在：\(storeURL.path)")
+            }
+            // <<< CHANGE-[2026-08-31 18:00:00]-[降级日志打全] 结束
         }
         // 2. 兜底：迁移计划已失败（磁盘 store 的版本不在 v1..v15 迁移阶梯中，
         //    即 "unknown model version"），此时任何「无迁移直接打开」都会把 store 置于
@@ -83,6 +108,12 @@ public enum AppPersistence {
         //    用户数据在云端，重装 App 登录即恢复；本次降级仅用于避免崩溃 + 给出提示。
         print("❌ [AppPersistence] 迁移计划失败，磁盘 store 版本与当前 schema(v\(currentSchemaVersion)) 不匹配，备份并降级内存存储")
         backupStore(from: storeURL)
+        // >>> CHANGE-[2026-08-31 18:25:53]-[降级库改名隔离] 开始
+        // 防死循环：只备份不改名，原坏库仍留在原位 → 下次冷启动又会打开它 → 又降级 → 又备份，
+        // 每启一次就重复一次。这里把原库（含 -wal/-shm）改名为 AIA.store.incompatible.<时间戳>
+        // 移出原位，下次启动 storeURL 不存在 → 正常建新库，不再反复降级。
+        quarantineStoreFiles(from: storeURL)
+        // <<< CHANGE-[2026-08-31 18:25:53]-[降级库改名隔离] 结束
         // 标记：本次启动走了「非持久化降级」，供 UI 层提示用户「数据需从云端恢复 / 重装 App」。
         UserDefaults.standard.set(true, forKey: "aia.storeDegradedToMemory")
         // 3. 最终兜底：内存存储，保证不白屏
@@ -223,5 +254,35 @@ public enum AppPersistence {
 
         try? fm.copyItem(at: url, to: backupURL)
         print("[AppPersistence] 旧库已备份到 \(backupURL)")
+    }
+
+    /// 降级后把原库整组（store / -wal / -shm）改名为 *.incompatible.<时间戳> 移出原位，
+    /// 防止下次冷启动再次打开同一个坏库 → 无限「降级→备份→再降级」循环。
+    private static func quarantineStoreFiles(from url: URL) {
+        let fm = FileManager.default
+        let baseDir = url.deletingLastPathComponent()
+        let stem = url.lastPathComponent
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyyMMdd_HHmmss"
+        let stamp = fmt.string(from: Date())
+        // 已存在同名隔离文件时追加 -N 后缀，保证幂等不覆盖
+        var suffix = stamp
+        var n = 1
+        while fm.fileExists(atPath: baseDir.appendingPathComponent("\(stem).incompatible.\(suffix)").path) {
+            suffix = "\(stamp)-\(n)"
+            n += 1
+        }
+        for name in [stem, stem + "-wal", stem + "-shm"] {
+            let src = baseDir.appendingPathComponent(name)
+            guard fm.fileExists(atPath: src.path) else { continue }
+            let dst = baseDir.appendingPathComponent("\(name).incompatible.\(suffix)")
+            do {
+                try fm.moveItem(at: src, to: dst)
+                print("[AppPersistence] 原库已改名隔离: \(name) → \(dst.lastPathComponent)")
+            } catch {
+                // 改名失败不阻断降级流程，仅打印日志，Backups/ 已有兜底备份。
+                print("[AppPersistence] 原库改名失败（保留原位，已依赖 Backups/ 备份）: \(error)")
+            }
+        }
     }
 }

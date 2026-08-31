@@ -530,7 +530,7 @@ struct ContentView: View {
         // 避免「看着能记、实则没存」的困惑。
         if UserDefaults.standard.bool(forKey: "aia.storeDegradedToMemory") {
             ToastCenter.shared.showImportant(
-                "数据库已降级为临时存储，重启会丢失。请重装 App 从云端恢复数据。",
+                "数据库版本不兼容（当前代码 v\(AppPersistence.currentSchemaVersion)），旧数据已自动备份。本次记录为临时存储，重启会清空，请重装 App 从云端恢复数据。",
                 icon: "⚠️",
                 accent: AIATheme.warning
             )
