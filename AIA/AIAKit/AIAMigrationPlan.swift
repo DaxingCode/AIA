@@ -756,8 +756,33 @@ enum SchemaVersion16: VersionedSchema {
 }
 
 // 版本 17：新增 DailyHealthMetric（每日健康指标快照，替代旧 ManualHealthStore 的 UserDefaults 方案）
+// 版本 17：新增 DailyHealthMetric（每日健康指标快照，替代旧 ManualHealthStore 的 UserDefaults 方案）
 enum SchemaVersion17: VersionedSchema {
     static var versionIdentifier: Schema.Version = Schema.Version(17, 0, 0)
+
+    // >>> CHANGE-[2026-08-31 17:40:00]-[补齐schemaV18] 开始
+    // v17 时刻的 ChatMessage：尚无 actionRouteRaw 字段（v18 才加）。
+    // 必须内嵌旧 shape 类，避免引用外层已变异的 ChatMessage 导致与 v18 schema checksum 重复。
+    @Model final class ChatMessage {
+        public var roleRaw: String
+        public var text: String
+        public var createdAt: Date
+        public var syncId: UUID
+        public var syncUpdatedAt: Date
+        public var syncDeleted: Bool
+
+        init(roleRaw: String, text: String, createdAt: Date = .now,
+             syncId: UUID = UUID(), syncUpdatedAt: Date = .now, syncDeleted: Bool = false) {
+            self.roleRaw = roleRaw
+            self.text = text
+            self.createdAt = createdAt
+            self.syncId = syncId
+            self.syncUpdatedAt = syncUpdatedAt
+            self.syncDeleted = syncDeleted
+        }
+    }
+    // <<< CHANGE-[2026-08-31 17:40:00]-[补齐schemaV18] 结束
+
     static var models: [any PersistentModel.Type] {
         [
             Bill.self,
@@ -765,7 +790,7 @@ enum SchemaVersion17: VersionedSchema {
             FoodEntry.self,
             HealthMetric.self,
             RecognitionRecord.self,
-            ChatMessage.self,
+            ChatMessage.self,            // SchemaVersion17 内嵌旧 shape（无 actionRouteRaw）
             RecurringRule.self,
             MerchantMeta.self,
             FoodMeta.self,
@@ -781,6 +806,41 @@ enum SchemaVersion17: VersionedSchema {
     }
 }
 
+// >>> CHANGE-[2026-08-31 17:40:00]-[补齐schemaV18] 开始
+// 原因：从 fix/小记查询增强_20260820 补齐 v18 schema。ChatMessage 新增可选字段 actionRouteRaw
+//       （默认 nil，lightweight 迁移安全）。纯新增可选字段，v17→v18 走 lightweight 自动填充默认值 nil。
+//       关键：v18（当前 schema）必须引用【外层 ChatMessage.self】而非内嵌类——
+//       运行时业务代码用外层 ChatMessage.self fetch/cast，内嵌类会 cast 失败崩溃。
+//       v17 内嵌旧 shape（无 actionRouteRaw）保证与 v18 的 schema checksum 不同，避免
+//       「Duplicate version checksums detected」。这与 v4-v9 的 RecurringRule/FoodEntry
+//       模式一致：中间版本内嵌旧类、最终版本引用外层类。
+// 回退：删除本 VersionedSchema + 撤销 schemas/stages 中的 v18 引用 + AppPersistence 改回 v17。
+enum SchemaVersion18: VersionedSchema {
+    static var versionIdentifier: Schema.Version = Schema.Version(18, 0, 0)
+    static var models: [any PersistentModel.Type] {
+        [
+            Bill.self,
+            Reminder.self,
+            FoodEntry.self,
+            HealthMetric.self,
+            RecognitionRecord.self,
+            ChatMessage.self,            // 外层新版（含 actionRouteRaw），与 v17 内嵌旧类 checksum 不同
+            RecurringRule.self,
+            MerchantMeta.self,
+            FoodMeta.self,
+            WaterLog.self,
+            FoodNote.self,
+            ReminderNote.self,
+            FoodSource.self,
+            HealthNote.self,
+            ImportBatch.self,
+            SleepSession.self,
+            DailyHealthMetric.self
+        ]
+    }
+}
+// <<< CHANGE-[2026-08-31 17:40:00]-[补齐schemaV18] 结束
+
 // MARK: - 迁移计划：v1 → v3 仅新增 MerchantMeta 表；v3 → v4 为 RecurringRule 新增 3 个字段；
 //           v4 → v5 为 FoodEntry 新增 5 个可选字段；v5 → v6 新增 FoodMeta 表；
 //           v6 → v7 为 MerchantMeta 新增 3 个 sync 字段；v7 → v8 为 FoodEntry 新增 7 个字段；
@@ -791,8 +851,8 @@ enum SchemaVersion17: VersionedSchema {
 //           其 schema checksum 会与 v1 重复，导致 SwiftData 报
 //           "Duplicate version checksums across stages detected"，故不保留同构中间版本。
 enum AIAMigrationPlan: SchemaMigrationPlan {
-    static var schemas: [VersionedSchema.Type] { [SchemaVersion1.self, SchemaVersion3.self, SchemaVersion4.self, SchemaVersion5.self, SchemaVersion6.self, SchemaVersion7.self, SchemaVersion8.self, SchemaVersion9.self, SchemaVersion10.self, SchemaVersion11.self, SchemaVersion12.self, SchemaVersion13.self, SchemaVersion14.self, SchemaVersion15.self, SchemaVersion16.self, SchemaVersion17.self] }
-    static var stages: [MigrationStage] { [migrateV1toV3, migrateV3toV4, migrateV4toV5, migrateV5toV6, migrateV6toV7, migrateV7toV8, migrateV8toV9, migrateV9toV10, migrateV10toV11, migrateV11toV12, migrateV12toV13, migrateV13toV14, migrateV14toV15, migrateV15toV16, migrateV16toV17] }
+    static var schemas: [VersionedSchema.Type] { [SchemaVersion1.self, SchemaVersion3.self, SchemaVersion4.self, SchemaVersion5.self, SchemaVersion6.self, SchemaVersion7.self, SchemaVersion8.self, SchemaVersion9.self, SchemaVersion10.self, SchemaVersion11.self, SchemaVersion12.self, SchemaVersion13.self, SchemaVersion14.self, SchemaVersion15.self, SchemaVersion16.self, SchemaVersion17.self, SchemaVersion18.self] }
+    static var stages: [MigrationStage] { [migrateV1toV3, migrateV3toV4, migrateV4toV5, migrateV5toV6, migrateV6toV7, migrateV7toV8, migrateV8toV9, migrateV9toV10, migrateV10toV11, migrateV11toV12, migrateV12toV13, migrateV13toV14, migrateV14toV15, migrateV15toV16, migrateV16toV17, migrateV17toV18] }
 
     static let migrateV1toV3 = MigrationStage.lightweight(
         fromVersion: SchemaVersion1.self,
@@ -872,4 +932,11 @@ enum AIAMigrationPlan: SchemaMigrationPlan {
         fromVersion: SchemaVersion16.self,
         toVersion: SchemaVersion17.self
     )
+
+    // >>> CHANGE-[2026-08-31 17:40:00]-[补齐schemaV18] 开始
+    static let migrateV17toV18 = MigrationStage.lightweight(
+        fromVersion: SchemaVersion17.self,
+        toVersion: SchemaVersion18.self
+    )
+    // <<< CHANGE-[2026-08-31 17:40:00]-[补齐schemaV18] 结束
 }

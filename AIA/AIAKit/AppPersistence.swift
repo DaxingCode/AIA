@@ -15,9 +15,9 @@ import Foundation
 public enum AppPersistence {
     /// 当前 SwiftData schema 版本（仅用于记录，不再参与文件名）。
     /// 每次改 @Model 字段或新增模型：+1 并在 AIAMigrationPlan 加对应 Stage。
-    /// 必须与 `schema` 实际引用的 VersionedSchema（SchemaVersion15）保持一致，
+    /// 必须与 `schema` 实际引用的 VersionedSchema（SchemaVersion18）保持一致，
     /// 否则日志/排查时版本号错乱，掩盖真实的迁移失败。
-    public static let currentSchemaVersion = 17
+    public static let currentSchemaVersion = 18
 
     /// App Group 标识符：主 App / Widget / ShareExtension / Siri 都靠它共享同一份 store 文件。
     /// 关键：Widget 是独立进程，它的 applicationSupportDirectory 与
@@ -41,13 +41,18 @@ public enum AppPersistence {
             .appendingPathComponent("Backups")
     }
 
-    /// 当前 schema：从 AIAMigrationPlan 的 v17 版本化 schema 构造（含 DailyHealthMetric），
-    /// 必须与 `currentSchemaVersion`（17）保持一致，否则 DailyHealthMetric 等新增模型不在 container
+    /// 当前 schema：从 AIAMigrationPlan 的 v18 版本化 schema 构造（含 DailyHealthMetric + ChatMessage.actionRouteRaw），
+    /// 必须与 `currentSchemaVersion`（18）保持一致，否则新增模型不在 container
     /// schema 里注册 → context.insert 静默丢弃、数据不落盘（删 App 重装后尤为明显）。
-    public static var schema: Schema { Schema(versionedSchema: SchemaVersion17.self) }
+    public static var schema: Schema { Schema(versionedSchema: SchemaVersion18.self) }
 
     /// 崩溃安全：磁盘库任何原因初始化失败，回退到内存存储，保证至少能写入（不白屏）。
     public static func makeContainer() -> ModelContainer {
+        // >>> CHANGE-[2026-08-31 18:00:00]-[降级标记粘住修复] 开始
+        // 关键修复：每次启动先清除「降级内存存储」标记，使该标记只反映【本次启动】的真实状态。
+        // 旧逻辑只在失败时 set(true)、从不清除 → 标记永久粘住，即使后续库正常打开警告也一直弹。
+        UserDefaults.standard.removeObject(forKey: "aia.storeDegradedToMemory")
+        // <<< CHANGE-[2026-08-31 18:00:00]-[降级标记粘住修复] 结束
         // 🟢 无条件 print：证明函数真的被调用了。如果连这行都看不到 = 跑的是旧二进制
         print("🟢 [AppPersistence.makeContainer] 函数被调用 (build=\(Bundle.main.infoDictionary?["CFBundleVersion"] ?? "?"))")
         // 首次启用新文件名：把旧 AIA.store.v1/v2 备份并迁移到 AIA.store
@@ -73,7 +78,27 @@ public enum AppPersistence {
             print("✅ [AppPersistence] 磁盘库打开成功 store=\(storeURL.lastPathComponent) schemaVersion=\(currentSchemaVersion)")
             return c
         } catch {
-            print("❌ [AppPersistence] 磁盘库+迁移计划打开失败：\(error.localizedDescription)\n  → 失败原因通常是 schema checksum 不匹配")
+            // >>> CHANGE-[2026-08-31 18:00:00]-[降级日志打全] 开始
+            // 旧逻辑只打印 localizedDescription（常是"未能完成操作"，等于没说）。
+            // 改为打印完整 error 及底层错误，并附带 store 文件状态，便于定位
+            // 「文件损坏 / 版本太新 / schema 校验和冲突」等真实原因。
+            print("❌ [AppPersistence] 磁盘库+迁移计划打开失败：\(error)")
+            if let nsError = error as NSError? {
+                print("   → 错误域: \(nsError.domain) 码: \(nsError.code)")
+                if let reason = nsError.localizedFailureReason { print("   → 原因: \(reason)") }
+                if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
+                    print("   → 底层错误: \(underlying)")
+                }
+            }
+            if FileManager.default.fileExists(atPath: storeURL.path) {
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: storeURL.path),
+                   let size = attrs[.size] as? Int64 {
+                    print("   → 磁盘 store 存在，大小 \(size) 字节，路径：\(storeURL.path)")
+                }
+            } else {
+                print("   → 磁盘 store 不存在：\(storeURL.path)")
+            }
+            // <<< CHANGE-[2026-08-31 18:00:00]-[降级日志打全] 结束
         }
         // 2. 兜底：迁移计划已失败（磁盘 store 的版本不在 v1..v15 迁移阶梯中，
         //    即 "unknown model version"），此时任何「无迁移直接打开」都会把 store 置于
