@@ -278,6 +278,12 @@ struct RecurringRuleEditView: View {
     }
     // <<< CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 结束
 
+    // >>> CHANGE-[2026-09-01 10:30:00]-[自定义周期强制展开间隔] 开始
+    /// 高级细项（生成日 / 每周 / 间隔）是否可见。
+    /// 自定义周期必须指定间隔才能确定周期长度，因此强制可见。
+    private var advancedCycleVisible: Bool { showAdvancedCycle || cycle == .custom }
+    // <<< CHANGE-[2026-09-01 10:30:00]-[自定义周期强制展开间隔] 结束
+
     private var amountValue: Double { Double(amountText) ?? 0 }
     private var canSave: Bool { !merchant.isEmpty && amountValue > 0 }
     private var cycle: RecurrenceCycle { RecurrenceCycle(rawValue: cycleRaw) ?? .monthly }
@@ -357,7 +363,11 @@ struct RecurringRuleEditView: View {
                         // >>> CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 开始
                         // 高级选项折叠：默认隐藏「生成日 / 每周 / 间隔」，
                         // 折叠态下用 startDate 的号数(或星期/间隔)作为默认生成依据。
-                        if showAdvancedCycle {
+                        // >>> CHANGE-[2026-09-01 10:30:00]-[自定义周期强制展开间隔] 开始
+                        // 自定义周期必须指定间隔才能确定周期长度，因此选中「自定义」时
+                        // 视为高级展开（advancedCycleVisible），间隔框直接可见，无需手动展开。
+                        // <<< CHANGE-[2026-09-01 10:30:00]-[自定义周期强制展开间隔] 结束
+                        if advancedCycleVisible {
                             if cycle == .monthly || cycle == .quarterly || cycle == .yearly {
                                 Divider()
                                     .padding(.leading, 42)
@@ -424,40 +434,45 @@ struct RecurringRuleEditView: View {
                         }
 
                         // >>> CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 开始
-                        // 高级选项入口：点击展开「生成日 / 每周 / 间隔」手动调整。
+                        // 高级选项入口：点击展开「生成日 / 每周」手动调整。
                         // 编辑已有规则且与原默认(取自首次生成)不符时，自动展开以保留用户设定。
-                        Divider()
-                            .padding(.leading, 42)
-                            .background(AIATheme.hairline)
+                        // >>> CHANGE-[2026-09-01 10:30:00]-[自定义周期强制展开间隔] 开始
+                        // 自定义周期下间隔已强制可见，无需再显示该入口，直接隐藏。
+                        // <<< CHANGE-[2026-09-01 10:30:00]-[自定义周期强制展开间隔] 结束
+                        if cycle != .custom {
+                            Divider()
+                                .padding(.leading, 42)
+                                .background(AIATheme.hairline)
 
-                        Button {
-                            showAdvancedCycle.toggle()
-                        } label: {
-                            HStack(spacing: 12) {
-                                ZStack {
-                                    Circle()
-                                        .fill(AIATheme.bill.opacity(0.12))
-                                        .frame(width: 30, height: 30)
-                                    Image(systemName: "slider.horizontal.3")
-                                        .font(AIATheme.Font.footnote.weight(.medium))
-                                        .foregroundStyle(AIATheme.bill)
+                            Button {
+                                showAdvancedCycle.toggle()
+                            } label: {
+                                HStack(spacing: 12) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(AIATheme.bill.opacity(0.12))
+                                            .frame(width: 30, height: 30)
+                                        Image(systemName: "slider.horizontal.3")
+                                            .font(AIATheme.Font.footnote.weight(.medium))
+                                            .foregroundStyle(AIATheme.bill)
+                                    }
+                                    Text("高级：自定义生成日")
+                                        .font(AIATheme.Font.callout.weight(.medium))
+                                        .foregroundStyle(.primary)
+                                    Spacer(minLength: 0)
+                                    Text(showAdvancedCycle ? "收起" : "展开")
+                                        .font(AIATheme.Font.micro)
+                                        .foregroundStyle(AIATheme.muted)
+                                    Image(systemName: "chevron.right")
+                                        .font(AIATheme.Font.caption.weight(.semibold))
+                                        .foregroundStyle(AIATheme.muted)
+                                        .rotationEffect(.degrees(showAdvancedCycle ? 90 : 0))
                                 }
-                                Text("高级：自定义生成日")
-                                    .font(AIATheme.Font.callout.weight(.medium))
-                                    .foregroundStyle(.primary)
-                                Spacer(minLength: 0)
-                                Text(showAdvancedCycle ? "收起" : "展开")
-                                    .font(AIATheme.Font.micro)
-                                    .foregroundStyle(AIATheme.muted)
-                                Image(systemName: "chevron.right")
-                                    .font(AIATheme.Font.caption.weight(.semibold))
-                                    .foregroundStyle(AIATheme.muted)
-                                    .rotationEffect(.degrees(showAdvancedCycle ? 90 : 0))
+                                .padding(12)
+                                .contentShape(Rectangle())
                             }
-                            .padding(12)
-                            .contentShape(Rectangle())
+                            .buttonStyle(PressableCardStyle())
                         }
-                        .buttonStyle(PressableCardStyle())
                         // <<< CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 结束
                     }
                     .card()
@@ -468,7 +483,10 @@ struct RecurringRuleEditView: View {
                             .foregroundStyle(AIATheme.muted)
                         // >>> CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 开始
                         // 折叠态提示「生成日 = 首次生成日号数」；展开态提示用户可自定义。
-                        Text(showAdvancedCycle
+                        // >>> CHANGE-[2026-09-01 10:30:00]-[自定义周期强制展开间隔] 开始
+                        // 自定义周期按「每 N 单位」提示，不用「每月X日」（后者仅适用月/季/年）。
+                        // <<< CHANGE-[2026-09-01 10:30:00]-[自定义周期强制展开间隔] 结束
+                        Text(advancedCycleVisible
                              ? "首次生成：\(dateFmt.string(from: startDate))，之后\(cycleHint)自动入账"
                              : "首次生成：\(dateFmt.string(from: startDate))，之后每月\(Calendar.current.component(.day, from: startDate))日自动入账")
                             .font(AIATheme.Font.micro)
