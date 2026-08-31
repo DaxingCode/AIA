@@ -1924,9 +1924,15 @@ struct EditBillView: View {
                     r.customValue = max(d.recurCustomValue, 1)
                     r.customUnitRaw = d.recurCustomUnitRaw
                     r.startDate = savedBill.time
+                    // >>> CHANGE-[2026-09-01 11:40:00]-[周期规则首次生成进度] 开始
+                    // 与编辑页同款：仅在从未生成过时兜底，避免覆盖历史生成记录导致重复补生成。
+                    if r.lastGeneratedAt == nil {
+                        r.lastGeneratedAt = savedBill.time
+                    }
+                    // <<< CHANGE-[2026-09-01 11:40:00]-[周期规则首次生成进度] 结束
                     // 更新的是系统来源规则，来源标记保留
                 } else {
-                    _ = RecurringRule.make(
+                    let rule = RecurringRule.make(
                         from: savedBill.merchant,
                         amount: savedBill.amount,
                         category: savedBill.category,
@@ -1940,6 +1946,10 @@ struct EditBillView: View {
                         context: context,
                         billSyncId: sid
                     )
+                    // >>> CHANGE-[2026-09-01 11:40:00]-[周期规则首次生成进度] 开始
+                    // 新建规则：首期这笔已由用户手动添加，标记已生成
+                    rule.lastGeneratedAt = savedBill.time
+                    // <<< CHANGE-[2026-09-01 11:40:00]-[周期规则首次生成进度] 结束
                     // 手动开开关：以 syncId 关联，来源标记无需保留
                     savedBill.sourceRecurringRuleSyncId = nil
                 }
@@ -2636,13 +2646,21 @@ struct EditBillView: View {
                 existing.customValue = max(recurCustomValue, 1)
                 existing.customUnitRaw = recurCustomUnitRaw
                 existing.startDate = bill.time
+                // >>> CHANGE-[2026-09-01 11:40:00]-[周期规则首次生成进度] 开始
+                // 仅在规则从未生成过（lastGeneratedAt 为 nil）时兜底设为账单日期：
+                // 这笔手动账单即首期，规则需视为「首期已生成」，否则列表「下次生成」会错显成首期当天，
+                // 且后续 generateDue 会重复生成首期。已有生成记录的规则绝不覆盖，避免重复补生成历史账期。
+                if existing.lastGeneratedAt == nil {
+                    existing.lastGeneratedAt = bill.time
+                }
+                // <<< CHANGE-[2026-09-01 11:40:00]-[周期规则首次生成进度] 结束
             } else {
                 context.delete(existing)
                 // 关掉开关：账单不再属于任何周期规则（清来源标记，下次进入开关保持关闭）
                 bill.sourceRecurringRuleSyncId = nil
             }
         } else if isRecurring {
-            _ = RecurringRule.make(
+            let rule = RecurringRule.make(
                 from: bill.merchant,
                 amount: bill.amount,
                 category: bill.category,
@@ -2656,6 +2674,11 @@ struct EditBillView: View {
                 context: context,
                 billSyncId: bill.syncId
             )
+            // >>> CHANGE-[2026-09-01 11:40:00]-[周期规则首次生成进度] 开始
+            // 新建规则：这笔手动账单即首期，标记为已生成，
+            // 避免列表「下次生成」错显成首期当天，且防止后续 generateDue 重复生成首期。
+            rule.lastGeneratedAt = bill.time
+            // <<< CHANGE-[2026-09-01 11:40:00]-[周期规则首次生成进度] 结束
             // 手动开开关：以 syncId 关联，来源标记无需保留
             bill.sourceRecurringRuleSyncId = nil
         }
