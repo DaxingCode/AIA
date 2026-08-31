@@ -128,15 +128,21 @@ enum DataDeduplicator {
         }
     }
 
-    /// Reminder：同 title → 重复（24 小时内）。过滤 syncDeleted：被软删的记录不应再被当作重复。
+    /// Reminder：同 title + 同 due（按小时归并）→ 重复（24 小时内）。过滤 syncDeleted：被软删的记录不应再被当作重复。
+    /// 注意：必须比较 due，否则「明天 8:00 打球」与「后天 9:00 打球」等同名不同时的提醒会被误判重复。
     @MainActor
-    static func isDuplicateReminder(title: String, context: ModelContext) -> Bool {
+    static func isDuplicateReminder(title: String, due: Date, context: ModelContext) -> Bool {
         let window = Date().addingTimeInterval(-86400)
         let normTitle = title.lowercased().trimmingCharacters(in: .whitespaces)
+        // due 按小时归并：同一小时内同名提醒视为重复，避免「8:00」和「8:05」被当成两条；
+        // 不同时（如明天 vs 后天）则不算重复，与 runOnce 清理逻辑（title + dueKey 按小时）保持一致。
+        let dueHour = floor(due.timeIntervalSince1970 / 3600)
         let all = (try? context.fetch(FetchDescriptor<Reminder>(predicate: #Predicate { !$0.syncDeleted }))) ?? []
         return all.contains { r in
-            guard let due = r.due else { return false }
-            return due >= window &&
+            guard let rDue = r.due else { return false }
+            let rDueHour = floor(rDue.timeIntervalSince1970 / 3600)
+            return rDue >= window &&
+                rDueHour == dueHour &&
                 r.title.lowercased().trimmingCharacters(in: .whitespaces) == normTitle
         }
     }

@@ -2179,15 +2179,28 @@ struct ChatView: View {
         // 一句话多条：按连词切分后逐条建待办
         let segments = IntentTextUtils.splitByConjunction(text)
         var todoPayloads: [TodoPayload] = []
+        // >>> CHANGE-[2026-08-31 21:45:36]-待办防重复提示 开始
+        // 记录整句话是否全部子句都被去重（短期窗口或 24h 内容级），全命中则提示"刚记过"不入库。
+        var allDup = true
+        // <<< CHANGE-[2026-08-31 21:45:36]-待办防重复提示 结束
         for seg in segments {
             guard let (title, due, repeatRule) = parseTodoCreate(seg) else { continue }
             if WaterIntakeParser.checkDuplicateAndRegister(seg, type: "todo") { continue }
-            if DataDeduplicator.isDuplicateReminder(title: title, context: context) { continue }
+            if DataDeduplicator.isDuplicateReminder(title: title, due: due, context: context) { continue }
+            // >>> CHANGE-[2026-08-31 21:45:36]-待办防重复提示 开始
+            allDup = false
+            // <<< CHANGE-[2026-08-31 21:45:36]-待办防重复提示 结束
             // 必须带本地时区偏移（AppFormat.iso）。此处曾裸用 ISO8601DateFormatter()（UTC），
             // 导致「19 点提醒吃饭」序列化成 11:00Z、被 LLM 当成 11 点回传，待办落成 11:00。
             let dueISO = AppFormat.iso.string(from: due)
             todoPayloads.append(TodoPayload(title: title, due: dueISO, repeatRule: repeatRule, priority: nil, action: nil, targetTitle: nil))
         }
+        // >>> CHANGE-[2026-08-31 21:45:36]-待办防重复提示 开始
+        // 整句话所有子句均被判为重复 → 和饮食一致，回"刚记过"提示，不再入库/不再走云端兜底。
+        if allDup && !segments.isEmpty {
+            return "这个提醒你刚记过啦，我就不重复记了～"
+        }
+        // <<< CHANGE-[2026-08-31 21:45:36]-待办防重复提示 结束
         guard !todoPayloads.isEmpty else { return nil }
         UsageAnalytics.logAdd("todo", source: "chat")
         let result = RecognitionResult(types: ["todo"], todos: todoPayloads)
@@ -2314,6 +2327,10 @@ struct ChatView: View {
         for seg in segments { expanded.append(contentsOf: IntentTextUtils.splitBillsByMeal(seg)) }
         segments = expanded
         var billPayloads: [BillPayload] = []
+        // >>> CHANGE-[2026-08-31 21:45:36]-账单防重复提示 开始
+        // 记录整句话是否全部子句都被去重（短期窗口或 24h 内容级），全命中则提示"刚记过"不入库。
+        var allDup = true
+        // <<< CHANGE-[2026-08-31 21:45:36]-账单防重复提示 结束
         for seg in segments {
             guard let fields = buildBill(from: seg) else { continue }
             // 解析日期 + 时刻：
@@ -2323,6 +2340,9 @@ struct ChatView: View {
             let billDate = ChatView.resolveBillDate(from: seg)
             if WaterIntakeParser.checkDuplicateAndRegister(seg, type: "bill") { continue }
             if DataDeduplicator.isDuplicateBill(merchant: fields.merchant, amount: fields.amount, time: billDate, context: context) { continue }
+            // >>> CHANGE-[2026-08-31 21:45:36]-账单防重复提示 开始
+            allDup = false
+            // <<< CHANGE-[2026-08-31 21:45:36]-账单防重复提示 结束
             billPayloads.append(BillPayload(merchant: fields.merchant,
                                             amount: fields.amount,
                                             currency: nil,
@@ -2332,6 +2352,12 @@ struct ChatView: View {
                                             action: nil,
                                             targetTitle: nil))
         }
+        // >>> CHANGE-[2026-08-31 21:45:36]-账单防重复提示 开始
+        // 整句话所有子句均被判为重复 → 和饮食一致，回"刚记过"提示，不再入库/不再走云端兜底。
+        if allDup && !segments.isEmpty {
+            return "这笔你刚记过啦，我就不重复记了～"
+        }
+        // <<< CHANGE-[2026-08-31 21:45:36]-账单防重复提示 结束
         guard !billPayloads.isEmpty else { return nil }
         UsageAnalytics.logAdd("bill", source: "chat")
         let result = RecognitionResult(types: ["bill"], bills: billPayloads)
