@@ -2193,8 +2193,8 @@ struct EditBillView: View {
 
                 let cycle = RecurrenceCycle(rawValue: recurCycleRaw) ?? .monthly
                 // >>> CHANGE-[2026-09-01 10:45:00]-[账单页周期生成日默认收起] 开始
-                // 生成日默认收起；自定义周期必须指定间隔 → 强制展开（advancedVisible）
-                let advancedVisible = showAdvancedRecur || cycle == .custom
+                // 生成日默认收起；自定义周期必须指定间隔、每周需展示星期几 → 强制展开（advancedVisible）
+                let advancedVisible = showAdvancedRecur || cycle == .custom || cycle == .weekly
                 if advancedVisible {
                     if cycle == .monthly || cycle == .quarterly || cycle == .yearly {
                         Divider().padding(.leading, 46)
@@ -2251,11 +2251,28 @@ struct EditBillView: View {
                         }
                         .padding(.vertical, 10)
                         .padding(.horizontal, 14)
+                    } else if cycle == .weekly {
+                        Divider().padding(.leading, 46)
+                        HStack(spacing: 12) {
+                            Image(systemName: "calendar")
+                                .font(AIATheme.Font.subhead)
+                                .foregroundStyle(AIATheme.muted)
+                                .frame(width: 20, alignment: .center)
+                            Text("每周")
+                                .font(AIATheme.Font.callout)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text("星期 \(weekdayText(from: time))")
+                                .font(AIATheme.Font.subhead.weight(.medium))
+                                .foregroundStyle(AIATheme.sub)
+                        }
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 14)
                     }
                 }
 
-                // 高级入口：自定义周期下间隔已强制可见，无需该入口
-                if cycle != .custom {
+                // 高级入口：自定义和每周的细项已强制可见，只有月/季/年需要入口
+                if cycle == .monthly || cycle == .quarterly || cycle == .yearly {
                     Divider().padding(.leading, 46)
                     Button {
                         showAdvancedRecur.toggle()
@@ -2362,8 +2379,8 @@ struct EditBillView: View {
 
                 let cycle = RecurrenceCycle(rawValue: draft.recurCycleRaw.wrappedValue) ?? .monthly
                 // >>> CHANGE-[2026-09-01 10:45:00]-[账单页周期生成日默认收起] 开始
-                // 与编辑页同款：生成日默认收起；自定义周期强制展开间隔
-                let advancedVisible = draft.showAdvancedRecur.wrappedValue || cycle == .custom
+                // 与编辑页同款：生成日默认收起；自定义周期/每周强制展开
+                let advancedVisible = draft.showAdvancedRecur.wrappedValue || cycle == .custom || cycle == .weekly
                 if advancedVisible {
                     if cycle == .monthly || cycle == .quarterly || cycle == .yearly {
                         Divider().padding(.leading, 46)
@@ -2420,11 +2437,28 @@ struct EditBillView: View {
                         }
                         .padding(.vertical, 10)
                         .padding(.horizontal, 14)
+                    } else if cycle == .weekly {
+                        Divider().padding(.leading, 46)
+                        HStack(spacing: 12) {
+                            Image(systemName: "calendar")
+                                .font(AIATheme.Font.subhead)
+                                .foregroundStyle(AIATheme.muted)
+                                .frame(width: 20, alignment: .center)
+                            Text("每周")
+                                .font(AIATheme.Font.callout)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text("星期 \(weekdayText(from: draft.time.wrappedValue))")
+                                .font(AIATheme.Font.subhead.weight(.medium))
+                                .foregroundStyle(AIATheme.sub)
+                        }
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 14)
                     }
                 }
 
-                // 高级入口：自定义周期下间隔已强制可见，无需该入口
-                if cycle != .custom {
+                // 高级入口：自定义和每周的细项已强制可见，只有月/季/年需要入口
+                if cycle == .monthly || cycle == .quarterly || cycle == .yearly {
                     Divider().padding(.leading, 46)
                     Button {
                         draft.showAdvancedRecur.wrappedValue.toggle()
@@ -2483,6 +2517,15 @@ struct EditBillView: View {
         }
     }
     // <<< CHANGE-[2026-08-30 13:43:27]-[编辑页周期开关] 结束
+
+    // >>> CHANGE-[2026-09-01 11:00:00]-[每周默认展开显示星期几] 开始
+    /// 把日期转成「星期 X」文字，供编辑/添加页「每周」行显示。
+    private func weekdayText(from date: Date) -> String {
+        let names = ["日", "一", "二", "三", "四", "五", "六"]
+        let idx = max(0, min(Calendar.current.component(.weekday, from: date) - 1, 6))
+        return names[idx]
+    }
+    // <<< CHANGE-[2026-09-01 11:00:00]-[每周默认展开显示星期几] 结束
 
     private var deleteCard: some View {
         Button {

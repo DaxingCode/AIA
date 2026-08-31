@@ -280,8 +280,9 @@ struct RecurringRuleEditView: View {
 
     // >>> CHANGE-[2026-09-01 10:30:00]-[自定义周期强制展开间隔] 开始
     /// 高级细项（生成日 / 每周 / 间隔）是否可见。
-    /// 自定义周期必须指定间隔才能确定周期长度，因此强制可见。
-    private var advancedCycleVisible: Bool { showAdvancedCycle || cycle == .custom }
+    /// - 自定义周期必须指定间隔才能确定周期长度，强制可见。
+    /// - 每周没有「号数」概念，核心信息是「星期几」，也强制可见以便用户确认。
+    private var advancedCycleVisible: Bool { showAdvancedCycle || cycle == .custom || cycle == .weekly }
     // <<< CHANGE-[2026-09-01 10:30:00]-[自定义周期强制展开间隔] 结束
 
     private var amountValue: Double { Double(amountText) ?? 0 }
@@ -439,12 +440,10 @@ struct RecurringRuleEditView: View {
                         }
 
                         // >>> CHANGE-[2026-09-01 10:00:00]-[周期规则生成日默认收起] 开始
-                        // 高级选项入口：点击展开「生成日 / 每周」手动调整。
+                        // 高级选项入口：点击展开「生成日」手动调整。
                         // 编辑已有规则且与原默认(取自首次生成)不符时，自动展开以保留用户设定。
-                        // >>> CHANGE-[2026-09-01 10:30:00]-[自定义周期强制展开间隔] 开始
-                        // 自定义周期下间隔已强制可见，无需再显示该入口，直接隐藏。
-                        // <<< CHANGE-[2026-09-01 10:30:00]-[自定义周期强制展开间隔] 结束
-                        if cycle != .custom {
+                        // 自定义和每周的细项已强制可见，无需该入口；只有月/季/年需要入口。
+                        if cycle == .monthly || cycle == .quarterly || cycle == .yearly {
                             Divider()
                                 .padding(.leading, 42)
                                 .background(AIATheme.hairline)
