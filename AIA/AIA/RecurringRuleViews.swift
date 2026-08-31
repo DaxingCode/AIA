@@ -4,12 +4,6 @@
 import SwiftUI
 import SwiftData
 
-// >>> CHANGE-[2026-08-31 23:50:48]-[周期账单分类补齐] 开始
-// 常用分类（与账单编辑页一致，完整 27 类含保险/运动/数码/云服务等），供一键选择。
-// 此前只用 14 类精简版，缺「保险」等 13 个分类，导致周期账单无法选到正确分类。
-private let recurringCategories = billCategoryOptions
-// <<< CHANGE-[2026-08-31 23:50:48]-[周期账单分类补齐] 结束
-
 struct RecurringRuleListView: View {
     @Environment(\.modelContext) private var context
     // >>> CHANGE-[2026-08-31 23:34:46]-[周期规则按下次生成日期排序] 开始
@@ -221,6 +215,9 @@ struct RecurringRuleEditView: View {
     @State private var cycleRaw: String
     @State private var customValue: Int
     @State private var customUnitRaw: String
+    // >>> CHANGE-[2026-08-31 23:52:00]-[周期账单分类改下拉选择] 开始
+    @State private var showCategoryPicker = false
+    // <<< CHANGE-[2026-08-31 23:52:00]-[周期账单分类改下拉选择] 结束
     @State private var showDeleteConfirm = false
 
     // >>> CHANGE-[2026-08-31 23:29:43]-[周期规则日期显示补齐] 开始
@@ -310,8 +307,10 @@ struct RecurringRuleEditView: View {
                     .card()
 
                     // MARK: 分类
+                    // >>> CHANGE-[2026-08-31 23:52:00]-[周期账单分类改下拉选择] 开始
+                    // 与账单编辑页一致：一行显示当前分类，点击弹「选择分类」sheet（按使用次数排序）
                     SectionTitle(text: "分类")
-                    categoryGrid
+                    categoryRow
 
                     // MARK: 生成规则
                     SectionTitle(text: "生成规则")
@@ -450,6 +449,11 @@ struct RecurringRuleEditView: View {
             } message: {
                 Text("删除后不再自动生成，已生成的历史账单仍会保留。")
             }
+            // >>> CHANGE-[2026-08-31 23:52:00]-[周期账单分类改下拉选择] 开始
+            .sheet(isPresented: $showCategoryPicker) {
+                BillCategoryPickerSheet(selection: $category)
+            }
+            // <<< CHANGE-[2026-08-31 23:52:00]-[周期账单分类改下拉选择] 结束
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("取消") { dismiss() }
@@ -500,37 +504,41 @@ struct RecurringRuleEditView: View {
         }
     }
 
-    // MARK: - 分类网格
-    private var categoryGrid: some View {
-        let columns = [GridItem(.adaptive(minimum: 68), spacing: 10)]
-        return LazyVGrid(columns: columns, spacing: 10) {
-            ForEach(recurringCategories, id: \.self) { cat in
-                let selected = category == cat
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        category = cat
-                    }
-                } label: {
-                    VStack(spacing: 6) {
-                        Text(BillCategoryHelpers.icon(for: cat))
-                            .font(AIATheme.Font.title1)
-                        Text(cat)
-                            .font(.system(size: 12, weight: selected ? .semibold : .regular))
-                    }
-                    .foregroundStyle(selected ? .white : AIATheme.sub)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(selected ? AIATheme.bill : AIATheme.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
-                    .overlay(RoundedRectangle(cornerRadius: AIATheme.rSM).stroke(selected ? Color.clear : AIATheme.hairline, lineWidth: 1))
+    // >>> CHANGE-[2026-08-31 23:52:00]-[周期账单分类改下拉选择] 开始
+    // 与账单编辑页 categoryRow 同款：一行显示图标+当前分类，点击弹 BillCategoryPickerSheet（按使用次数排序）
+    private var categoryRow: some View {
+        let selected = category.trimmingCharacters(in: .whitespaces).isEmpty ? "其他" : category
+        return Button {
+            showCategoryPicker = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "tag.fill")
+                    .font(AIATheme.Font.subhead)
+                    .foregroundStyle(AIATheme.muted)
+                    .frame(width: 20, alignment: .center)
+                Text("分类")
+                    .font(AIATheme.Font.callout)
+                    .foregroundStyle(.primary)
+                Spacer()
+                HStack(spacing: 6) {
+                    Text(BillCategoryHelpers.icon(for: selected))
+                        .font(AIATheme.Font.subhead)
+                    Text(selected)
+                        .font(AIATheme.Font.headline.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Image(systemName: "chevron.right")
+                        .font(AIATheme.Font.caption.weight(.semibold))
+                        .foregroundStyle(AIATheme.muted)
                 }
-                .buttonStyle(.plain)
             }
+            .padding(12)
+            .background(AIATheme.surfaceSecondary)
+            .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+            .contentShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
         }
-        .padding(12)
-        .background(AIATheme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: AIATheme.rMD))
+        .buttonStyle(.plain)
     }
+    // <<< CHANGE-[2026-08-31 23:52:00]-[周期账单分类改下拉选择] 结束
 
     // MARK: - 规则行
     private func ruleRow<Content: View>(title: String, icon: String,
