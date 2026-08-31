@@ -629,7 +629,14 @@ struct FoodListView: View {
             baseSugar: ref?.sugar,
             baseSodium: ref?.sodium
         )
-        context.insert(entry)   // SwiftData autosave 自动持久化，无需手动 save()
+        context.insert(entry)
+        // >>> CHANGE-[2026-08-27 13:05:00]-[常吃食物临时ID编辑崩溃] 开始
+        // 原因：insert 后无显式 save()，靠 SwiftData autosave 异步落盘，那一瞬 entry 是 temporaryIdentifier。
+        //       若此时点编辑，编辑页收到临时 ID，body 重渲染读其属性 → fatal("model instance was
+        //       invalidated... temporary identifier")。立即落盘让实例变永久 ID，从根消除临时窗口。
+        // 回退：删除本行，恢复仅靠 autosave。
+        try? context.save()
+        // <<< CHANGE-[2026-08-27 13:05:00]-[常吃食物临时ID编辑崩溃] 结束
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         // 手动新增饮食记录后触发增量同步，尽快推上云端，绑定后小程序可见
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
@@ -2767,13 +2774,22 @@ struct BillListView: View {
                                 .font(AIATheme.Font.subhead.weight(.medium))
                         )
                 }
+                // >>> CHANGE-[2026-08-24 16:07:54]-[账单分类图例金额截断] 开始
+                // 原因：原 .frame(width: 90) 把图例区硬限 90pt，5 位数金额(如 ¥10,472) 超出后被 HStack 的 Spacer 挤压截断，
+                //       表现为「¥10,2...」漏显。改为 maxWidth 自然展开 + 金额允许缩放，彻底防溢出。
+                // 二次微调（同日同主题）：去限宽后图例顶到卡边、文字贴左右，加 .padding(.horizontal, 10) 留呼吸。
+                // 回退：删本块标记并恢复 .frame(width: 90) 即回旧观感（但 5 位数仍会截断）。
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(Array(categories.prefix(3)), id: \.cat) { item in
                         HStack(spacing: 4) {
                             Circle().fill(BillCategoryHelpers.color(for: item.cat)).frame(width: 6, height: 6)
                             Text(item.cat).font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
-                            Spacer()
-                            Text("¥\(Int(item.sum))").font(AIATheme.Font.micro.weight(.medium))
+                            Spacer(minLength: 4)
+                            Text("¥\(Int(item.sum))")
+                                .font(AIATheme.Font.micro.weight(.medium))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+                                .fixedSize(horizontal: true, vertical: false)
                         }
                     }
                     if categories.isEmpty {
@@ -2781,7 +2797,9 @@ struct BillListView: View {
                             .font(AIATheme.Font.micro).foregroundStyle(AIATheme.sub)
                     }
                 }
-                .frame(width: 90)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                // <<< CHANGE-[2026-08-24 16:07:54]-[账单分类图例金额截断] 结束
             }
             .frame(maxWidth: .infinity)
         }
@@ -4392,6 +4410,15 @@ struct ReminderListView: View {
         // 直接同步改 done，@Query 会在下一帧自然重 fetch 一次，当前行从列表消失即可。
         r.done.toggle()
         if !wasDone { UsageAnalytics.log("todo_done") }
+        // >>> CHANGE-[2026-08-24 12:34:50]-[完成待办立即取消通知] 开始
+        // 原因：原 cancel(r) 包在 DispatchQueue.main.async，下一帧 @Query 重排可能把 r 变成 fault，
+        //       syncId 取不到正确值 → 通知删不掉 → 重复待办今天仍响。
+        //       修复：同步段先抓取 syncId 字符串，立即取消（用 bySyncId 重载，不依赖异步闭包里的 r）。
+        let finishedSyncId = r.syncId.uuidString
+        if !wasDone {
+            ReminderNotificationManager.cancel(bySyncId: finishedSyncId)
+        }
+        // <<< CHANGE-[2026-08-24 12:34:50]-[完成待办立即取消通知] 结束
         // 通知调度延后到下一帧，不阻塞当前点击事件。
         // 显式 context.save() 也去掉，由 SwiftData autosave 处理。
         DispatchQueue.main.async {
@@ -4399,8 +4426,7 @@ struct ReminderListView: View {
                 // 之前已完成，现在切回未完成：重新排程提醒
                 ReminderNotificationManager.schedule(r)
             } else {
-                // 之前未完成，现在标记为已完成：取消提醒
-                ReminderNotificationManager.cancel(r)
+                // 之前未完成，现在标记为已完成：取消提醒（已同步段处理）
                 // 如果是重复待办，自动创建下一个周期的新实例
                 createNextRepeatReminder(r)
             }
@@ -4798,7 +4824,13 @@ private struct DietAnalysisView: View {
     // 回退: 删本段,恢复原判(5 元组 periodAvg 无 carb/fat)。
     private var periodAvg: (cal: Double, protein: Double, carb: Double, fat: Double, fiber: Double, sugar: Double, sodium: Double) {
         let (s, e) = period.range()
-        let dayCount = max(1, Calendar.current.dateComponents([.day], from: s, to: e).day ?? 1)
+        // >>> CHANGE-[2026-08-27 14:42:18]-饮食分析日均改按记录天数 开始
+        // 原因: 原 dayCount 用区间日历天数(本周=7/本月=整月)，未记录的日子会拉低日均，导致"本周平均达成"永远偏低。
+        // 修法: 改为去重后的实际记录天数，无记录时回落 1 防除零。
+        // 回退: 恢复 let dayCount = max(1, Calendar.current.dateComponents([.day], from: s, to: e).day ?? 1)
+        let recordedDays = Set(periodFoods.map { Calendar.current.startOfDay(for: $0.date) }).count
+        let dayCount = max(1, recordedDays)
+        // <<< CHANGE-[2026-08-27 14:42:18]-饮食分析日均改按记录天数 结束
         var calSum = 0.0, proteinSum = 0.0, carbSum = 0.0, fatSum = 0.0, fiberSum = 0.0, sugarSum = 0.0, sodiumSum = 0.0
         for f in periodFoods {
             calSum += f.calories
@@ -4846,7 +4878,13 @@ private struct DietAnalysisView: View {
     /// 颜色：前 4 项按宏量素语义色；后 4 项同色
     private var nutritionCards: [(label: String, value: String, color: Color)] {
         let (s, e) = period.range()
-        let dayCount = max(1, Calendar.current.dateComponents([.day], from: s, to: e).day ?? 1)
+        // >>> CHANGE-[2026-08-27 14:42:18]-饮食分析日均改按记录天数 开始
+        // 原因: 与 periodAvg 同步，营养小卡日均也按实际记录天数除，保证两处口径一致。
+        // 修法: 同 periodAvg，用去重后的实际记录天数，无记录时回落 1。
+        // 回退: 恢复 let dayCount = max(1, Calendar.current.dateComponents([.day], from: s, to: e).day ?? 1)
+        let recordedDays = Set(periodFoods.map { Calendar.current.startOfDay(for: $0.date) }).count
+        let dayCount = max(1, recordedDays)
+        // <<< CHANGE-[2026-08-27 14:42:18]-饮食分析日均改按记录天数 结束
         let sum = periodFoods.reduce((cal: 0.0, p: 0.0, c: 0.0, f: 0.0, fiber: 0.0, sugar: 0.0, sodium: 0.0, water: 0.0)) { acc, f in
             (acc.cal + f.calories, acc.p + f.protein, acc.c + f.carbs, acc.f + f.fat,
              acc.fiber + f.fiber, acc.sugar + f.sugar, acc.sodium + f.sodium, acc.water + f.waterIntake)
@@ -4895,17 +4933,7 @@ private struct DietAnalysisView: View {
                     )
                 }
 
-                // 4. 平均每日营养摄入：3 列网格（与饮食记录页 MacroCard 网格列数一致）
-                SectionTitle(text: "平均每日营养摄入", trailing: "基于周期内记录自动计算")
-                LazyVGrid(columns: [
-                    GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())
-                ], spacing: 8) {
-                    ForEach(nutritionCards, id: \.label) { c in
-                        DietNutritionCard(label: c.label, value: c.value, color: c.color)
-                    }
-                }
-
-                // 5. 目标达成（减脂/增肌/维持 对比层）：热量/蛋白目标 = TDEE × 系数 / 体重 × g/kg；
+                // 4. 目标达成（减脂/增肌/维持 对比层）：热量/蛋白目标 = TDEE × 系数 / 体重 × g/kg；
                 //    纤维/糖/钠目标按「目标热量（calorieTarget = TDEE × 系数，即本卡顶部显示的“目标热量”）」线性缩放，与热量行同源一致。
                 SectionTitle(text: NSLocalizedString("diet.analysis.goalTarget", comment: ""), trailing: nil)
                 if let cal = calorieTarget {
@@ -4935,6 +4963,16 @@ private struct DietAnalysisView: View {
                     )
                 } else {
                     DietAnalysisNoWeightCard()
+                }
+
+                // 5. 平均每日营养摄入：3 列网格（与饮食记录页 MacroCard 网格列数一致）
+                SectionTitle(text: "平均每日营养摄入", trailing: "基于周期内记录自动计算")
+                LazyVGrid(columns: [
+                    GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())
+                ], spacing: 8) {
+                    ForEach(nutritionCards, id: \.label) { c in
+                        DietNutritionCard(label: c.label, value: c.value, color: c.color)
+                    }
                 }
 
                 // 底部留白

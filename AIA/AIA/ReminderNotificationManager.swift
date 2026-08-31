@@ -124,10 +124,21 @@ enum ReminderNotificationManager {
 
     /// 取消某条待办的所有 pending 通知（覆盖所有时间点，循环上限放宽到 8 以兼容 4 个默认提醒）
     static func cancel(_ reminder: Reminder) {
-        var ids = ["reminder-\(reminder.syncId.uuidString)"] // 旧版单通知 id
-        for i in 0..<8 { ids.append("reminder-\(reminder.syncId.uuidString)-\(i)") }
+        cancel(bySyncId: reminder.syncId.uuidString)
+    }
+
+    /// >>> CHANGE-[2026-08-24 12:34:50]-[完成待办立即取消通知] 开始
+    /// 原因：原 cancel(_ reminder:) 在调用方把 reminder 包进 DispatchQueue.main.async 闭包时，
+    ///       下一帧 @Query 重排可能把该 @Model 实例变成 fault，reminder.syncId 取不到正确值，
+    ///       导致拼出的通知 id 错误、系统里那条通知删不掉（重复待办今天仍响）。
+    ///       新增按 syncId 字符串取消的重载，调用方在同步段先抓取 syncId 再传入，避免 fault 风险。
+    /// 回退：删除本函数即可，cancel(_ reminder:) 仍可用。
+    static func cancel(bySyncId syncId: String) {
+        var ids = ["reminder-\(syncId)"] // 旧版单通知 id
+        for i in 0..<8 { ids.append("reminder-\(syncId)-\(i)") }
         center.removePendingNotificationRequests(withIdentifiers: ids)
     }
+    /// <<< CHANGE-[2026-08-24 12:34:50]-[完成待办立即取消通知] 结束
 
     /// 发送一条测试通知（延迟 seconds 秒），用于验证授权与横幅弹出是否正常。
     /// completion 回调在主线程返回是否成功排程（false 表示未授权，需去系统设置手动开启）。
@@ -297,6 +308,11 @@ extension ReminderNotificationManager {
         // 回退: 删除本段 + 删除文件末尾 sleepReminder extension 即可。
         rescheduleSleepReminder()
         // <<< CHANGE-[2026-08-18 18:28:46]-[睡眠提醒排程] 结束
+        // >>> CHANGE-[2026-08-24 09:26:09]-[每天记录提醒排程] 开始
+        // 原因: 新增"每天记录提醒"独立功能，默认开+默认9:00，点通知回首页宫格。
+        // 回退: 删除本段 + 删除文件末尾 morningReminder extension 即可。
+        rescheduleMorningReminder()
+        // <<< CHANGE-[2026-08-24 09:26:09]-[每天记录提醒排程] 结束
     }
 }
 
@@ -336,6 +352,42 @@ extension ReminderNotificationManager {
     }
 }
 // <<< CHANGE-[2026-08-18 18:28:46]-[睡眠提醒扩展] 结束
+
+// >>> CHANGE-[2026-08-24 09:26:09]-[每天记录提醒扩展] 开始
+// MARK: - 每天记录提醒（独立开关，默认开、默认 9:00）
+// 早上发「美好的一天从好记开始」早安问候，点通知直接回首页宫格。
+extension ReminderNotificationManager {
+    static let morningReminderID = "morning-reminder"
+    static let morningEnabledKey = "morningReminderEnabled"
+    static let morningHourKey = "morningReminderHour"
+    static let morningMinuteKey = "morningReminderMinute"
+
+    /// 从 UserDefaults 读开关/时间，开启则排程、关闭则取消。identifier 固定 → 幂等覆盖。
+    static func rescheduleMorningReminder() {
+        guard UserDefaults.standard.bool(forKey: morningEnabledKey) else {
+            cancelMorningReminder()
+            return
+        }
+        let h = UserDefaults.standard.integer(forKey: morningHourKey)
+        let m = UserDefaults.standard.integer(forKey: morningMinuteKey)
+        let content = UNMutableNotificationContent()
+        content.title = "美好的一天从「好记」开始"
+        content.body = "账单、待办、饮食、健康都能帮你记☺️"
+        content.sound = .default
+        // route=home → ContentView.consumeNotificationRoute 已有拦截，弹回首页宫格主界面。
+        content.userInfo = ["route": "home"]
+        let trigger = makeDailyTrigger(hour: h, minute: m)
+        let request = UNNotificationRequest(identifier: morningReminderID, content: content, trigger: trigger)
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error { print("[通知] 每天记录提醒排程失败: \(error)") }
+        }
+    }
+
+    static func cancelMorningReminder() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [morningReminderID])
+    }
+}
+// <<< CHANGE-[2026-08-24 09:26:09]-[每天记录提醒扩展] 结束
 
 // MARK: - 健康目标傍晚提醒
 /// 傍晚（默认 19:00）发一条轻提醒，提示用户今天步数 / 饮水目标还没完成，

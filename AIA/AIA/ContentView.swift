@@ -29,6 +29,13 @@ enum HomeRoute: Hashable {
     case bodyData
     case healthGoals
     case billDashboard(BillDashboardMode)
+    // >>> CHANGE-[2026-08-24 17:59:13]-[账单分类点击跳分类明细] 开始
+    // 原因：账单仪表盘分类构成页点击某一分类，需跳到"仅该分类的账单列表"。
+    //      新增携带快照参数的路由（category/periodStart/periodEnd/onlyIncome），跳转时深拷贝父页当前值，
+    //      回退后父页时间/类型变化不影响已开的列表页。
+    // 回退：删本行 + routeDestination 内对应分支 + BillCategoryListView.swift 即可整体移除该功能。
+    case billCategory(category: String, periodStart: Date, periodEnd: Date, onlyIncome: Bool)
+    // <<< CHANGE-[2026-08-24 17:59:13]-[账单分类点击跳分类明细] 结束
     case recognitionRecords
     // Settings 子页（2026-07-29 从 SettingsView 闭包式 NavigationLink 改造为路由推送）
     case homeLayoutSettings
@@ -387,6 +394,13 @@ struct ContentView: View {
             HealthGoalsView()
         case .billDashboard(let mode):
             BillDashboardView(mode: mode)
+        // >>> CHANGE-[2026-08-24 17:59:13]-[账单分类点击跳分类明细] 开始
+        case let .billCategory(category, periodStart, periodEnd, onlyIncome):
+            BillCategoryListView(category: category,
+                                 periodStart: periodStart,
+                                 periodEnd: periodEnd,
+                                 onlyIncome: onlyIncome)
+        // <<< CHANGE-[2026-08-24 17:59:13]-[账单分类点击跳分类明细] 结束
         case .recognitionRecords:
             RecognitionRecordsView()
         case .homeLayoutSettings:
@@ -2557,20 +2571,11 @@ struct ContentView: View {
             // 用 ButtonStyle 实现，与 Button 点击共存，不吞点击，且自动遵守「减弱动态效果」。
             .buttonStyle(PressableCardStyle())
 
-            // 空状态提示（点击记录）
-            if isEmpty {
-                HStack(spacing: 4) {
-                    Image(systemName: "hand.tap")
-                        .font(AIATheme.Font.micro.weight(.semibold))
-                    Text("点击记录")
-                        .font(AIATheme.Font.micro.weight(.medium))
-                }
-                .foregroundStyle(accent)
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(accent.opacity(0.12))
-                .clipShape(Capsule())
-                .allowsHitTesting(false)
-            }
+            // >>> CHANGE-[2026-08-26 14:00:00]-移除首页宫格"点击记录"假按钮标签 开始
+            // 原因: 原空状态用圆角胶囊 + hand.tap 图标展示"点击记录"，外观极似按钮但 .allowsHitTesting(false) 完全不接收点击，审核员（iPad 模式）误判为"占位按钮/功能不完整"触发 Guideline 2.1.0 App Completeness。整张宫格本就可点进模块，无需此误导标签。
+            // 回退: 恢复下方被删除的 if isEmpty { HStack ... } 胶囊标签即可
+            // 空状态提示已彻底移除（用户要求连低调文字也去掉），仅凭整张宫格可点进入模块即可。
+            // <<< CHANGE-[2026-08-26 14:00:00]-移除首页宫格"点击记录"假按钮标签 结束
 
             // 右上角小按钮（睡眠/饮水/隐私眼等）：用 .overlay(alignment:.topTrailing) 盖在父卡片之上，
             // 点击命中必然独立，不会被大卡片的 contentShape 吞掉。

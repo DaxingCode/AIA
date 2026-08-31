@@ -311,7 +311,21 @@ struct BillDashboardView: View {
                     let items = categoryBreakdown
                     ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                         let pct = totalAmountForCurrentType > 0 ? item.sum / totalAmountForCurrentType : 0
-                        categoryRow(item: item, percent: pct)
+                        // >>> CHANGE-[2026-08-24 17:59:13]-[账单分类点击跳分类明细] 开始
+                        // 整行可点：跳转"仅该分类的账单列表"，携带当前周期/收支类型的快照。
+                        Button {
+                            NavigationRouter.shared.navigate(.billCategory(
+                                category: item.cat,
+                                periodStart: periodStart,
+                                periodEnd: periodEnd,
+                                onlyIncome: showIncome
+                            ))
+                        } label: {
+                            categoryRow(item: item, percent: pct)
+                        }
+                        .buttonStyle(.plain)
+                        .contentShape(Rectangle())
+                        // <<< CHANGE-[2026-08-24 17:59:13]-[账单分类点击跳分类明细] 结束
                         if index < items.count - 1 {
                             Divider().padding(.leading, 38)
                         }

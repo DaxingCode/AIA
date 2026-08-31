@@ -64,7 +64,7 @@ struct SettingsView: View {
                     .foregroundStyle(.primary)
                 Spacer()
             }
-            Toggle("提醒我记账 / 记饮食 / 记健康 / 看待办", isOn: enabled)
+            Toggle("每日小结提醒", isOn: enabled)
                 .font(AIATheme.Font.subhead)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
@@ -104,6 +104,36 @@ struct SettingsView: View {
                 DatePicker("提醒时间", selection: healthTimeBinding, displayedComponents: .hourAndMinute)
                     .font(AIATheme.Font.subhead)
             }
+            // >>> CHANGE-[2026-08-24 09:26:09]-[每天记录提醒设置项] 开始
+            // 每天记录提醒：独立子开关（默认开、默认9:00），点通知进首页。
+            let morningEnabled = Binding<Bool>(
+                get: { UserDefaults.standard.bool(forKey: ReminderNotificationManager.morningEnabledKey) },
+                set: { on in
+                    UserDefaults.standard.set(on, forKey: ReminderNotificationManager.morningEnabledKey)
+                    ReminderNotificationManager.rescheduleFromStoredDefaults()
+                }
+            )
+            Divider().padding(.vertical, 4)
+            Toggle("每天记录提醒", isOn: morningEnabled)
+                .font(AIATheme.Font.subhead)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            let morningHour = UserDefaults.standard.integer(forKey: ReminderNotificationManager.morningHourKey)
+            let morningMin = UserDefaults.standard.integer(forKey: ReminderNotificationManager.morningMinuteKey)
+            let morningTimeBinding = Binding<Date>(
+                get: { Calendar.current.date(bySettingHour: morningHour, minute: morningMin, second: 0, of: Date()) ?? Date() },
+                set: { newDate in
+                    let c = Calendar.current.dateComponents([.hour, .minute], from: newDate)
+                    UserDefaults.standard.set(c.hour ?? 9, forKey: ReminderNotificationManager.morningHourKey)
+                    UserDefaults.standard.set(c.minute ?? 0, forKey: ReminderNotificationManager.morningMinuteKey)
+                    ReminderNotificationManager.rescheduleFromStoredDefaults()
+                }
+            )
+            if morningEnabled.wrappedValue {
+                DatePicker("提醒时间", selection: morningTimeBinding, displayedComponents: .hourAndMinute)
+                    .font(AIATheme.Font.subhead)
+            }
+            // <<< CHANGE-[2026-08-24 09:26:09]-[每天记录提醒设置项] 结束
         }
         .padding(14)
         .card()

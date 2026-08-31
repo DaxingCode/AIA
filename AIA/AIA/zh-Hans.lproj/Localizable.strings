@@ -49,6 +49,8 @@
 "bill.details" = "账单详情";
 "bill.searchMerchant" = "搜索商户、金额、分类、日期、备注";
 "bill.searchEmpty" = "未找到匹配“%@”的账单";
+"bill.categoryCount" = "%d 笔";
+"bill.categoryEmpty" = "该周期内没有“%@”的记录了";
 "bill.carousel.hint" = "点击圆环查看详情 / 左右滑动查看更多";
 "bill.grid.hint" = "点击圆环查看详情";
 "bill.empty.title" = "没有%@账单记录";
@@ -161,7 +163,7 @@
 "fitness.goal.cut" = "减脂";
 "fitness.goal.bulk" = "增肌";
 "fitness.goal.maintain" = "维持";
-"diet.analysis.goalTarget" = "目标达成";
+"diet.analysis.goalTarget" = "平均每日摄入情况";
 "diet.analysis.calorieTarget" = "目标热量";
 "diet.analysis.proteinTarget" = "蛋白推荐";
 "diet.analysis.goalMet" = "达标";

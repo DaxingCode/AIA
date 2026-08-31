@@ -239,12 +239,26 @@ struct BodyDataView: View {
                 currentColumn(value: currentBMI.map { String(format: "%.1f", $0) } ?? "—",
                               unit: "", label: "BMI")
             }
+            // >>> CHANGE-[2026-08-26 14:05:00]-BMI加WHO来源引用 开始
+            bmiSourceLink
+            // <<< CHANGE-[2026-08-26 14:05:00]-BMI加WHO来源引用 结束
         }
         .padding(16)
         .frame(maxWidth: .infinity)
         .background(AIATheme.health)
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
+
+    // >>> CHANGE-[2026-08-26 14:05:00]-BMI加WHO来源引用 开始
+    // 原因: 审核员据 Guideline 1.4.1 要求健康/医疗计算必须展示数据来源引用（BMI 属此类）。原 BMI 仅公式展示，无来源链接。
+    // 回退: 删除下方 bmiSourceLink 视图 + 在调用处移除即可
+    private var bmiSourceLink: some View {
+        Link("BMI 依据 WHO 标准计算", destination: URL(string: "https://www.who.int/news-room/fact-sheets/detail/obesity-and-overweight")!)
+            .font(AIATheme.Font.micro)
+            .foregroundStyle(.white.opacity(0.85))
+            .padding(.top, 4)
+    }
+    // <<< CHANGE-[2026-08-26 14:05:00]-BMI加WHO来源引用 结束
 
     private var divider: some View {
         Rectangle()
