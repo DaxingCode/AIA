@@ -309,8 +309,10 @@ struct RecurringRuleEditView: View {
                     // MARK: 分类
                     // >>> CHANGE-[2026-08-31 23:52:00]-[周期账单分类改下拉选择] 开始
                     // 与账单编辑页一致：一行显示当前分类，点击弹「选择分类」sheet（按使用次数排序）
+                    // 视觉与「生成规则」区块对齐：ruleRow 同款圆底图标 + 外层 .card() 统一卡片底
                     SectionTitle(text: "分类")
                     categoryRow
+                        .card()
 
                     // MARK: 生成规则
                     SectionTitle(text: "生成规则")
@@ -505,21 +507,28 @@ struct RecurringRuleEditView: View {
     }
 
     // >>> CHANGE-[2026-08-31 23:52:00]-[周期账单分类改下拉选择] 开始
-    // 与账单编辑页 categoryRow 同款：一行显示图标+当前分类，点击弹 BillCategoryPickerSheet（按使用次数排序）
+    // >>> CHANGE-[2026-08-31 23:55:00]-[周期账单分类UI对齐准则] 开始
+    // 视觉与「生成规则」区块完全对齐：ruleRow 同款圆底图标(bill.opacity 0.12 圆形底) +
+    // 透明行底（卡片底由外层 .card() 统一提供）+ 右侧当前分类 + chevron。
+    // 整行可点：.contentShape 撑满 + PressableCardStyle 按压反馈（项目可点卡片准则）。
     private var categoryRow: some View {
         let selected = category.trimmingCharacters(in: .whitespaces).isEmpty ? "其他" : category
         return Button {
             showCategoryPicker = true
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: "tag.fill")
-                    .font(AIATheme.Font.subhead)
-                    .foregroundStyle(AIATheme.muted)
-                    .frame(width: 20, alignment: .center)
+                ZStack {
+                    Circle()
+                        .fill(AIATheme.bill.opacity(0.12))
+                        .frame(width: 30, height: 30)
+                    Image(systemName: "tag.fill")
+                        .font(AIATheme.Font.footnote.weight(.medium))
+                        .foregroundStyle(AIATheme.bill)
+                }
                 Text("分类")
-                    .font(AIATheme.Font.callout)
+                    .font(AIATheme.Font.callout.weight(.medium))
                     .foregroundStyle(.primary)
-                Spacer()
+                Spacer(minLength: 0)
                 HStack(spacing: 6) {
                     Text(BillCategoryHelpers.icon(for: selected))
                         .font(AIATheme.Font.subhead)
@@ -532,12 +541,11 @@ struct RecurringRuleEditView: View {
                 }
             }
             .padding(12)
-            .background(AIATheme.surfaceSecondary)
-            .clipShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
-            .contentShape(RoundedRectangle(cornerRadius: AIATheme.rSM))
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableCardStyle())
     }
+    // <<< CHANGE-[2026-08-31 23:55:00]-[周期账单分类UI对齐准则] 结束
     // <<< CHANGE-[2026-08-31 23:52:00]-[周期账单分类改下拉选择] 结束
 
     // MARK: - 规则行
