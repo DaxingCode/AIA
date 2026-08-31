@@ -29,19 +29,21 @@ public enum RecurrenceCycle: String, Codable, CaseIterable, Identifiable {
 
 /// 自定义周期的单位。
 public enum RecurrenceUnit: String, Codable, CaseIterable, Identifiable {
-    case day   = "day"
-    case week  = "week"
-    case month = "month"
-    case year  = "year"
+    case day     = "day"
+    case week    = "week"
+    case month   = "month"
+    case quarter = "quarter"
+    case year    = "year"
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
-        case .day:   return "天"
-        case .week:  return "周"
-        case .month: return "月"
-        case .year:  return "年"
+        case .day:     return "天"
+        case .week:    return "周"
+        case .month:   return "月"
+        case .quarter: return "季"
+        case .year:    return "年"
         }
     }
 }
@@ -71,7 +73,7 @@ public enum RecurrenceUnit: String, Codable, CaseIterable, Identifiable {
     public var cycleRaw: String?
     /// 自定义周期数值（仅 custom 有效，>=1）
     public var customValue: Int?
-    /// 自定义周期单位：day/week/month/year（仅 custom 有效）
+    /// 自定义周期单位：day/week/month/quarter/year（仅 custom 有效）
     public var customUnitRaw: String?
 
     /// 周期类型（计算属性，不存盘）。

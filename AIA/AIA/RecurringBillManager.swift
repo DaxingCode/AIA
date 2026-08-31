@@ -167,14 +167,19 @@ enum RecurringBillManager {
     private static func nextCustom(after: Date, rule: RecurringRule) -> Date? {
         let cal = Calendar.current
         let unit: Calendar.Component
+        // >>> CHANGE-[2026-09-01 11:20:00]-[自定义间隔支持季] 开始
+        // Calendar 没有 .quarter 组件，「季」按 3 个月折算：单位用 .month，步长 value × 3。
+        // <<< CHANGE-[2026-09-01 11:20:00]-[自定义间隔支持季] 结束
+        let step: Int
         switch rule.customUnit {
-        case .day:   unit = .day
-        case .week:  unit = .weekOfYear
-        case .month: unit = .month
-        case .year:  unit = .year
-        @unknown default: unit = .day
+        case .day:     unit = .day;        step = 1
+        case .week:    unit = .weekOfYear; step = 1
+        case .month:   unit = .month;      step = 1
+        case .quarter: unit = .month;      step = 3
+        case .year:    unit = .year;       step = 1
+        @unknown default: unit = .day;     step = 1
         }
-        let value = max(rule.customValue ?? 1, 1)
+        let value = max(rule.customValue ?? 1, 1) * step
 
         // 从 startDate 开始，按固定间隔生成，找到第一个严格大于 after 的日期
         var current = rule.startDate
