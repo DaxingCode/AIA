@@ -6,6 +6,12 @@ import Combine
 import PhotosUI
 import MessageUI
 
+extension Bundle {
+    var appVersion: String {
+        infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+    }
+}
+
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -781,7 +787,7 @@ struct SettingsView: View {
                     .font(AIATheme.Font.callout.weight(.medium))
                     .foregroundStyle(.primary)
                 Spacer()
-                Text("好记AI 1.0.1")
+                Text("好记AI \(Bundle.main.appVersion)")
                     .font(AIATheme.Font.footnote)
                     .foregroundStyle(AIATheme.muted)
             }
