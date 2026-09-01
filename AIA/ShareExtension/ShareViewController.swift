@@ -5,6 +5,7 @@
 // >>> CHANGE-[2026-08-21 10:00:00]-[分享扩展打通] 开始
 import UIKit
 import UniformTypeIdentifiers
+import UserNotifications
 
 @objc(ShareViewController)
 public class ShareViewController: UIViewController {
@@ -57,16 +58,25 @@ public class ShareViewController: UIViewController {
         finishAndOpenApp(success: true)
     }
 
-    // 关闭扩展并唤起主 App 进对话页：
-    // 先 open(aia://chat) 主动唤起主 App（正式签名包下可靠，系统分享流程会据此拉起宿主）；
-    // 无论 open 成败都在回调里 completeRequest 关掉扩展，避免扩展卡在"正在打开"界面。
-    // 主 App 启动后由 checkScreenshotPending 检测到 App Group 里的分享图并自动进对话页识别。
+    // 关掉扩展并兜底提醒用户（iOS 26 分享扩展的 extensionContext.open(url) 无法唤起宿主 App，
+    // 已实测确诊：纯 open 只让扩展卡在界面、主 App 不启动）。
+    // 改用本地通知兜底：存图后发一条通知，用户点通知横幅即唤起主 App 并跳对话页；
+    // 即使不点通知，手动打开主 App 也会由 checkScreenshotPending 的 fromShareExtension 分支自动跳对话页。
     private func finishAndOpenApp(success: Bool) {
-        let url = URL(string: "aia://chat")!
-        let context = extensionContext
-        context?.open(url) { _ in
-            context?.completeRequest(returningItems: nil)
+        let content = UNMutableNotificationContent()
+        content.title = "好记AI已收到你的图片"
+        content.body = "点击查看AI识别结果"
+        content.sound = .default
+        content.userInfo = ["route": "chat"]
+        let request = UNNotificationRequest(
+            identifier: "shareExtension-\(UUID().uuidString)",
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error { print("[ShareExt] 发通知失败: \(error)") }
         }
+        extensionContext?.completeRequest(returningItems: nil)
     }
 
     // 从分享上下文里取出图片（兼容 URL / Data / UIImage 三种返回形式，图片与文件分享都覆盖）
