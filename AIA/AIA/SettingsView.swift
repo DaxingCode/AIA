@@ -303,7 +303,7 @@ struct SettingsView: View {
             MailComposer(
                 recipient: "754727942@qq.com",
                 subject: "好记AI 意见反馈",
-                body: "请描述您遇到的问题或建议：\n\n"
+                body: "请描述您遇到的问题或建议：<br/><br/>" + feedbackDeviceInfoHTML()
             )
         }
         .centeredAlert(isPresented: $feedbackMailUnavailable,
