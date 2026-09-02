@@ -140,6 +140,35 @@ enum ReminderNotificationManager {
     }
     /// <<< CHANGE-[2026-08-24 12:34:50]-[完成待办立即取消通知] 结束
 
+    // >>> CHANGE-[2026-09-02 14:43:11]-[回前台清扫孤儿待办提醒] 开始
+    /// 清扫「孤儿待办提醒」：系统里还排着队，但本地这条待办已删除或已完成的通知。
+    /// 用于兜底：历史版本删除待办时漏了取消通知，这些通知会一直挂在系统里到点弹。
+    /// 08-24 已修"完成待办"，但"删除待办"的 cancel 漏在 SafeDelete.reminderByID 之外，
+    /// 直到 2026-09-02 才补；本函数清掉已漏在系统里的历史通知。
+    /// 注意 id 形如 reminder-<uuid> 或 reminder-<uuid>-<序号>，uuidString 固定 36 字符，
+    /// 不能按横杠切分（uuid 本身含横杠），必须按固定长度截取。
+    static func pruneOrphanReminderNotifications(context: ModelContext) {
+        // 先在主线程取出「还需要提醒」的待办 syncId 集合（Set<String> 可安全传入后台闭包）
+        let alive = Set(
+            ((try? context.fetch(FetchDescriptor<Reminder>(
+                predicate: #Predicate { !$0.syncDeleted && !$0.done }
+            ))) ?? []).map { $0.syncId.uuidString }
+        )
+        center.getPendingNotificationRequests { requests in
+            let prefix = "reminder-"
+            let candidates = requests.map(\.identifier).filter { $0.hasPrefix(prefix) }
+            guard !candidates.isEmpty else { return }
+            let dead = candidates.filter { id in
+                let uuidPart = String(id.dropFirst(prefix.count).prefix(36))
+                return !alive.contains(uuidPart)
+            }
+            guard !dead.isEmpty else { return }
+            center.removePendingNotificationRequests(withIdentifiers: dead)
+            print("[通知] 清扫孤儿待办提醒 \(dead.count) 条")
+        }
+    }
+    // <<< CHANGE-[2026-09-02 14:43:11]-[回前台清扫孤儿待办提醒] 结束
+
     /// 发送一条测试通知（延迟 seconds 秒），用于验证授权与横幅弹出是否正常。
     /// completion 回调在主线程返回是否成功排程（false 表示未授权，需去系统设置手动开启）。
     static func sendTest(after seconds: TimeInterval = 5, completion: @escaping (Bool) -> Void) {

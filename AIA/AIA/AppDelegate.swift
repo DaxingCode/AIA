@@ -438,6 +438,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                 CloudSyncManager.shared.autoSyncIfEnabled(context: ModelContext(container))
                 // 每天使用提醒：开关开启时用最新时间 + 当天数据重排程（幂等覆盖，不会累积多条）
                 ReminderNotificationManager.rescheduleFromStoredDefaults()
+                // >>> CHANGE-[2026-09-02 14:43:11]-[回前台清扫孤儿待办提醒] 开始
+                // 兜底：清掉系统里还排着队、但本地已删除/已完成的待办通知（历史版本删除漏了取消）。
+                ReminderNotificationManager.pruneOrphanReminderNotifications(context: ModelContext(container))
+                // <<< CHANGE-[2026-09-02 14:43:11]-[回前台清扫孤儿待办提醒] 结束
                 // 回前台刷新 HealthKit：App 在前台停留期间不自动更新，切回即拉最新（2026-08-01）
                 HealthManager.shared.refreshAll()
             }
