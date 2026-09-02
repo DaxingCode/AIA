@@ -117,7 +117,10 @@ enum SafeDelete {
         // 把所有操作推到下一帧执行，避免与父页面的 @Query 重 fetch / 转场动画
         // 在主线程同步竞争（用户多次反馈删除最后一条后卡死）。
         DispatchQueue.main.async {
-            ReminderNotificationManager.cancel(r)
+            // >>> CHANGE-[2026-09-02 14:43:11]-[删除待办取消提醒通知] 开始
+            // 同步段先取 syncId 字符串再用 bySyncId 重载，避免闭包内对象 fault 取错 id。
+            ReminderNotificationManager.cancel(bySyncId: r.syncId.uuidString)
+            // <<< CHANGE-[2026-09-02 14:43:11]-[删除待办取消提醒通知] 结束
             r.syncDeleted = true
             r.syncUpdatedAt = Date()
             deleteImageIfOrphaned(r, in: context)
@@ -195,6 +198,15 @@ enum SafeDelete {
         CloudSyncManager.shared.syncAfterLocalChange(context: context)
         DispatchQueue.main.async {
             guard let r = context.model(for: id) as? Reminder else { return }
+            // >>> CHANGE-[2026-09-02 14:43:11]-[删除待办取消提醒通知] 开始
+            // 原因：删除只置 syncDeleted，未撤销系统里已排程的本地通知 → 删掉的待办到点仍弹提醒。
+            //      本应走 SafeDelete.reminder(_:)（那版带 cancel），但 08-17 防崩溃改造把所有删除
+            //      切到 reminderByID 时漏掉了 cancel 这一行，导致 8 个删除入口全不撤通知。
+            //      同步段先取 syncId 字符串再用 bySyncId 重载，避免闭包内对象 fault 取错 id。
+            // 回退：删除下面两行。
+            let targetSyncId = r.syncId.uuidString
+            ReminderNotificationManager.cancel(bySyncId: targetSyncId)
+            // <<< CHANGE-[2026-09-02 14:43:11]-[删除待办取消提醒通知] 结束
             r.syncDeleted = true
             r.syncUpdatedAt = Date()
             deleteImageIfOrphaned(r, in: context)
