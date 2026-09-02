@@ -840,6 +840,12 @@ final class CloudSyncManager: ObservableObject {
 
     private static nonisolated func applyReminder(context: ModelContext, id: UUID, remoteDate: Date, deleted: Bool, payload: [String: Any]) -> Int {
         if let existing = (try? context.fetch(FetchDescriptor<Reminder>(predicate: #Predicate { $0.syncId == id })))?.first {
+            // >>> CHANGE-[2026-09-02 14:43:11]-[跨端删除待办取消提醒通知] 开始
+            // 原因：别的设备/小程序删了待办、同步回本机时直接 context.delete，没撤系统提醒通知，
+            //       导致本机到点仍弹已删除待办。先按 syncId 撤通知再删对象。
+            // 回退：删除下面一行。
+            if deleted { ReminderNotificationManager.cancel(bySyncId: id.uuidString) }
+            // <<< CHANGE-[2026-09-02 14:43:11]-[跨端删除待办取消提醒通知] 结束
             if deleted { context.delete(existing); return 1 }
             guard existing.syncUpdatedAt < remoteDate else { return 0 }
             existing.title = payload["title"] as? String ?? existing.title
