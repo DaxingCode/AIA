@@ -160,8 +160,9 @@ struct OnboardingView: View {
     private var welcomePage: some View {
         pageContent(kind: .welcome,
                     title: "你好，我是小记 👋",
-                    message: "你的专属AI助理，自动记账、记待办、记饮食、管健康，一个App全搞定",
-                    illustration: { AnyView(pandaAvatar) })
+                    message: "你的专属AI助理，自动记账、记待办、记饮食、管健康，一个App全搞定\n\n所有数据、图片默认只保存在手机本地，充分保护你的信息和隐私。",
+                    illustration: { AnyView(pandaAvatar) },
+                    guideURL: URL(string: "https://mp.weixin.qq.com/s/JBXw6GsFm0BRNVi5kGhCYA"))
     }
     // <<< CHANGE-[2026-08-20 15:00:00]-新人引导第一页换熊猫头像-结束
 
@@ -169,13 +170,15 @@ struct OnboardingView: View {
     private var screenshotPage: some View {
         pageContent(kind: .welcome,
                     title: "自动记账、记待办、记饮食",
-                    message: "截屏、语音、Siri、拍照、图片、文字，都能自动记账、记待办、记饮食、记健康，超方便的！")
+                    message: "截屏、语音、Siri、拍照、图片、文字，都能自动记账、记待办、记饮食、记健康，超方便的！",
+                    guideURL: URL(string: "https://mp.weixin.qq.com/s/JBXw6GsFm0BRNVi5kGhCYA"))
     }
     // <<< CHANGE-[2026-08-20 15:00:00]-新人引导第二页沿用第一页紫蓝渐变-结束
     private var payScreenshotPage: some View {
         pageContent(kind: .screenshot,
                     title: "付款后截屏自动记账",
-                    message: "付款完成，截一张屏，小记自动识别金额与商户并记账，不用手动填")
+                    message: "付款完成，截一张屏，小记自动识别金额与商户并记账，不用手动填",
+                    guideURL: URL(string: "https://mp.weixin.qq.com/s/8KDKxh-0770tOeBP7PgecA"))
     }
     private var payFoodPage: some View {
         pageContent(kind: .diet,
@@ -185,17 +188,20 @@ struct OnboardingView: View {
     private var notifyScreenshotPage: some View {
         pageContent(kind: .todo,
                     title: "收到通知截屏记待办",
-                    message: "收到通知时截一张屏，小记自动建好待办，并在指定时间提醒你")
+                    message: "收到通知时截一张屏，小记自动建好待办，并在指定时间提醒你",
+                    guideURL: URL(string: "https://mp.weixin.qq.com/s/_7QRJ0Bl8K1hOnxFYlUgTQ"))
     }
     private var voiceScenarioPage: some View {
         pageContent(kind: .voice,
                     title: "记账、待办、饮食，一句话搞定",
-                    message: "跟小记说「中午吃烤肉花了50元」，自动记一笔账单和烤肉热量\n跟小记说「周五提醒我交报表」，自动记好周五的待办，会自动提醒哦")
+                    message: "跟小记说「中午吃烤肉花了50元」，自动记一笔账单和烤肉热量\n跟小记说「周五提醒我交报表」，自动记好周五的待办，会自动提醒哦",
+                    guideURL: URL(string: "https://mp.weixin.qq.com/s/7k-GdzWaox83MLUGq0RZpw"))
     }
     private var siriPage: some View {
         pageContent(kind: .siri,
                     title: "通过Siri记账、记待办、记饮食",
-                    message: "跟Siri说「用好记AI」，就可以自动记账、记饮食、记待办，到点自动提醒")
+                    message: "跟Siri说「用好记AI」，就可以自动记账、记饮食、记待办，到点自动提醒",
+                    guideURL: URL(string: "https://mp.weixin.qq.com/s/B9Wj6kctAKSGpIdfq-nEzg"))
     }
     private var askPage: some View {
         pageContent(kind: .ask,
@@ -277,10 +283,12 @@ struct OnboardingView: View {
     }
     // <<< CHANGE-[2026-08-20 15:00:00]-新人引导第一页换熊猫头像-结束
 
+    // >>> CHANGE-[2026-09-02 17:15:53]-[引导页加使用攻略按钮] 开始
     private func pageContent(kind: IllustrationView.Kind,
                              title: String,
                              message: String,
-                             illustration: (() -> AnyView)? = nil) -> some View {
+                             illustration: (() -> AnyView)? = nil,
+                             guideURL: URL? = nil) -> some View {
         VStack(spacing: 22) {
             Spacer()
             if let illustration {
@@ -297,11 +305,27 @@ struct OnboardingView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 300)
             }
+            if let guideURL {
+                Button {
+                    presentInAppBrowser(guideURL)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "book.fill")
+                        Text("使用攻略")
+                        Image(systemName: "chevron.right")
+                    }
+                    .font(AIATheme.Font.footnote.weight(.medium))
+                    .foregroundStyle(AIATheme.blue)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+            }
             Spacer()
             Spacer()
         }
         .padding(.horizontal, 28)
     }
+    // <<< CHANGE-[2026-09-02 17:15:53]-[引导页加使用攻略按钮] 结束
 
     // MARK: - 快捷指令配置页（核心）
     private var shortcutsPage: some View {
