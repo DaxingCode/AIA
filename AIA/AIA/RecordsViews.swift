@@ -1358,7 +1358,7 @@ struct HealthListView: View {
     @Query(filter: #Predicate<FoodEntry> { !$0.syncDeleted }) private var foods: [FoodEntry]
     /// 今日摄入热量 = 今日 FoodEntry.calories 求和（按日历日过滤，与饮食页 selectedFoods 同源）
     private var todayCalories: Double {
-        foods.filter { Calendar.current.isDate($0.date, inSameDayAs: Date()) }
+        foods.filter { Calendar.current.isDate($0.date, inSameDayAs: selectedHealthDate) }
              .reduce(0) { $0 + $1.calories }
     }
     /// 净热量 = 整数(今日摄入) − 整数(今日消耗)（与饮食页净热量英雄数字同源，方案B整数减口径一致）
@@ -1481,6 +1481,9 @@ struct HealthListView: View {
     @AppStorage("aia.targetHeightCm") private var targetHeightCm: Double = 0
     @AppStorage("aia.weightGoalKg") private var weightGoalKg: Double = 65
 
+    /// 健康页「今日概览」卡片当前选中的日期；默认今天，左右箭头切换查看历史健康数据。
+    @State private var selectedHealthDate: Date = Date()
+
     // 今日达成数（手动录入，HealthKit 未接入时回退到这里，按日期隔离存储在 ManualHealthStore）。
 
     // MARK: 圆环数据来源（逐指标切换）
@@ -1522,22 +1525,22 @@ struct HealthListView: View {
     }
 
     private var stepsCurrentValue: Int {
-        isAuto(.steps) ? Int(ManualHealthStore.shared.healthKitValue("steps", for: Date())) : ManualHealthStore.shared.steps(for: Date())
+        isAuto(.steps) ? Int(ManualHealthStore.shared.healthKitValue("steps", for: selectedHealthDate)) : ManualHealthStore.shared.steps(for: selectedHealthDate)
     }
     private var sleepCurrentValue: Double {
         if isAuto(.sleep) {
             // 自动模式：优先读 HealthKit 落库值（.hk 槽位，已持久化），兼容旧 HealthMetric 体检记录兜底。
-            let hk = ManualHealthStore.shared.healthKitValue("sleep", for: Date())
+            let hk = ManualHealthStore.shared.healthKitValue("sleep", for: selectedHealthDate)
             if hk > 0 { return hk }
             return healths.first(where: { $0.metric.contains("睡眠") }).flatMap { Double($0.value) } ?? 0
         }
         // 手动模式：与圆环完成数据、首页「昨晚睡眠」同源（详见 manualSleepTotalHours）
-        return manualSleepTotalHours(sleeps: sleeps, healths: healths, on: Date())
+        return manualSleepTotalHours(sleeps: sleeps, healths: healths, on: selectedHealthDate)
     }
     private var exerciseCurrentValue: Double {
         isAuto(.exercise)
-            ? ManualHealthStore.shared.healthKitValue("exercise", for: Date())
-            : health.exerciseTimeToday + Double(ManualHealthStore.shared.exerciseMinutes(for: Date()))
+            ? ManualHealthStore.shared.healthKitValue("exercise", for: selectedHealthDate)
+            : health.exerciseTimeToday + Double(ManualHealthStore.shared.exerciseMinutes(for: selectedHealthDate))
     }
     // >>> CHANGE-[2026-08-19 12:55:00]-对齐全App今日消耗口径 开始
     // 原因: 原写法读 HealthManager 实时 restingEnergyToday+activeEnergyToday, 与饮食页(按 selectedDate 查字典)口径差 55kcal → 净热量两页不一致
@@ -1545,7 +1548,7 @@ struct HealthListView: View {
     //       手动模式按 Date() 查 ManualHealthStore。
     // 回退: 删除本段, 恢复原判(HealthManager.shared.restingEnergyToday + activeEnergyToday) 即可。
     private var tdeeCurrentValue: Double {
-        let day = Calendar.current.startOfDay(for: Date())
+        let day = Calendar.current.startOfDay(for: selectedHealthDate)
         if isAuto(.tdee) && HealthManager.shared.isAvailable && HealthManager.shared.hasHealthKitData {
             let active = HealthManager.shared.activeEnergyForDay[day]
                 ?? ManualHealthStore.shared.healthKitValue("activeCalories", for: day)
@@ -1613,13 +1616,28 @@ struct HealthListView: View {
         return ("—", nil)
     }
 
-    // 身高/体重/BMI 优先用用户档案（@AppStorage），未设置则回退到健康记录。
+    // 身高/体重/BMI：按选中日期读取，优先级 hk真实 > healths手动 > fill补全 > 当前档案值。
+    private func healthsWeight(on date: Date) -> Double? {
+        healths.first(where: { Calendar.current.isDate($0.date, inSameDayAs: date) && $0.metric.contains("体重") })
+            .flatMap { Double($0.value) }
+    }
     private var weightDisplay: String {
-        weightKg > 0 ? String(format: "%.1fkg", weightKg) : stat("体重")
+        let d = selectedHealthDate
+        let hk = ManualHealthStore.shared.healthKitValue("weight", for: d)
+        if hk > 0 { return String(format: "%.1fkg", hk) }
+        if let m = healthsWeight(on: d), m > 0 { return "\(m)kg" }
+        let fill = ManualHealthStore.shared.filledWeight(for: d)
+        if fill > 0 { return String(format: "%.1fkg", fill) }
+        if weightKg > 0 { return String(format: "%.1fkg", weightKg) }
+        return "—"
     }
     private var heightDisplay: String {
-        // 2026-07-30：身高保留一位小数会被截断成 "165.0cm" 在窄卡片里换行；统一取整 + 自动去 ".0"
-        // 与体重 ("58.0kg") 风格统一，且更稳。同时回退到健康记录时也剥掉 ".0"。
+        let d = selectedHealthDate
+        let fill = ManualHealthStore.shared.filledHeight(for: d)
+        if fill > 0 {
+            let rounded = fill.rounded()
+            return rounded == floor(rounded) ? "\(Int(rounded))cm" : String(format: "%.1fcm", rounded)
+        }
         if heightCm > 0 {
             let rounded = heightCm.rounded()
             return rounded == floor(rounded) ? "\(Int(rounded))cm" : String(format: "%.1fcm", rounded)
@@ -1628,6 +1646,9 @@ struct HealthListView: View {
         return raw.replacingOccurrences(of: ".0cm", with: "cm")
     }
     private var bmiDisplay: String {
+        let d = selectedHealthDate
+        let fill = ManualHealthStore.shared.filledBmi(for: d)
+        if fill > 0 { return String(format: "%.1f", fill) }
         guard heightCm > 0, weightKg > 0 else { return stat("BMI") }
         let m = heightCm / 100
         return String(format: "%.1f", weightKg / (m * m))
@@ -1652,14 +1673,32 @@ struct HealthListView: View {
         // 手动模式优先读 ManualHealthStore（HealthKit 静息心率不回写 healths 表，否则永远 "—"）。
         if key == "心率" {
             if isAuto(.heartRate) {
-                let hk = ManualHealthStore.shared.healthKitValue("heartRate", for: Date())
+                let hk = ManualHealthStore.shared.healthKitValue("heartRate", for: selectedHealthDate)
                 if hk > 0 { return "\(Int(hk))bpm" }
             }
-            let manual = ManualHealthStore.shared.restingHeartRate(for: Date())
+            let manual = ManualHealthStore.shared.restingHeartRate(for: selectedHealthDate)
             if manual > 0 { return "\(manual)bpm" }
         }
         return healths.first(where: { $0.metric.contains(key) }).map { "\($0.value)\($0.unit)" } ?? "—"
     }
+
+    /// 选中日期是否为今天（用于禁用右箭头与历史日期圆环自增）。
+    private func isToday(_ d: Date) -> Bool { Calendar.current.isDateInToday(d) }
+
+    // >>> CHANGE-[2026-09-04 00:54:32]-[健康页日期导航条今天昨天带日期星期] 开始
+    /// 日期导航条文案：今天/昨天 也带「M月d日 星期X」（如「今天 · 9月4日 星期五」），
+    /// 与饮食页 dateTitleText（RecordsViews:783）格式统一；其余历史日期同款仅日期星期、无前缀。
+    private func dateLabel(_ d: Date) -> String {
+        let cal = Calendar.current
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "M月d日 EEEE"
+        let md = f.string(from: d)
+        if cal.isDateInToday(d) { return "今天 · \(md)" }
+        if cal.isDateInYesterday(d) { return "昨天 · \(md)" }
+        return md
+    }
+    // <<< CHANGE-[2026-09-04 00:54:32]-[健康页日期导航条今天昨天带日期星期] 结束
     /// 近 7 日步数柱状数据。`offset` 为 0 表示本周，负数表示过去第 |offset| 周。
     private func weekSteps(offset: Int = 0) -> [ChartPoint] {
         let cal = Calendar.current
@@ -1860,6 +1899,45 @@ struct HealthListView: View {
                     }
                     // Card A · 今日概览（圆环 + 关键指标）
                     VStack(alignment: .leading, spacing: 12) {
+                        // 日期切换导航条（样式照抄饮食记录页 Card1，圆底箭头 + sub 中性色），不另创
+                        HStack(spacing: 8) {
+                            Button {
+                                if let prev = Calendar.current.date(byAdding: .day, value: -1, to: selectedHealthDate) {
+                                    selectedHealthDate = prev
+                                }
+                            } label: {
+                                Image(systemName: "chevron.left")
+                                    .font(AIATheme.Font.caption.weight(.semibold))
+                                    .foregroundStyle(AIATheme.sub)
+                                    .frame(width: 24, height: 24)
+                                    .background(AIATheme.surfaceSecondary)
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+
+                            Text(dateLabel(selectedHealthDate))
+                                .font(AIATheme.Font.footnote.weight(.medium))
+
+                            Spacer()
+
+                            Button {
+                                let next = Calendar.current.date(byAdding: .day, value: 1, to: selectedHealthDate)!
+                                if Calendar.current.startOfDay(for: next) <= Calendar.current.startOfDay(for: Date()) {
+                                    selectedHealthDate = next
+                                }
+                            } label: {
+                                Image(systemName: "chevron.right")
+                                    .font(AIATheme.Font.caption.weight(.semibold))
+                                    .foregroundStyle(AIATheme.sub)
+                                    .frame(width: 24, height: 24)
+                                    .background(AIATheme.surfaceSecondary)
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isToday(selectedHealthDate))
+                        }
+                        .padding(.bottom, 4)
+
                         // 目标兜底：未手动设置或计算出 0（常见：未填体重/身高 → TDEE 算出 0）时，
                         // 回退到系统默认目标，避免圆环出现「— / 目标为空」状态（2026-08-01）。
                         let effectiveStepGoal     = stepGoal > 0 ? stepGoal : 10000
@@ -1877,7 +1955,7 @@ struct HealthListView: View {
                                 progress: effectiveStepGoal > 0 ? min(Double(stepsCurrentValue) / Double(effectiveStepGoal), 1) : 0,
                                 onTap: { incrementMetric(.steps) },
                                 bumpText: bumpText(.steps),
-                                enabled: !isAuto(.steps)
+                                enabled: !isAuto(.steps) && !isToday(selectedHealthDate)
                             )
 
                             let sleepRing = ringLines(
@@ -1894,7 +1972,7 @@ struct HealthListView: View {
                                 progress: effectiveSleepGoal > 0 ? min(sleepCurrentValue / effectiveSleepGoal, 1) : 0,
                                 onTap: { incrementMetric(.sleep) },
                                 bumpText: bumpText(.sleep),
-                                enabled: !isAuto(.sleep)
+                                enabled: !isAuto(.sleep) && !isToday(selectedHealthDate)
                             )
 
                             let exerciseRing = ringLines(
@@ -1911,7 +1989,7 @@ struct HealthListView: View {
                                 progress: effectiveExerciseGoal > 0 ? min(exerciseCurrentValue / effectiveExerciseGoal, 1) : 0,
                                 onTap: { incrementMetric(.exercise) },
                                 bumpText: bumpText(.exercise),
-                                enabled: !isAuto(.exercise)
+                                enabled: !isAuto(.exercise) && !isToday(selectedHealthDate)
                             )
 
                             let tdeeRing = ringLines(
@@ -1927,7 +2005,7 @@ struct HealthListView: View {
                                 progress: Double(effectiveTdeeGoal) > 0 ? min(tdeeCurrentValue / Double(effectiveTdeeGoal), 1) : 0,
                                 onTap: { incrementMetric(.tdee) },
                                 bumpText: bumpText(.tdee),
-                                enabled: !isAuto(.tdee)
+                                enabled: !isAuto(.tdee) && !isToday(selectedHealthDate)
                             )
                         }
 

@@ -78,6 +78,9 @@ final class DailyHealthStore {
         case "exercise":     m.exercise = Int(value)
         case "activeCalories": m.calories = Int(value)
         case "heartRate":    m.heartRate = Int(value)
+        case "weight":       m.weight = value
+        case "height":       m.height = value
+        case "bmi":          m.bmi = value
         default: break
         }
         if touchesUpdatedAt {
@@ -88,17 +91,94 @@ final class DailyHealthStore {
 
     private func read(metric: String, dayTs: Int, source: String) -> Double {
         guard let m = row(dayTs: dayTs, source: source) else { return 0 }
-        let v: Int?
         switch metric {
-        case "steps":        v = m.steps
-        case "exercise":     v = m.exercise
-        case "activeCalories": v = m.calories
-        case "heartRate":    v = m.heartRate
-        default:             v = nil
+        case "steps":        return Double(m.steps ?? 0)
+        case "sleep":        return m.sleep ?? 0
+        case "exercise":     return Double(m.exercise ?? 0)
+        case "activeCalories": return Double(m.calories ?? 0)
+        case "heartRate":    return Double(m.heartRate ?? 0)
+        case "weight":       return m.weight ?? 0
+        case "height":       return m.height ?? 0
+        case "bmi":          return m.bmi ?? 0
+        default:             return 0
         }
-        if let v { return Double(v) }
-        if metric == "sleep" { return m.sleep ?? 0 }
-        return 0
+    }
+
+    // MARK: - 体重/身高/BMI 按天快照（source = "fill"，每日自动补全备用）
+
+    /// 写一条补全快照（weight/height/bmi），source="fill" 物理隔离于真实 hk/manual 数据。
+    func setFilledBodyMetrics(weight: Double, height: Double, bmi: Double, for date: Date) {
+        let day = calendar.startOfDay(for: date)
+        let ts = Int(day.timeIntervalSince1970)
+        write(metric: "weight", value: weight, dayTs: ts, source: "fill", touchesUpdatedAt: false)
+        write(metric: "height", value: height, dayTs: ts, source: "fill", touchesUpdatedAt: false)
+        write(metric: "bmi", value: bmi, dayTs: ts, source: "fill", touchesUpdatedAt: false)
+    }
+
+    /// 读 fill 快照（补全备用）的体重/身高/BMI。
+    func filledWeight(for date: Date) -> Double {
+        let ts = Int(calendar.startOfDay(for: date).timeIntervalSince1970)
+        return read(metric: "weight", dayTs: ts, source: "fill")
+    }
+    func filledHeight(for date: Date) -> Double {
+        let ts = Int(calendar.startOfDay(for: date).timeIntervalSince1970)
+        return read(metric: "height", dayTs: ts, source: "fill")
+    }
+    func filledBmi(for date: Date) -> Double {
+        let ts = Int(calendar.startOfDay(for: date).timeIntervalSince1970)
+        return read(metric: "bmi", dayTs: ts, source: "fill")
+    }
+
+    /// 启动补录：从最早一条已知体重记录补到昨天，按变化点分段填 weight/height/bmi。
+    /// 已知体重来源：healths（HealthMetric 手动记录）+ @AppStorage 当前体重（作为今天锚）。
+    /// 若某天已有 hk/manual 真实体重则跳过，只填补空缺（fill），不覆盖真实值。
+    func fillMissingBodyMetrics() {
+        guard let ctx = context else { return }
+        let cal = calendar
+
+        // 1. 收集已知体重日 (date, value)
+        var known: [(date: Date, value: Double)] = []
+
+        // 1a. healths 表手动体重记录
+        let pred = #Predicate<HealthMetric> { !$0.syncDeleted && $0.metric.contains("体重") }
+        if let records = try? ctx.fetch(FetchDescriptor<HealthMetric>(predicate: pred)) {
+            for r in records {
+                if let v = Double(r.value) { known.append((r.date, v)) }
+            }
+        }
+
+        // 1b. @AppStorage 当前体重作为「截至昨天的最新已知值」锚点（今天的数据今天实时显示，历史用此值补全）
+        let curWeight = UserDefaults.standard.double(forKey: "aia.weightKg")
+        if curWeight > 0 {
+            let yesterday = cal.startOfDay(for: Date().addingTimeInterval(-86400))
+            known.append((yesterday, curWeight))
+        }
+
+        known.sort { $0.date < $1.date }
+        guard !known.isEmpty else { return }
+
+        // 2. 遍历 最早已知日（或昨天）→ 昨天，分段填 fill
+        let earliest = cal.startOfDay(for: known.first!.date)
+        let yesterday = cal.startOfDay(for: Date().addingTimeInterval(-86400))
+        guard yesterday >= earliest else { return }
+
+        let height = UserDefaults.standard.double(forKey: "aia.heightCm")
+
+        var cursor = 0
+        var day = earliest
+        while day <= yesterday {
+            while cursor + 1 < known.count && known[cursor + 1].date <= day { cursor += 1 }
+            let val = known[cursor].value
+            let bmi = height > 0 ? (val / ((height / 100) * (height / 100))) : 0
+            let ts = Int(day.timeIntervalSince1970)
+            // 仅当 真实(hk/manual) 与 已有 fill 都缺失时才写，保证幂等、重复打开不重填
+            if read(metric: "weight", dayTs: ts, source: "hk") == 0
+               && read(metric: "weight", dayTs: ts, source: "manual") == 0
+               && read(metric: "weight", dayTs: ts, source: "fill") == 0 {
+                setFilledBodyMetrics(weight: val, height: height, bmi: bmi, for: day)
+            }
+            day = cal.date(byAdding: .day, value: 1, to: day)!
+        }
     }
 
     // MARK: - HealthKit 自动槽位（source = "hk"，物理隔离手动数据）

@@ -536,13 +536,16 @@ import SwiftData
 @Model public final class DailyHealthMetric {
     /// 当日起始时间戳（秒），同一天所有指标共用一条记录。
     public var dayTs: Int
-    /// 数据来源："manual"（手动录入）| "hk"（HealthKit 自动拉取）。
+    /// 数据来源："manual"（手动录入）| "hk"（HealthKit 自动拉取）| "fill"（每日自动补全备用）。
     public var source: String
     public var steps: Int?
     public var sleep: Double?        // 小时
     public var exercise: Int?        // 分钟
     public var calories: Int?        // 活动热量 kcal
     public var heartRate: Int?       // 静息心率 bpm
+    public var weight: Double?       // 体重 kg（按天快照）
+    public var height: Double?       // 身高 cm（按天快照）
+    public var bmi: Double?          // BMI（按天快照，= 体重 / (身高/100)²）
 
     // sync 三件套（满足全局 @Model 约定；manualHealth 类型由 CloudSyncManager 单独导出，不依赖此处）
     public var syncId: UUID
@@ -552,6 +555,7 @@ import SwiftData
     public init(dayTs: Int, source: String = "manual",
                 steps: Int? = nil, sleep: Double? = nil, exercise: Int? = nil,
                 calories: Int? = nil, heartRate: Int? = nil,
+                weight: Double? = nil, height: Double? = nil, bmi: Double? = nil,
                 syncId: UUID = UUID(), syncUpdatedAt: Date = .now, syncDeleted: Bool = false) {
         self.dayTs = dayTs
         self.source = source
@@ -560,6 +564,9 @@ import SwiftData
         self.exercise = exercise
         self.calories = calories
         self.heartRate = heartRate
+        self.weight = weight
+        self.height = height
+        self.bmi = bmi
         self.syncId = syncId
         self.syncUpdatedAt = syncUpdatedAt
         self.syncDeleted = syncDeleted

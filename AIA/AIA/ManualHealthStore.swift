@@ -87,4 +87,10 @@ final class ManualHealthStore {
     func addSleepHours(_ delta: Double, for date: Date) { store.addSleepHours(delta, for: date) }
     func addExerciseMinutes(_ delta: Int, for date: Date) { store.addExerciseMinutes(delta, for: date) }
     func addActiveCalories(_ delta: Int, for date: Date) { store.addActiveCalories(delta, for: date) }
+
+    // MARK: - 体重/身高/BMI 按天快照（fill 补全备用）
+    func filledWeight(for date: Date) -> Double { store.filledWeight(for: date) }
+    func filledHeight(for date: Date) -> Double { store.filledHeight(for: date) }
+    func filledBmi(for date: Date) -> Double { store.filledBmi(for: date) }
+    func fillMissingBodyMetrics() { store.fillMissingBodyMetrics() }
 }

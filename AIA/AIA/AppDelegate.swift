@@ -240,6 +240,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     /// 注意：writeShared 此刻写入的可能是 0（HealthKit 还没回来），HealthManager.refreshAll() 完成后的延迟补偿会再补写一次真实值。
     func applicationDidBecomeActive(_ application: UIApplication) {
         HealthManager.shared.refreshAll()
+        DailyHealthStore.shared.fillMissingBodyMetrics()
         MainActor.assumeIsolated {
             WidgetSnapshot.writeShared()
         }
