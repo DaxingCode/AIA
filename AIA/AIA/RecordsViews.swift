@@ -132,12 +132,36 @@ private enum DietPeriod: String, CaseIterable {
     }
 }
 
-/// 饮食喜好页：单条 Top N 排行
+/// 饮食喜好页：单条排行（含汇总指标）
 private struct DietFoodRank: Identifiable {
     let id = UUID()
     let rank: Int
     let name: String
     let count: Int
+    let totalGrams: Double      // 该食物所有记录的重量总和（weightGram 为 nil 的不计入）
+    let totalCalories: Double   // 该食物所有记录的热量总和
+}
+
+/// 按名字分组 → 计数 + 累重 + 累热 → 次数倒序、同名按拼音稳定排序。
+/// Top 5 与「查看全部」共用同一套计算，保证口径一致。
+private func rankedFoods(_ foods: [FoodEntry]) -> [DietFoodRank] {
+    let nonWater = foods.filter { $0.name != "饮用水" }
+    let grouped = Dictionary(grouping: nonWater, by: \.name)
+    let rows: [DietFoodRank] = grouped.map { name, entries in
+        let grams = entries.compactMap { $0.weightGram }.reduce(0, +)
+        let cals  = entries.reduce(0) { $0 + $1.calories }
+        return DietFoodRank(rank: 0, name: name, count: entries.count,
+                            totalGrams: grams, totalCalories: cals)
+    }
+    return rows.sorted {
+        if $0.count != $1.count { return $0.count > $1.count }
+        return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+    }
+    .enumerated()
+    .map { idx, r in
+        DietFoodRank(rank: idx + 1, name: r.name, count: r.count,
+                     totalGrams: r.totalGrams, totalCalories: r.totalCalories)
+    }
 }
 
 /// 饮食喜好页：记录来源拆分（AI 识别 vs 手动输入）
@@ -4660,18 +4684,9 @@ private struct DietPreferencesView: View {
     @Query(filter: #Predicate { !$0.syncDeleted }, sort: \FoodEntry.date, order: .reverse)
     private var foods: [FoodEntry]
 
-    /// Top 5 最常吃的食物：按 name 分组计数、倒序、取前 5；饮用水不属于饮食，单独分类，不进入此排行
+    /// Top 5 最常吃的食物：复用 rankedFoods 取前 5；饮用水不属于饮食，已在 rankedFoods 内排除
     private var topFoods: [DietFoodRank] {
-        let nonWaterFoods = foods.filter { $0.name != "饮用水" }
-        let counts = Dictionary(grouping: nonWaterFoods, by: \.name).mapValues { $0.count }
-        return counts.sorted {
-            if $0.value != $1.value { return $0.value > $1.value }
-            // 次数相同：按名称首字母（中文拼音 / 英文）稳定排序，避免每次数据变动循环切换位置
-            return $0.key.localizedStandardCompare($1.key) == .orderedAscending
-        }
-        .prefix(5)
-        .enumerated()
-        .map { idx, kv in DietFoodRank(rank: idx + 1, name: kv.key, count: kv.value) }
+        Array(rankedFoods(foods).prefix(5))
     }
 
     /// 记录来源：imageName 非空 = 图片识别记录；空 = 语音、文字记录（含手动编辑）
@@ -4715,7 +4730,11 @@ private struct DietPreferencesView: View {
                 DietPreferencesHero(total: foods.count, calories: totalCalories, grams: totalGrams)
 
                 // 2. Top 5
-                SectionTitle(text: "最常吃的食物 Top 5", trailing: nil)
+                SectionTitle(
+                    text: "最常吃的食物 Top 5",
+                    trailing: "查看全部",
+                    trailingAction: { NavigationRouter.shared.navigate(.dietAllFoods) }
+                )
                 if topFoods.isEmpty {
                     DietPreferencesEmptyCard(text: "还没有食物记录\n先去「饮食记录」页拍一张试试")
                 } else {
@@ -4763,6 +4782,52 @@ private struct DietPreferencesView: View {
             }
             .padding(12)
         }
+    }
+}
+
+// MARK: - 所有记录过的食物（Top 5 的完整版）
+/// 复用 rankedFoods 全量排行；每行展示 次数 / 总重量 / 总热量。
+struct DietAllFoodsView: View {
+    @Environment(\.modelContext) private var context
+    @Query(filter: #Predicate { !$0.syncDeleted }, sort: \FoodEntry.date, order: .reverse)
+    private var foods: [FoodEntry]
+
+    private var allFoods: [DietFoodRank] { rankedFoods(foods) }
+
+    private var totalGrams: Double { allFoods.reduce(0) { $0 + $1.totalGrams } }
+    private var totalCalories: Double { allFoods.reduce(0) { $0 + $1.totalCalories } }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                SectionTitle(
+                    text: "共 \(allFoods.count) 种食物",
+                    trailing: String(format: "%.1f kg · %d kcal", totalGrams / 1000, Int(totalCalories))
+                )
+
+                if allFoods.isEmpty {
+                    DietPreferencesEmptyCard(text: "还没有食物记录\n先去「饮食记录」页拍一张试试")
+                } else {
+                    LazyVStack(spacing: 0) {
+                        ForEach(allFoods) { rank in
+                            DietRankRow(rank: rank)
+                            if rank.id != allFoods.last?.id {
+                                Divider().padding(.leading, 48)
+                            }
+                        }
+                    }
+                    .card(radius: AIATheme.rMD, shadow: false)
+                }
+
+                // 底部留白，避免被悬浮胶囊压住
+                Color.clear.frame(height: 80)
+            }
+            .padding(12)
+        }
+        .background(Color(.secondarySystemBackground))
+        .navigationTitle("所有食物")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { UsageAnalytics.logOpen("diet_all_foods") }
     }
 }
 
@@ -4854,10 +4919,18 @@ private struct DietPreferencesEmptyCard: View {
     }
 }
 
-/// 饮食喜好：单条 Top N 行。1-3 名橙色实心 badge，4-5 名灰底
+/// 饮食喜好：单条排行行。1-3 名橙色实心 badge，4-5 名灰底；右侧两行显示次数 + 重量·热量
 private struct DietRankRow: View {
     let rank: DietFoodRank
     var isTopThree: Bool { rank.rank <= 3 }
+
+    /// 没记录重量的食物显示「—」而不是 0.0 kg，避免误导
+    private var weightText: String {
+        rank.totalGrams > 0
+            ? String(format: "%.1f kg", rank.totalGrams / 1000)
+            : "—"
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
@@ -4876,10 +4949,16 @@ private struct DietRankRow: View {
                 .foregroundStyle(.primary)
                 .lineLimit(1)
             Spacer(minLength: 0)
-            Text("\(rank.count) 次")
-                .font(AIATheme.Font.footnote.weight(.medium))
-                // 前 3 名保留食物语义橙；后 2 名改用 sub（dark:0xa1a1a6），相比 muted(0x8e8e93) 提亮一档
-                .foregroundStyle(isTopThree ? AIATheme.food : AIATheme.sub)
+            // 右侧：上行次数，下行 重量·热量
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("\(rank.count) 次")
+                    .font(AIATheme.Font.footnote.weight(.medium))
+                    // 前 3 名保留食物语义橙；后 2 名改用 sub（dark:0xa1a1a6），相比 muted(0x8e8e93) 提亮一档
+                    .foregroundStyle(isTopThree ? AIATheme.food : AIATheme.sub)
+                Text("\(weightText) · \(Int(rank.totalCalories)) kcal")
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.muted)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)

@@ -680,6 +680,8 @@ struct SectionTitle: View {
     let text: String
     var trailing: String? = nil
     var systemImage: String? = nil
+    /// 右侧文字可点击（如「查看全部」跳页）。传了 action 时 trailing 必须非空，否则不渲染按钮。
+    var trailingAction: (() -> Void)? = nil
     var body: some View {
         HStack(spacing: 6) {
             if let img = systemImage {
@@ -687,7 +689,21 @@ struct SectionTitle: View {
             }
             Text(text).font(AIATheme.Font.caption.weight(.medium)).foregroundStyle(AIATheme.muted)
             Spacer()
-            if let t = trailing { Text(t).font(AIATheme.Font.micro).foregroundStyle(AIATheme.muted) }
+            if let action = trailingAction, let t = trailing {
+                Button(action: action) {
+                    HStack(spacing: 2) {
+                        Text(t)
+                        Image(systemName: "chevron.right")
+                            .font(AIATheme.Font.micro.weight(.semibold))
+                    }
+                    .font(AIATheme.Font.micro)
+                    .foregroundStyle(AIATheme.food)
+                }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+            } else if let t = trailing {
+                Text(t).font(AIATheme.Font.micro).foregroundStyle(AIATheme.muted)
+            }
         }
         .padding(.top, 6)
     }

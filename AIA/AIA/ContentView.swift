@@ -60,6 +60,8 @@ enum HomeRoute: Hashable {
     case restingHeartRateRecords
     // 2026-08-19：近30日能量记录页（点饮食记录页净热量格跳转，顶部三汇总+下方每天三列）
     case energy30DaysRecords
+    // 2026-09-07：饮食喜好页 Top 5「查看全部」跳转，展示所有记录过的食物（次数/重量/热量）
+    case dietAllFoods
 
     // >>> CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 开始
     // 原因：小记查询回复需在 AI 气泡下方渲染平级跳转按钮，把 HomeRoute 编码进 ChatMessage.actionRouteRaw（String?）。
@@ -454,6 +456,8 @@ struct ContentView: View {
             RestingHeartRateRecordsView()
         case .energy30DaysRecords:
             Energy30DaysRecordsView()
+        case .dietAllFoods:
+            DietAllFoodsView()
         }
     }
 
