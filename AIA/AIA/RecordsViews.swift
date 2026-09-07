@@ -364,7 +364,7 @@ struct FoodListView: View {
                 Image(systemName: "fork.knife")
                     .font(AIATheme.Font.micro.weight(.semibold))
                     .foregroundStyle(AIATheme.food)
-                Text("常吃食物 · 点一下快速记录 100g")
+                Text("常吃食物 · 点一下快速记录（自动用上次重量）")
                     .font(AIATheme.Font.footnote.weight(.semibold))
                     .foregroundStyle(Color.primary)
                 Spacer()
@@ -600,13 +600,19 @@ struct FoodListView: View {
         return combined.isEmpty ? Self.defaultFrequentFoods : combined
     }
 
-    /// 点「常吃食物」名称：优先用营养库每100g营养 ×100g 入库当前餐次；
+    /// 点「常吃食物」名称：优先用营养库每100g营养 ×最近一次该食物的重量 入库当前餐次；
     /// 库未命中时兜底复用用户最近一次同名记录的营养值（带护栏），都无则热量归零（用户可改）。
+    /// 重量自动取最近一次同名食物的有效 weightGram（lastWeightForFood），找不到则回退 100g。
     private func saveFrequentFood(_ name: String) {
         // A 层：营养库优先（内置表 + 云端沉淀）；B 层：库不认识时复用用户历史（仅优质记录）
         let ref: FoodRef? = NutritionLibrary.shared.match(name, in: context)
             ?? lastReusableFoodRef(named: name)
-        let weight = 100.0
+        // >>> CHANGE-[2026-09-07 17:55:15]-[常吃食物自动用上次重量] 开始
+        // 原因：用户希望点常吃食物 chip 自动记录"最近一次"该食物的重量，而非写死 100g。
+        //       重量来自 lastWeightForFood（最近一条有效 weightGram 记录），无历史/老旧数据回退 100g。
+        // 回退：把 weight 改回 100.0 即可恢复写死 100g。
+        let weight = lastWeightForFood(named: name) ?? 100.0
+        // <<< CHANGE-[2026-09-07 17:55:15]-[常吃食物自动用上次重量] 结束
         let ratio = weight / 100.0
         let entry = FoodEntry(
             name: name,
@@ -617,7 +623,7 @@ struct FoodListView: View {
             fiber: (ref?.fiber ?? 0) * ratio,
             sugar: (ref?.sugar ?? 0) * ratio,
             sodium: (ref?.sodium ?? 0) * ratio,
-            portion: "100g",
+            portion: "\(Int(weight))g",
             meal: meal.mealString,
             date: selectedDate,
             weightGram: weight,
@@ -670,6 +676,23 @@ struct FoodListView: View {
         }
         return nil
     }
+
+    /// 取用户最近一次同名食物的有效重量，供「常吃食物」chip 自动记录复用。
+    /// - 复用 foods（已带 !syncDeleted 过滤的 @Query），自动排除软删记录。
+    /// - 按时间倒序找第一条 weightGram > 0 的记录；都无则返回 nil（调用方回退 100g）。
+    /// - 与 lastReusableFoodRef 共享同一排序口径，但只取重量、不反推营养，逻辑更轻。
+    // >>> CHANGE-[2026-09-07 17:55:15]-[常吃食物自动用上次重量] 开始
+    private func lastWeightForFood(named name: String) -> Double? {
+        let sorted = foods
+            .filter { $0.name == name }
+            .sorted { $0.date > $1.date }
+        for f in sorted {
+            guard let w = f.weightGram, w > 0 else { continue } // 无有效重量跳过
+            return w
+        }
+        return nil
+    }
+    // <<< CHANGE-[2026-09-07 17:55:15]-[常吃食物自动用上次重量] 结束
 
     /// 餐次 SegmentedPicker 用的自定义 Binding：getter 返回 meal，setter 在 SegmentedPicker 写入新值时
     /// （只在用户点击按钮时发生，SegmentedPicker 首次渲染只读不写）同步设置 meal 并递增 scrollToFoodNonce，
@@ -1581,11 +1604,12 @@ struct HealthListView: View {
             showAutoModeAlert = true
             return
         }
+        // 落库日期 = selectedHealthDate：用户当前选中的日期（可为历史日），实现切日期后补录。
         switch kind {
-        case .steps: ManualHealthStore.shared.addSteps(1000, for: Date())
-        case .sleep: ManualHealthStore.shared.addSleepHours(1, for: Date())
-        case .exercise: ManualHealthStore.shared.addExerciseMinutes(10, for: Date())
-        case .tdee: ManualHealthStore.shared.addActiveCalories(100, for: Date())
+        case .steps: ManualHealthStore.shared.addSteps(1000, for: selectedHealthDate)
+        case .sleep: ManualHealthStore.shared.addSleepHours(1, for: selectedHealthDate)
+        case .exercise: ManualHealthStore.shared.addExerciseMinutes(10, for: selectedHealthDate)
+        case .tdee: ManualHealthStore.shared.addActiveCalories(100, for: selectedHealthDate)
         case .heartRate: break   // 2026-08-19：静息心率方块已改为跳记录页, 不再此处弹 sheet
         }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -1955,7 +1979,7 @@ struct HealthListView: View {
                                 progress: effectiveStepGoal > 0 ? min(Double(stepsCurrentValue) / Double(effectiveStepGoal), 1) : 0,
                                 onTap: { incrementMetric(.steps) },
                                 bumpText: bumpText(.steps),
-                                enabled: !isAuto(.steps) && !isToday(selectedHealthDate)
+                                enabled: !isAuto(.steps)
                             )
 
                             let sleepRing = ringLines(
@@ -1972,7 +1996,7 @@ struct HealthListView: View {
                                 progress: effectiveSleepGoal > 0 ? min(sleepCurrentValue / effectiveSleepGoal, 1) : 0,
                                 onTap: { incrementMetric(.sleep) },
                                 bumpText: bumpText(.sleep),
-                                enabled: !isAuto(.sleep) && !isToday(selectedHealthDate)
+                                enabled: !isAuto(.sleep)
                             )
 
                             let exerciseRing = ringLines(
@@ -1989,7 +2013,7 @@ struct HealthListView: View {
                                 progress: effectiveExerciseGoal > 0 ? min(exerciseCurrentValue / effectiveExerciseGoal, 1) : 0,
                                 onTap: { incrementMetric(.exercise) },
                                 bumpText: bumpText(.exercise),
-                                enabled: !isAuto(.exercise) && !isToday(selectedHealthDate)
+                                enabled: !isAuto(.exercise)
                             )
 
                             let tdeeRing = ringLines(
@@ -2005,7 +2029,7 @@ struct HealthListView: View {
                                 progress: Double(effectiveTdeeGoal) > 0 ? min(tdeeCurrentValue / Double(effectiveTdeeGoal), 1) : 0,
                                 onTap: { incrementMetric(.tdee) },
                                 bumpText: bumpText(.tdee),
-                                enabled: !isAuto(.tdee) && !isToday(selectedHealthDate)
+                                enabled: !isAuto(.tdee)
                             )
                         }
 
