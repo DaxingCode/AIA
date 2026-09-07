@@ -261,19 +261,22 @@ struct RingView: View {
         // 2026-08-13 对齐 MiniBar 哲学：只在进入播一次生长，后续数据刷新由数字展示，圆环安静停末值。
         // 首播守卫：老芯片(A12/XS Max)首屏渲染慢、progress 常异步晚到，onAppear 时读到 0 导致环不显示，
         // 故额外用 onChange 在 progress 首次就绪(>0)时补播一次。
+        // >>> CHANGE-[2026-09-07 17:34:26]-[圆环切日期回缩修复] 开始
         .onAppear { animateRing() }
         .onChange(of: progress) { _, newVal in
             if !hasAnimated, newVal > 0 {
                 // 老芯片(A12/XS Max)首屏数据晚到：补播一次进入生长动画。
                 hasAnimated = true
                 animateRing()
-            } else if newVal > drawn {
-                // 手动点击圆环 / 数据刷新导致进度增长：快速补位，给用户即时反馈
-                // （不再依赖 hasAnimated 守卫，否则手动记录后退出再进才看得到色条）。
-                guard !AIATheme.motionReduce else { drawn = max(drawn, newVal); return }
-                withAnimation(AIATheme.Motion.ringFast) { drawn = max(drawn, newVal) }
+            } else if newVal != drawn {
+                // 进度变化（含回缩到 0：切到无数据日期 / 删记录）时同步圆环，
+                // 不再「只增不减」，否则切日期后圆环卡在旧进度（2026-09-07 修复）。
+                // 与同文件 MacroCard 的 onChange 逻辑对齐。
+                guard !AIATheme.motionReduce else { drawn = newVal; return }
+                withAnimation(AIATheme.Motion.ringFast) { drawn = newVal }
             }
         }
+        // <<< CHANGE-[2026-09-07 17:34:26]-[圆环切日期回缩修复] 结束
     }
 
     /// 进入时让进度环从 0 描边生长到目标值；「减弱动态效果」下直接落位。
