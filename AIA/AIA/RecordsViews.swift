@@ -4695,11 +4695,24 @@ private struct DietPreferencesView: View {
         Int(foods.reduce(0) { $0 + $1.calories })
     }
 
+    // >>> CHANGE-[2026-09-07 18:19:35]-饮食喜好累计重量 开始
+    // 原因: 用户要求在「我的饮食记录」hero 卡增加「累计 Xkg」。
+    // 口径: ① 只累计 weightGram 非空的记录(旧数据未解析重量跳过,不补默认值)
+    //       ② 排除「饮用水」(与 topFoods 同口径,水不算食物重量)
+    // 回退: 删本段 + 移除 DietPreferencesHero 的 grams 参数即可。
+    private var totalGrams: Double {
+        foods
+            .filter { $0.name != "饮用水" }
+            .compactMap { $0.weightGram }
+            .reduce(0, +)
+    }
+    // <<< CHANGE-[2026-09-07 18:19:35]-饮食喜好累计重量 结束
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 // 1. Hero 摘要卡：满宽、dietBG 底、icon+label+大数字（对齐首页 4 宫格的视觉语言）
-                DietPreferencesHero(total: foods.count, calories: totalCalories)
+                DietPreferencesHero(total: foods.count, calories: totalCalories, grams: totalGrams)
 
                 // 2. Top 5
                 SectionTitle(text: "最常吃的食物 Top 5", trailing: nil)
@@ -4757,6 +4770,15 @@ private struct DietPreferencesView: View {
 private struct DietPreferencesHero: View {
     let total: Int
     let calories: Int
+    let grams: Double
+
+    /// 重量显示：≥10kg 取整，<10kg 保留 1 位小数（例 0.5 / 1.2 / 9.9）
+    private var weightDisplay: String {
+        let kg = grams / 1000
+        if kg >= 10 { return String(format: "%.0f", kg) }
+        return String(format: "%.1f", kg)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
@@ -4768,18 +4790,40 @@ private struct DietPreferencesHero: View {
                     .foregroundStyle(AIATheme.sub)
                 Spacer()
             }
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("\(total)")
-                    .font(AIATheme.Font.ultra.weight(.semibold))
-                    .foregroundStyle(AIATheme.food)
-                Text("条")
-                    .font(AIATheme.Font.footnote)
-                    .foregroundStyle(AIATheme.sub)
-                Spacer()
-                Text("累计 \(calories) kcal")
-                    .font(AIATheme.Font.micro)
-                    .foregroundStyle(AIATheme.muted)
+            // >>> CHANGE-[2026-09-07 18:19:35]-饮食喜好累计重量 开始
+            // 三段式：左=总条数(按内容宽) / 中=累计重量(独占剩余,内部居中) / 右=累计热量(按内容宽)
+            // 注意：中块 .frame(maxWidth:.infinity) 本身已是 flexible，此处【绝不可再加 Spacer】，
+            //      否则 Spacer 与中块平分剩余空间，中块被压缩到小于内容宽而截断文字(实测需 55 只分到 50)。
+            HStack(alignment: .center, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("\(total)")
+                        .font(AIATheme.Font.ultra.weight(.semibold))
+                        .foregroundStyle(AIATheme.food)
+                    Text("条")
+                        .font(AIATheme.Font.footnote)
+                        .foregroundStyle(AIATheme.sub)
+                }
+                VStack(spacing: 1) {
+                    Text("\(weightDisplay) kg")
+                        .font(AIATheme.Font.title3.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text("累计重量")
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.muted)
+                }
+                .frame(maxWidth: .infinity)
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("\(calories) kcal")
+                        .font(AIATheme.Font.title3.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text("累计热量")
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.muted)
+                }
             }
+            // <<< CHANGE-[2026-09-07 18:19:35]-饮食喜好累计重量 结束
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
