@@ -364,7 +364,11 @@ struct FoodListView: View {
                 Image(systemName: "fork.knife")
                     .font(AIATheme.Font.micro.weight(.semibold))
                     .foregroundStyle(AIATheme.food)
-                Text("常吃食物 · 点一下快速记录（自动用上次重量）")
+                // >>> CHANGE-[2026-09-07 18:03:00]-[常吃食物文案精简] 开始
+                // 原因：用户要求去掉"自动用上次重量"的提示语，简化为中性表述。
+                // 回退：恢复为 "常吃食物 · 点一下快速记录（自动用上次重量）"
+                Text("常吃食物 · 点一下食物名称快速记录")
+                // <<< CHANGE-[2026-09-07 18:03:00]-[常吃食物文案精简] 结束
                     .font(AIATheme.Font.footnote.weight(.semibold))
                     .foregroundStyle(Color.primary)
                 Spacer()
