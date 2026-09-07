@@ -165,7 +165,7 @@
 "fitness.goal.maintain" = "維持";
 "diet.analysis.goalTarget" = "平均每日攝入情況";
 "diet.analysis.calorieTarget" = "目標熱量";
-"diet.analysis.proteinTarget" = "蛋白推薦";
+"diet.analysis.proteinTarget" = "蛋白質";
 "diet.analysis.goalMet" = "達標";
 "diet.analysis.goalLow" = "偏低";
 "diet.analysis.goalOver" = "超出";
