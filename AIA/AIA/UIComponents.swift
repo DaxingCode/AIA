@@ -1098,17 +1098,36 @@ enum AISummary {
         ]
     }
 
+    // >>> CHANGE-[2026-09-09 18:31:53]-[fix-账单气泡收入误显支出] 开始
     static func billMessages(bills: [Bill]) -> [String] {
         let todayBills = bills.filter { Calendar.current.isDateInToday($0.time) }
-        let todayTotal = todayBills.reduce(0) { $0 + $1.amount }
-        var list = ["账单管理 · 今日支出 ¥\(Int(todayTotal))，共 \(todayBills.count) 笔"]
+        let todayExpense = todayBills.filter { !$0.isIncome }.reduce(0) { $0 + $1.amount }
+        let todayIncome  = todayBills.filter {  $0.isIncome }.reduce(0) { $0 + $1.amount }
+        let expenseCount = todayBills.filter { !$0.isIncome }.count
+        let incomeCount  = todayBills.filter {  $0.isIncome }.count
         let cal = Calendar.current
         let now = Date()
         let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: now))!
         let monthExpense = bills.filter { $0.time >= monthStart && !$0.isIncome }.reduce(0) { $0 + $1.amount }
+        let monthIncome  = bills.filter { $0.time >= monthStart &&  $0.isIncome }.reduce(0) { $0 + $1.amount }
+
+        var list: [String] = []
+        if expenseCount > 0 {
+            list.append("账单管理 · 今日支出 ¥\(Int(todayExpense))，共 \(expenseCount) 笔")
+        }
+        if incomeCount > 0 {
+            list.append("账单管理 · 今日收入 ¥\(Int(todayIncome))，共 \(incomeCount) 笔")
+        }
+        if list.isEmpty {
+            list.append("账单管理 · 今天还没记账，记一笔？")
+        }
         list.append("账单管理 · 本月支出 ¥\(Int(monthExpense))")
+        if monthIncome > 0 {
+            list.append("账单管理 · 本月收入 ¥\(Int(monthIncome))")
+        }
         return list
     }
+    // <<< CHANGE-[2026-09-09 18:31:53]-[fix-账单气泡收入误显支出] 结束
 
     static func todoMessages(reminders: [Reminder]) -> [String] {
         let now = Date()
