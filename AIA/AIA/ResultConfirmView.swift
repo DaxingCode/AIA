@@ -606,9 +606,9 @@ struct ResultConfirmView: View {
         let isEditing = editingFoodIdx.contains(idx)
         let subtitle = "\(food.meal) · \(source == .local ? "免费版AI识别" : "Pro版AI识别")"
         let nutrients: [(String, Double, Bool)] = [
-            ("碳水", food.carbsPer100g * ratio, false),
             ("蛋白质", food.proteinPer100g * ratio, false),
             ("脂肪", food.fatPer100g * ratio, false),
+            ("碳水", food.carbsPer100g * ratio, false),
             ("纤维", food.fiberPer100g * ratio, false),
             ("糖", food.sugarPer100g * ratio, false),
             ("钠", food.sodiumPer100g * ratio, true)

@@ -1012,9 +1012,9 @@ struct FoodRowCard: View {
                 let p = payloadFood
                 let hasMacro = (p?.calories ?? 0) > 0 || (p?.protein ?? 0) > 0 || (p?.carbs ?? 0) > 0 || (p?.fat ?? 0) > 0
                 let nutrients: [(String, Double, Bool)] = [
-                    ("碳水", p?.carbs ?? 0, false),
                     ("蛋白", p?.protein ?? 0, false),
                     ("脂肪", p?.fat ?? 0, false),
+                    ("碳水", p?.carbs ?? 0, false),
                     ("纤维", p?.fiber ?? 0, false),
                     ("糖", p?.sugar ?? 0, false),
                     ("钠", p?.sodium ?? 0, true),
@@ -1183,9 +1183,9 @@ struct FoodSavedCard: View {
                 return s
             }()
             foodCardPreview(name: food.name, weight: foodWeightText, subtitle: foodSubtitle, calories: food.calories, nutrients: [
-                ("碳水", food.carbs, false),
                 ("蛋白", food.protein, false),
                 ("脂肪", food.fat, false),
+                ("碳水", food.carbs, false),
                 ("纤维", food.fiber, false),
                 ("糖", food.sugar, false),
                 ("钠", food.sodium, true),

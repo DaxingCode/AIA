@@ -814,11 +814,11 @@ struct FoodListView: View {
                         Divider()
                             .background(AIATheme.hairline)
 
-                        // 6 列营养明细：碳水 / 蛋白 / 脂肪 / 纤维 / 糖 / 钠
+                        // 6 列营养明细：蛋白 / 脂肪 / 碳水 / 纤维 / 糖 / 钠
                         HStack(spacing: 4) {
-                            macroCell("碳水", f.carbs, "g")
                             macroCell("蛋白", f.protein, "g")
                             macroCell("脂肪", f.fat, "g")
+                            macroCell("碳水", f.carbs, "g")
                             macroCell("纤维", f.fiber, "g")
                             macroCell("糖", f.sugar, "g")
                             macroCell("钠", f.sodium, "mg")
@@ -5124,8 +5124,8 @@ private struct DietAnalysisView: View {
         return [
             ("热量(kcal)",  String(format: "%.0f", sum.cal / d), AIATheme.food),
             ("蛋白质(g)",   String(format: "%.1f", sum.p   / d), AIATheme.blue),
-            ("碳水(g)",     String(format: "%.1f", sum.c   / d), AIATheme.amber),
             ("脂肪(g)",     String(format: "%.1f", sum.f   / d), AIATheme.green),
+            ("碳水(g)",     String(format: "%.1f", sum.c   / d), AIATheme.amber),
             ("膳食纤维(g)", String(format: "%.1f", sum.fiber / d), AIATheme.health),
             ("糖(g)",       String(format: "%.1f", sum.sugar / d), AIATheme.food),
             ("钠(mg)",      String(format: "%.0f", sum.sodium / d), AIATheme.todo),
@@ -5326,17 +5326,9 @@ private struct GoalCheckCard: View {
                 )
             }
             // >>> CHANGE-[2026-08-19 10:44:39]-目标达成补碳水脂肪 开始
-            // 原因: 补碳水/脂肪两行,与饮食记录页 6 元组顺序(蛋白→碳水→脂肪→纤维→糖→钠)一致;
+            // 原因: 补碳水/脂肪两行,与饮食记录页 6 元组顺序(蛋白→脂肪→碳水→纤维→糖→钠)一致;
             //       碳水/脂肪属「越高越好」,lowerIsBetter=false;目标与记录页同源(cal×0.5/4、cal×0.25/9)。
             // 回退: 删本段两 goalRow。
-            let carbSt = macroState(actual: avgCarb, target: carbTarget, lowerIsBetter: false)
-            goalRow(
-                label: NSLocalizedString("food.macro.carb", comment: ""),
-                detail: String(format: "%.1f / %.1f g", avgCarb, carbTarget),
-                ratio: carbTarget > 0 ? min(avgCarb / carbTarget, 1) : 0,
-                badge: carbSt.label,
-                color: carbSt.color
-            )
             let fatSt = macroState(actual: avgFat, target: fatTarget, lowerIsBetter: false)
             goalRow(
                 label: NSLocalizedString("food.macro.fat", comment: ""),
@@ -5344,6 +5336,14 @@ private struct GoalCheckCard: View {
                 ratio: fatTarget > 0 ? min(avgFat / fatTarget, 1) : 0,
                 badge: fatSt.label,
                 color: fatSt.color
+            )
+            let carbSt = macroState(actual: avgCarb, target: carbTarget, lowerIsBetter: false)
+            goalRow(
+                label: NSLocalizedString("food.macro.carb", comment: ""),
+                detail: String(format: "%.1f / %.1f g", avgCarb, carbTarget),
+                ratio: carbTarget > 0 ? min(avgCarb / carbTarget, 1) : 0,
+                badge: carbSt.label,
+                color: carbSt.color
             )
             // <<< CHANGE-[2026-08-19 10:44:39]-目标达成补碳水脂肪 结束
             // 按建议热量线性缩放的三项微量营养素目标
@@ -5790,11 +5790,6 @@ private struct NutritionCompositionCard: View {
                 GridItem(.flexible()),
                 GridItem(.flexible())
             ], spacing: 8) {
-                MacroCard(title: NSLocalizedString("food.macro.carb", comment: ""),
-                          value: valueText(macros.c, "g"),
-                          targetText: valueText(Double(targets.carb), "g"),
-                          progress: progress(actual: macros.c, target: targets.carb),
-                          color: AIATheme.amber)
                 MacroCard(title: NSLocalizedString("food.macro.protein", comment: ""),
                           value: valueText(macros.p, "g"),
                           targetText: valueText(Double(targets.protein), "g"),
@@ -5805,6 +5800,11 @@ private struct NutritionCompositionCard: View {
                           targetText: valueText(Double(targets.fat), "g"),
                           progress: progress(actual: macros.f, target: targets.fat),
                           color: AIATheme.green)
+                MacroCard(title: NSLocalizedString("food.macro.carb", comment: ""),
+                          value: valueText(macros.c, "g"),
+                          targetText: valueText(Double(targets.carb), "g"),
+                          progress: progress(actual: macros.c, target: targets.carb),
+                          color: AIATheme.amber)
                 MacroCard(title: NSLocalizedString("food.macro.fiber", comment: ""),
                           value: valueText(macros.fiber, "g"),
                           targetText: valueText(Double(targets.fiber), "g"),

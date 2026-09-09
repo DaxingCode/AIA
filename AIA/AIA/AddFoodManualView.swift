@@ -686,18 +686,18 @@ struct AddFoodManualView: View {
                 // 来自搜索(内置库/联网): 营养按当前重量自动缩放且只读; 用户手动填: 保留 TextField 手填基础值(按100g)。
                 if drafts[idx].isFromSearch {
                     nutritionReadOnlyCell(label: "蛋白质", unit: "g", value: drafts[idx].totalProtein)
-                    nutritionReadOnlyCell(label: "碳水", unit: "g", value: drafts[idx].totalCarbs)
                     nutritionReadOnlyCell(label: "脂肪", unit: "g", value: drafts[idx].totalFat)
+                    nutritionReadOnlyCell(label: "碳水", unit: "g", value: drafts[idx].totalCarbs)
                     nutritionReadOnlyCell(label: "膳食纤维", unit: "g", value: drafts[idx].totalFiber)
                     nutritionReadOnlyCell(label: "糖", unit: "g", value: drafts[idx].totalSugar)
                     nutritionReadOnlyCell(label: "钠", unit: "mg", value: drafts[idx].totalSodium)
                 } else {
                     nutritionCell(label: "蛋白质", unit: "g",
                               binding: $drafts[idx].baseProteinText)
-                    nutritionCell(label: "碳水", unit: "g",
-                              binding: $drafts[idx].baseCarbsText)
                     nutritionCell(label: "脂肪", unit: "g",
                               binding: $drafts[idx].baseFatText)
+                    nutritionCell(label: "碳水", unit: "g",
+                              binding: $drafts[idx].baseCarbsText)
                     nutritionCell(label: "膳食纤维", unit: "g",
                               binding: $drafts[idx].baseFiberText)
                     nutritionCell(label: "糖", unit: "g",

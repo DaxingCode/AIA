@@ -48,7 +48,7 @@ struct AllRecordsView: View {
                 id: "food-\(f.syncId.uuidString)",
                 type: .food,
                 title: f.name,
-                subtitle: "\(f.meal) · 蛋白 \(Int(f.protein)) / 碳水 \(Int(f.carbs)) / 脂肪 \(Int(f.fat))",
+                subtitle: "\(f.meal) · 蛋白 \(Int(f.protein)) / 脂肪 \(Int(f.fat)) / 碳水 \(Int(f.carbs))",
                 valueText: "\(Int(f.calories)) kcal",
                 date: f.date,
                 systemImage: "fork.knife",

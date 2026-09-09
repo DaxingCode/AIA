@@ -734,10 +734,10 @@ struct EditFoodView: View {
                       spacing: 8) {
                 nutritionCell(icon: "fish.fill", label: "蛋白质", unit: "g",
                               binding: totalBinding(for: $baseProteinText), color: AIATheme.blue)
-                nutritionCell(icon: "leaf.fill", label: "碳水", unit: "g",
-                              binding: totalBinding(for: $baseCarbsText), color: AIATheme.amber)
                 nutritionCell(icon: "drop.fill", label: "脂肪", unit: "g",
                               binding: totalBinding(for: $baseFatText), color: AIATheme.green)
+                nutritionCell(icon: "leaf.fill", label: "碳水", unit: "g",
+                              binding: totalBinding(for: $baseCarbsText), color: AIATheme.amber)
                 nutritionCell(icon: "leaf", label: "膳食纤维", unit: "g",
                               binding: totalBinding(for: $baseFiberText), color: AIATheme.health)
                 nutritionCell(icon: "cube.fill", label: "糖", unit: "g",

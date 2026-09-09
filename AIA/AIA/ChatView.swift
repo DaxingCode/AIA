@@ -1160,11 +1160,11 @@ struct ChatView: View {
                 Divider()
                     .background(AIATheme.hairline)
 
-                // 6 列营养明细：碳水 / 蛋白 / 脂肪 / 纤维 / 糖 / 钠
+                // 6 列营养明细：蛋白 / 脂肪 / 碳水 / 纤维 / 糖 / 钠
                 HStack(spacing: 4) {
-                    macroCell("碳水", pending.carbs, "g")
                     macroCell("蛋白", pending.protein, "g")
                     macroCell("脂肪", pending.fat, "g")
+                    macroCell("碳水", pending.carbs, "g")
                     macroCell("纤维", pending.fiber, "g")
                     macroCell("糖", pending.sugar, "g")
                     macroCell("钠", pending.sodium, "mg")
@@ -2668,7 +2668,7 @@ struct ChatView: View {
         let sod  = String(format: "%.0f", ref.sodium)
 
         return "小记帮你查到「\(ref.name)」每100克" +
-               "热量\(kcal)kcal，碳水\(carb)g，蛋白质\(pro)g，脂肪\(fat)g，" +
+               "热量\(kcal)kcal，蛋白质\(pro)g，脂肪\(fat)g，碳水\(carb)g，" +
                "膳食纤维\(fib)g，糖\(sug)g，钠\(sod)mg，数据仅供参考。"
     }
 
@@ -4428,7 +4428,7 @@ struct ChatView: View {
                                              kcal: baseCal, protein: basePro, carbs: baseCar, fat: baseFat,
                                              fiber: baseFiber, sugar: baseSugar, sodium: baseSodium,
                                              source: "cloud", in: context)
-                        summary.append("🔄 已更新「\(foodName)」：\(target.meal) \(Int(cal)) kcal\n  蛋白 \(String(format: "%.1f", target.protein))g · 碳水 \(String(format: "%.1f", target.carbs))g · 脂肪 \(String(format: "%.1f", target.fat))g · 纤维 \(String(format: "%.1f", target.fiber))g · 糖 \(String(format: "%.1f", target.sugar))g · 钠 \(String(format: "%.0f", target.sodium))mg\n\n结果仅供参考，如需修改可到\"饮食记录\"页面进行修改。")
+                        summary.append("🔄 已更新「\(foodName)」：\(target.meal) \(Int(cal)) kcal\n  蛋白 \(String(format: "%.1f", target.protein))g · 脂肪 \(String(format: "%.1f", target.fat))g · 碳水 \(String(format: "%.1f", target.carbs))g · 纤维 \(String(format: "%.1f", target.fiber))g · 糖 \(String(format: "%.1f", target.sugar))g · 钠 \(String(format: "%.0f", target.sodium))mg\n\n结果仅供参考，如需修改可到\"饮食记录\"页面进行修改。")
                     } else {
                         fallthrough
                     }
@@ -4472,7 +4472,7 @@ struct ChatView: View {
                     // 云端「新建饮食」动作真正入库 → 登记首页宫格待高亮（与新建路径口径统一）。
                     HomeHighlight.mark(types: ["food"])
                     // <<< CHANGE-[2026-08-31 19:10:00]-[对话页宫格高亮] 结束
-                    summary.append("🍽 \(meal)「\(foodName)」\(Int(cal)) kcal\n  蛋白 \(String(format: "%.1f", protein))g · 碳水 \(String(format: "%.1f", carbs))g · 脂肪 \(String(format: "%.1f", fat))g · 纤维 \(String(format: "%.1f", fiber))g · 糖 \(String(format: "%.1f", sugar))g · 钠 \(String(format: "%.0f", sodium))mg\n\n结果仅供参考，如需修改可到\"饮食记录\"页面进行修改。")
+                    summary.append("🍽 \(meal)「\(foodName)」\(Int(cal)) kcal\n  蛋白 \(String(format: "%.1f", protein))g · 脂肪 \(String(format: "%.1f", fat))g · 碳水 \(String(format: "%.1f", carbs))g · 纤维 \(String(format: "%.1f", fiber))g · 糖 \(String(format: "%.1f", sugar))g · 钠 \(String(format: "%.0f", sodium))mg\n\n结果仅供参考，如需修改可到\"饮食记录\"页面进行修改。")
                 }
             }
         }

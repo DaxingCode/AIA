@@ -88,9 +88,9 @@ struct FoodDetailView: View {
 
                 SectionTitle(text: "营养明细")
                 VStack(spacing: 8) {
-                    macroRow("碳水", entry.carbs, entry.baseCarbs ?? entry.carbs, "g", AIATheme.amber)
                     macroRow("蛋白质", entry.protein, entry.baseProtein ?? entry.protein, "g", AIATheme.blue)
                     macroRow("脂肪", entry.fat, entry.baseFat ?? entry.fat, "g", AIATheme.green)
+                    macroRow("碳水", entry.carbs, entry.baseCarbs ?? entry.carbs, "g", AIATheme.amber)
                     macroRow("膳食纤维", entry.fiber, entry.baseFiber ?? entry.fiber, "g", AIATheme.purple)
                     macroRow("糖", entry.sugar, entry.baseSugar ?? entry.sugar, "g", AIATheme.warn)
                     macroRow("钠", entry.sodium, entry.baseSodium ?? entry.sodium, "mg", AIATheme.warning)
