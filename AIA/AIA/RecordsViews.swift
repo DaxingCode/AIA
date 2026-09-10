@@ -4723,11 +4723,31 @@ private struct DietPreferencesView: View {
     }
     // <<< CHANGE-[2026-09-07 18:19:35]-饮食喜好累计重量 结束
 
+    // >>> CHANGE-[2026-09-10 22:34:42]-饮食喜好时间范围 开始
+    // 原因: 用户要求在「我的饮食记录」hero 卡标题右侧展示统计时间范围 (最早 - 最晚)。
+    // 口径: 取 foods（按 date 倒序）最早/最晚；同日只显示一天；空记录返回空串不展示。
+    // 回退: 删本段 + 移除 DietPreferencesHero 的 dateRange 参数及调用处传参即可。
+    // 统计时间范围：按 FoodEntry.date 最早 ~ 最晚；空记录返回空串（不显示）
+    private var dateRangeText: String {
+        guard let earliest = foods.last?.date,
+              let latest = foods.first?.date else {
+            return ""
+        }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "yyyy.MM.dd"
+        if Calendar.current.isDate(earliest, inSameDayAs: latest) {
+            return "(\(f.string(from: earliest)))"
+        }
+        return "(\(f.string(from: earliest)) - \(f.string(from: latest)))"
+    }
+    // <<< CHANGE-[2026-09-10 22:34:42]-饮食喜好时间范围 结束
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 // 1. Hero 摘要卡：满宽、dietBG 底、icon+label+大数字（对齐首页 4 宫格的视觉语言）
-                DietPreferencesHero(total: foods.count, calories: totalCalories, grams: totalGrams)
+                DietPreferencesHero(total: foods.count, calories: totalCalories, grams: totalGrams, dateRange: dateRangeText)
 
                 // 2. Top 5
                 SectionTitle(
@@ -4836,6 +4856,7 @@ private struct DietPreferencesHero: View {
     let total: Int
     let calories: Int
     let grams: Double
+    let dateRange: String
 
     /// 重量显示：≥10kg 取整，<10kg 保留 1 位小数（例 0.5 / 1.2 / 9.9）
     private var weightDisplay: String {
@@ -4853,6 +4874,12 @@ private struct DietPreferencesHero: View {
                 Text("我的饮食记录")
                     .font(AIATheme.Font.footnote.weight(.medium))
                     .foregroundStyle(AIATheme.sub)
+                if !dateRange.isEmpty {
+                    Text(dateRange)
+                        .font(AIATheme.Font.caption)
+                        .foregroundStyle(AIATheme.muted)
+                        .lineLimit(1)
+                }
                 Spacer()
             }
             // >>> CHANGE-[2026-09-07 18:19:35]-饮食喜好累计重量 开始
