@@ -1420,6 +1420,12 @@ struct HealthListView: View {
         let v = netCalorie
         return (v > 0 ? "+" : "") + "\(v) kcal"
     }
+    // >>> CHANGE-[2026-09-10 22:40:08]-[健康页第1方块改静息心率第3方块改今日摄入] 开始
+    /// 今日摄入展示：整数 kcal，与饮食页「今日摄入」列同源（todayCalories 按 selectedHealthDate 求和）
+    private var todayCaloriesDisplay: String {
+        "\(Int(todayCalories)) kcal"
+    }
+    // <<< CHANGE-[2026-09-10 22:40:08]-[健康页第1方块改静息心率第3方块改今日摄入] 结束
     /// 净热量颜色：医学营养界习惯——盈余(正)红、缺口(负)绿；无数据中性
     private var netCalorieColor: Color {
         // >>> CHANGE-[2026-08-20 14:00:00]-[深色模式文字色整改] 开始
@@ -2063,20 +2069,20 @@ struct HealthListView: View {
 
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                             // >>> CHANGE-[2026-08-19 12:36:16]-[健康目标页净热量方块] 开始
-                            // 顺序调整: 体重 → BMI → 静息心率 → 净热量(替代身高);净热量跳饮食页
-                            Button { NavigationRouter.shared.navigate(.bodyData) } label: {
-                                StatCard(value: weightDisplay, caption: NSLocalizedString("health.stat.weight", comment: ""))
+                            // 顺序调整: 静息心率(原体重位置) → BMI → 今日摄入(原静息心率位置) → 净热量
+                            Button {
+                                // 跳转到静息心率每天记录页（最近90天，自动/手动均可点进去录入或覆盖）
+                                NavigationRouter.shared.navigate(.restingHeartRateRecords)
+                            } label: {
+                                StatCard(value: stat("心率"), caption: NSLocalizedString("health.stat.restingHR", comment: ""))
                             }
                             .buttonStyle(.plain)
                             Button { NavigationRouter.shared.navigate(.bodyData) } label: {
                                 StatCard(value: bmiDisplay, caption: NSLocalizedString("health.stat.bmi", comment: ""))
                             }
                             .buttonStyle(.plain)
-                            Button {
-                                // 跳转到静息心率每天记录页（最近90天，自动/手动均可点进去录入或覆盖）
-                                NavigationRouter.shared.navigate(.restingHeartRateRecords)
-                            } label: {
-                                StatCard(value: stat("心率"), caption: NSLocalizedString("health.stat.restingHR", comment: ""))
+                            Button { NavigationRouter.shared.navigate(.diet) } label: {
+                                StatCard(value: todayCaloriesDisplay, caption: NSLocalizedString("health.stat.intake", comment: "今日摄入"))
                             }
                             .buttonStyle(.plain)
                             Button { NavigationRouter.shared.navigate(.diet) } label: {

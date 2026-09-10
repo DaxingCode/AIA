@@ -141,6 +141,7 @@
 "health.restingHR.tag.manual" = "手动";
 "health.stat.bmi" = "BMI";
 "health.stat.netCalorie" = "净热量";
+"health.stat.intake" = "今日摄入";
 "health.weightTrend" = "体重趋势";
 "health.noWeight" = "暂无体重记录，去首页截一张体重截屏";
 "health.sleepStages" = "睡眠分期 · 昨晚";
