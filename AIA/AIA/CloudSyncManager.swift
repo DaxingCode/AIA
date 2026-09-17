@@ -1478,6 +1478,11 @@ final class CloudSyncManager: ObservableObject {
                 let sleeps = try bg.fetch(FetchDescriptor<SleepSession>()); sleeps.forEach { bg.delete($0) }
                 let rules = try bg.fetch(FetchDescriptor<RecurringRule>()); rules.forEach { bg.delete($0) }
                 let sources = try bg.fetch(FetchDescriptor<FoodSource>()); sources.forEach { bg.delete($0) }
+                // >>> CHANGE-[2026-09-16 09:44:24]-[全量清空补RecogSource] 开始
+                // 补漏：RecogSource 与 FoodSource 同族（1:1 来源标记），此前全量清空漏了它，
+                // 清理后会残留孤儿记录。回退：删除本 1 行即可。
+                let recogSources = try bg.fetch(FetchDescriptor<RecogSource>()); recogSources.forEach { bg.delete($0) }
+                // <<< CHANGE-[2026-09-16 09:44:24]-[全量清空补RecogSource] 结束
                 try bg.save()
                 print("[sync] 本地全量清空完成")
             } catch {

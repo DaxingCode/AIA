@@ -15,9 +15,12 @@ import Foundation
 public enum AppPersistence {
     /// 当前 SwiftData schema 版本（仅用于记录，不再参与文件名）。
     /// 每次改 @Model 字段或新增模型：+1 并在 AIAMigrationPlan 加对应 Stage。
-    /// 必须与 `schema` 实际引用的 VersionedSchema（SchemaVersion19）保持一致，
+    /// 必须与 `schema` 实际引用的 VersionedSchema（SchemaVersion21）保持一致，
     /// 否则日志/排查时版本号错乱，掩盖真实的迁移失败。
-    public static let currentSchemaVersion = 20
+    // >>> CHANGE-[2026-09-16 09:44:24]-[补登记RecogSource到schema] 开始
+    // v20 → v21：补登记漏掉的 RecogSource（详见 AIAMigrationPlan.SchemaVersion21）。
+    public static let currentSchemaVersion = 21
+    // <<< CHANGE-[2026-09-16 09:44:24]-[补登记RecogSource到schema] 结束
 
     /// App Group 标识符：主 App / Widget / ShareExtension / Siri 都靠它共享同一份 store 文件。
     /// 关键：Widget 是独立进程，它的 applicationSupportDirectory 与
@@ -41,10 +44,13 @@ public enum AppPersistence {
             .appendingPathComponent("Backups")
     }
 
-    /// 当前 schema：从 AIAMigrationPlan 的 v20 版本化 schema 构造（含 DailyHealthMetric.weight/height/bmi 等），
-    /// 必须与 `currentSchemaVersion`（20）保持一致，否则新增模型不在 container
+    /// 当前 schema：从 AIAMigrationPlan 的 v21 版本化 schema 构造（v20 + RecogSource），
+    /// 必须与 `currentSchemaVersion`（21）保持一致，否则新增模型不在 container
     /// schema 里注册 → context.insert 静默丢弃、数据不落盘（删 App 重装后尤为明显）。
-    public static var schema: Schema { Schema(versionedSchema: SchemaVersion20.self) }
+    // >>> CHANGE-[2026-09-16 09:44:24]-[补登记RecogSource到schema] 开始
+    // v21：RecogSource 补登记（修复 iOS 27 HistoryObserver 冷启崩溃）。
+    public static var schema: Schema { Schema(versionedSchema: SchemaVersion21.self) }
+    // <<< CHANGE-[2026-09-16 09:44:24]-[补登记RecogSource到schema] 结束
 
     /// 崩溃安全：磁盘库任何原因初始化失败，回退到内存存储，保证至少能写入（不白屏）。
     public static func makeContainer() -> ModelContainer {

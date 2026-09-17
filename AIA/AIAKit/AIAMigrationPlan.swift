@@ -980,6 +980,43 @@ enum SchemaVersion20: VersionedSchema {
 // <<< CHANGE-[2026-09-04 00:26:45]-[每日体重身高BMI快照] 结束
 // <<< CHANGE-[2026-08-31 23:30:00]-[周期账单来源关联] 结束
 
+// >>> CHANGE-[2026-09-16 09:44:24]-[补登记RecogSource到schema] 开始
+// v21.0.0：把长期漏登记的 RecogSource 正式纳入 schema。
+// 背景：RecogSource 一直是 @Model（Models.swift:498），被 context.insert / @Query 大量使用，
+//       却从未登记进任何 VersionedSchema（v1~v20 全无它）。于是"运行时认识的实体"与
+//       "磁盘库模型里的实体"不一致：iOS 27 新增的 HistoryObserver 会逐个实体构建
+//       `ENTITY IN {"实体名"}` 去过滤持久化历史，轮到 RecogSource 时库模型查无此实体 →
+//       CoreData 报 "unimplemented SQL generation for predicate" → 冷启 abort
+//       （1.0.5 在 iOS 27 上必崩的真因）。
+// v21 = v20 + RecogSource（纯新增一张表，lightweight 自动建表，不动任何用户数据）。
+// 回退：删除本 enum + 撤销 schemas/stages 中的 v21 引用 + AppPersistence 改回 v20。
+enum SchemaVersion21: VersionedSchema {
+    static var versionIdentifier: Schema.Version = Schema.Version(21, 0, 0)
+    static var models: [any PersistentModel.Type] {
+        [
+            Bill.self,
+            Reminder.self,
+            FoodEntry.self,
+            HealthMetric.self,
+            RecognitionRecord.self,
+            ChatMessage.self,
+            RecurringRule.self,
+            MerchantMeta.self,
+            FoodMeta.self,
+            WaterLog.self,
+            FoodNote.self,
+            ReminderNote.self,
+            FoodSource.self,
+            HealthNote.self,
+            ImportBatch.self,
+            SleepSession.self,
+            DailyHealthMetric.self,    // v20 外层新版（含 weight/height/bmi）
+            RecogSource.self           // ← v21 唯一新增（补齐漏登记）
+        ]
+    }
+}
+// <<< CHANGE-[2026-09-16 09:44:24]-[补登记RecogSource到schema] 结束
+
 // MARK: - 迁移计划：v1 → v3 仅新增 MerchantMeta 表；v3 → v4 为 RecurringRule 新增 3 个字段；
 //           v4 → v5 为 FoodEntry 新增 5 个可选字段；v5 → v6 新增 FoodMeta 表；
 //           v6 → v7 为 MerchantMeta 新增 3 个 sync 字段；v7 → v8 为 FoodEntry 新增 7 个字段；
@@ -990,8 +1027,8 @@ enum SchemaVersion20: VersionedSchema {
 //           其 schema checksum 会与 v1 重复，导致 SwiftData 报
 //           "Duplicate version checksums across stages detected"，故不保留同构中间版本。
 enum AIAMigrationPlan: SchemaMigrationPlan {
-    static var schemas: [VersionedSchema.Type] { [SchemaVersion1.self, SchemaVersion3.self, SchemaVersion4.self, SchemaVersion5.self, SchemaVersion6.self, SchemaVersion7.self, SchemaVersion8.self, SchemaVersion9.self, SchemaVersion10.self, SchemaVersion11.self, SchemaVersion12.self, SchemaVersion13.self, SchemaVersion14.self, SchemaVersion15.self, SchemaVersion16.self, SchemaVersion17.self, SchemaVersion18.self, SchemaVersion19.self, SchemaVersion20.self] }
-    static var stages: [MigrationStage] { [migrateV1toV3, migrateV3toV4, migrateV4toV5, migrateV5toV6, migrateV6toV7, migrateV7toV8, migrateV8toV9, migrateV9toV10, migrateV10toV11, migrateV11toV12, migrateV12toV13, migrateV13toV14, migrateV14toV15, migrateV15toV16, migrateV16toV17, migrateV17toV18, migrateV18toV19, migrateV19toV20] }
+    static var schemas: [VersionedSchema.Type] { [SchemaVersion1.self, SchemaVersion3.self, SchemaVersion4.self, SchemaVersion5.self, SchemaVersion6.self, SchemaVersion7.self, SchemaVersion8.self, SchemaVersion9.self, SchemaVersion10.self, SchemaVersion11.self, SchemaVersion12.self, SchemaVersion13.self, SchemaVersion14.self, SchemaVersion15.self, SchemaVersion16.self, SchemaVersion17.self, SchemaVersion18.self, SchemaVersion19.self, SchemaVersion20.self, SchemaVersion21.self] }
+    static var stages: [MigrationStage] { [migrateV1toV3, migrateV3toV4, migrateV4toV5, migrateV5toV6, migrateV6toV7, migrateV7toV8, migrateV8toV9, migrateV9toV10, migrateV10toV11, migrateV11toV12, migrateV12toV13, migrateV13toV14, migrateV14toV15, migrateV15toV16, migrateV16toV17, migrateV17toV18, migrateV18toV19, migrateV19toV20, migrateV20toV21] }
 
     static let migrateV1toV3 = MigrationStage.lightweight(
         fromVersion: SchemaVersion1.self,
@@ -1094,4 +1131,14 @@ enum AIAMigrationPlan: SchemaMigrationPlan {
         toVersion: SchemaVersion20.self
     )
     // <<< CHANGE-[2026-09-04 00:26:45]-[每日体重身高BMI快照] 结束
+
+    // >>> CHANGE-[2026-09-16 09:44:24]-[补登记RecogSource到schema] 开始
+    // v20 → v21：新增 RecogSource 表（纯新增，lightweight 自动建表，不动已有数据）。
+    // 修复：RecogSource 漏登记导致 iOS 27 的 HistoryObserver 过滤持久化历史时
+    //       "unimplemented SQL generation for predicate: ENTITY IN {RecogSource}" → 冷启崩溃。
+    static let migrateV20toV21 = MigrationStage.lightweight(
+        fromVersion: SchemaVersion20.self,
+        toVersion: SchemaVersion21.self
+    )
+    // <<< CHANGE-[2026-09-16 09:44:24]-[补登记RecogSource到schema] 结束
 }
