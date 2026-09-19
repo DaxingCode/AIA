@@ -2829,6 +2829,18 @@ struct ContentView: View {
             HealthManager.shared.debouncedChange
                 .sink { [weak self] in self?.objectWillChange.send() }
                 .store(in: &cancellables)
+            // >>> CHANGE-[2026-09-19 10:11:35]-[iOS27手动健康数据刷新(首页/心率页/饮食页)] 开始
+            // 原因：iOS 27 起 SwiftData 只按「实体是否变化」精确刷新 @Query，本单例读的 DailyHealthMetric
+            //       （ManualHealthStore 门面 → DailyHealthStore）没有 @Query 订阅它 → 健康页点圆环录入后，
+            //       首页宫格/AI 气泡的步数·运动·能量·静息心率不会更新（iOS 26/18 因过度刷新掩盖此缺陷）。
+            // 说明：写入侧 DailyHealthStore.notifyChanged() 会广播 .dailyHealthStoreChanged，这里转发一次
+            //       objectWillChange，让订阅本单例的三个子视图（HealthTileView / DietTileView / AISummarySectionView）重算。
+            // 回退：删除本段 sink 即可（写入侧广播保留也无副作用）。
+            NotificationCenter.default.publisher(for: .dailyHealthStoreChanged)
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in self?.objectWillChange.send() }
+                .store(in: &cancellables)
+            // <<< CHANGE-[2026-09-19 10:11:35]-[iOS27手动健康数据刷新(首页/心率页/饮食页)] 结束
         }
 
         private var hkUsable: Bool {

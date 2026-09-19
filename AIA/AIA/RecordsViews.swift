@@ -225,6 +225,10 @@ struct FoodListView: View {
     @State private var showGoalEditor: Bool = false
     @State private var editedGoal: Double = 0
     @State private var showCalorieGoalAlert: Bool = false   // 热量目标为 0 → 弹窗引导去健康目标页
+    // >>> CHANGE-[2026-09-19 10:11:35]-[iOS27手动健康数据刷新(首页/心率页/饮食页)] 开始
+    /// 手动健康数据（DailyHealthMetric）变更票据：自增即触发本页重算（TDEE 目标/今日消耗重新取值）。
+    @State private var healthStoreTick = 0
+    // <<< CHANGE-[2026-09-19 10:11:35]-[iOS27手动健康数据刷新(首页/心率页/饮食页)] 结束
     @State private var showCamera = false
     @State private var showPicker = false
     @State private var showAddFood = false
@@ -1340,6 +1344,13 @@ struct FoodListView: View {
             // <<< CHANGE-[2026-08-17 17:25:00]-[编辑食物统一EditFoodSheet] 结束
         }
         .onAppear { meal = FoodListView.defaultMeal(for: .now) }
+        // >>> CHANGE-[2026-09-19 10:11:35]-[iOS27手动健康数据刷新(首页/心率页/饮食页)] 开始
+        // 手动健康数据写入（健康页点圆环等）后重算本页：本页 TDEE/今日消耗读 DailyHealthMetric，
+        // iOS 27 起 @Query 按实体刷新且本页无该表订阅，靠写入侧广播兜底。
+        .onReceive(NotificationCenter.default.publisher(for: .dailyHealthStoreChanged)) { _ in
+            healthStoreTick &+= 1
+        }
+        // <<< CHANGE-[2026-09-19 10:11:35]-[iOS27手动健康数据刷新(首页/心率页/饮食页)] 结束
         .cameraRecognitionFlow(showCamera: $showCamera, showPicker: $showPicker, navigateToChat: true)
         // 热量目标为 0（未设置）→ 居中弹窗引导去健康目标页录入身高体重自动生成
         .centeredAlert(
@@ -1400,6 +1411,13 @@ struct HealthListView: View {
     @Query(filter: #Predicate<SleepSession> { !$0.syncDeleted }, sort: \.sleepStart, order: .reverse) private var sleeps: [SleepSession]
     /// 识别引擎来源标记（RecogSource 1:1 关联 HealthMetric.syncId），用于每行显示「免费版AI识别/Pro版AI…」
     @Query private var recogSources: [RecogSource]
+    // >>> CHANGE-[2026-09-19 09:43:24]-[健康页圆环iOS27不刷新修复] 开始
+    // 原因：本页四环的手动数值从 DailyHealthMetric 表读取（ManualHealthStore 门面 → DailyHealthStore），
+    //       但此前没有任何 @Query 订阅该表。iOS 27 起 SwiftData 按实体精确刷新 @Query，
+    //       于是点圆环 +N 后本页不重算 → 数字与色环不更新（iOS 26/18 会过度刷新，故只在 iOS 27 真机暴露）。
+    // 回退：删除本段 @Query 与本文件三处配套代码（healthStoreTick / let _ .count / .onReceive）即可。
+    @Query(filter: #Predicate<DailyHealthMetric> { !$0.syncDeleted }) private var dailyHealthMetrics: [DailyHealthMetric]
+    // <<< CHANGE-[2026-09-19 09:43:24]-[健康页圆环iOS27不刷新修复] 结束
     private var recogSourceBySyncId: [UUID: String] {
         Dictionary(uniqueKeysWithValues: recogSources.map { ($0.syncId, $0.recogSourceRaw) })
     }
@@ -1722,6 +1740,10 @@ struct HealthListView: View {
     @State private var showAutoModeAlert = false     // 自动记录模式点击圆环的切换确认弹窗
     @State private var alertMetricKind: HealthMetricKind? = nil
     @State private var alertMetricTitle: String = ""
+    // >>> CHANGE-[2026-09-19 09:43:24]-[健康页圆环iOS27不刷新修复] 开始
+    /// 仅用于「手动健康数据变更 → 本页重算」的刷新票据，值本身不参与渲染。
+    @State private var healthStoreTick = 0
+    // <<< CHANGE-[2026-09-19 09:43:24]-[健康页圆环iOS27不刷新修复] 结束
 
     private var sleepHours: Double {
         healths.first(where: { $0.metric.contains("睡眠") }).flatMap { Double($0.value) } ?? 0
@@ -2002,6 +2024,12 @@ struct HealthListView: View {
                         let effectiveSleepGoal    = sleepGoalHours > 0 ? sleepGoalHours : 8
                         let effectiveExerciseGoal = exerciseGoalMin > 0 ? exerciseGoalMin : 30
                         let effectiveTdeeGoal     = tdeeGoal > 0 ? Int(tdeeGoal) : 2000
+
+                        // >>> CHANGE-[2026-09-19 09:43:24]-[健康页圆环iOS27不刷新修复] 开始
+                        // 显式读一次，确保本页与 DailyHealthMetric（手动健康数据）建立刷新依赖：
+                        // 写入后本页重算，四环拿到新 value/progress，RingView 的 onChange 才会播生长动画。
+                        let _ = dailyHealthMetrics.count
+                        // <<< CHANGE-[2026-09-19 09:43:24]-[健康页圆环iOS27不刷新修复] 结束
 
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                             let stepsRing = ringLines(current: "\(stepsCurrentValue)", hasData: stepsCurrentValue > 0, goal: effectiveStepGoal)
@@ -2360,6 +2388,13 @@ struct HealthListView: View {
         .onChange(of: sleeps.count) { _, _ in
             restoreSleepMaskIfNeeded()
         }
+        // >>> CHANGE-[2026-09-19 09:43:24]-[健康页圆环iOS27不刷新修复] 开始
+        // 双保险：手动健康数据写入（DailyHealthStore.notifyChanged）直接广播，本页收到即重算，
+        // 不依赖 SwiftData 跨实体传播（iOS 27 真机上 @Query 不再"顺带"刷新其它实体）。
+        .onReceive(NotificationCenter.default.publisher(for: .dailyHealthStoreChanged)) { _ in
+            healthStoreTick &+= 1
+        }
+        // <<< CHANGE-[2026-09-19 09:43:24]-[健康页圆环iOS27不刷新修复] 结束
         // 未录入健康目标提醒弹窗（身高或体重任一为 0 即弹，每次进入都判断）
         // 用自定义居中弹窗取代系统 .alert（iOS 26 系统 alert 文字强制左对齐，无法居中）
         .overlay(alignment: .center) {

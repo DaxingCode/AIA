@@ -12,6 +12,10 @@ struct RestingHeartRateRecordsView: View {
     @State private var showInput = false
     @State private var inputDay: Date = Date()
     @State private var inputInitial: Int = 0
+    // >>> CHANGE-[2026-09-19 10:11:35]-[iOS27手动健康数据刷新(首页/心率页/饮食页)] 开始
+    /// 手动健康数据（DailyHealthMetric）变更票据：自增即触发本页重算，行内数值重新从 store 读取。
+    @State private var dailyHealthTick = 0
+    // <<< CHANGE-[2026-09-19 10:11:35]-[iOS27手动健康数据刷新(首页/心率页/饮食页)] 结束
 
     private let calendar = Calendar.current
     private let daysToShow = 90
@@ -32,6 +36,13 @@ struct RestingHeartRateRecordsView: View {
         .onReceive(HealthManager.shared.debouncedChange) { _ in
             // HealthKit 自动数据刷新后重绘（只读 @State 里存的值会在 body 重新计算）
         }
+        // >>> CHANGE-[2026-09-19 10:11:35]-[iOS27手动健康数据刷新(首页/心率页/饮食页)] 开始
+        // 手动录入/覆盖静息心率（本页 sheet 保存、健康页点其他环）后重算本页：
+        // iOS 27 起 @Query 按实体刷新，本页无 DailyHealthMetric 订阅，靠写入侧广播兜底。
+        .onReceive(NotificationCenter.default.publisher(for: .dailyHealthStoreChanged)) { _ in
+            dailyHealthTick &+= 1
+        }
+        // <<< CHANGE-[2026-09-19 10:11:35]-[iOS27手动健康数据刷新(首页/心率页/饮食页)] 结束
         .sheet(isPresented: $showInput) {
             RestingHeartRateInputSheet(
                 initial: inputInitial,

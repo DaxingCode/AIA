@@ -66,6 +66,14 @@ final class DailyHealthStore {
         syncTrigger?()
         // 手动记健康数据后，补偿刷新桌面 widget。
         WidgetSnapshot.refreshAfterWrite()
+        // >>> CHANGE-[2026-09-19 09:43:24]-[健康页圆环iOS27不刷新修复] 开始
+        // 原因：iOS 27 起 SwiftData 改为「按实体精确刷新 @Query」（新增 HistoryObserver 逐实体查持久化历史），
+        //       视图若没有 @Query 订阅 DailyHealthMetric，手动录入（点健康圆环 +N）后不会重算，
+        //       表现为「只飘 +N 字、圆环数字与色条不更新」；iOS 26/18 因过度刷新看不到该缺陷。
+        // 说明：写入侧显式广播一次，关心手动健康数据的视图（如健康管理页）收到后自行重算。
+        // 回退：删除本段 + 文件末尾的 Notification.Name 扩展即可。
+        NotificationCenter.default.post(name: .dailyHealthStoreChanged, object: nil)
+        // <<< CHANGE-[2026-09-19 09:43:24]-[健康页圆环iOS27不刷新修复] 结束
     }
 
     /// 写入单个指标字段（覆盖式，幂等）。touchesUpdatedAt=true 时刷新 syncUpdatedAt + 触发同步。
@@ -396,3 +404,11 @@ final class DailyHealthStore {
         }
     }
 }
+
+// >>> CHANGE-[2026-09-19 09:43:24]-[健康页圆环iOS27不刷新修复] 开始
+extension Notification.Name {
+    /// 每日健康指标（DailyHealthMetric · 手动录入）写入通知。
+    /// 消费方（如健康管理页）读该表却无法用 @Query 订阅时，收到后仅用于触发自身重算。
+    static let dailyHealthStoreChanged = Notification.Name("aia.dailyHealthStoreChanged")
+}
+// <<< CHANGE-[2026-09-19 09:43:24]-[健康页圆环iOS27不刷新修复] 结束
