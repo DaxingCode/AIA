@@ -1010,7 +1010,12 @@ struct ContentView: View {
         NavigationRouter.shared.beginChatSession()
         // 像微信一样：这张截屏先作为「你发的图」进对话流，好记AI随后在同一段对话里回识别卡片。
         // 返回的文件名给识别结果复用，同一张图不落盘两次。
-        let presavedName = appendUserImageMessage(image: img, context: context)
+        // >>> CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 开始
+        // 来源：截屏无感识别 → "screenshot"（气泡上方显示「截屏自动记」）；
+        //       分享扩展 → "share"（显示「图片自动记」）。两者共用本函数，靠 pending 标记区分。
+        let presavedName = appendUserImageMessage(image: img, context: context,
+                                                  source: p.fromShareExtension ? "share" : "screenshot")
+        // <<< CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 结束
 
         // >>> 分享扩展来源：图片已进对话页，识别交给主 App 在对话页内完成（显示「好记AI正在识别…」加载条）。
         // 不再读扩展端 result，统一复用拍照/相册那条成熟识别链路，避免两端各写一份识别。
@@ -1021,7 +1026,8 @@ struct ContentView: View {
                 runImageRecognition(image: img, context: context,
                                     errorMessage: Binding<String?>.constant(nil),
                                     navigateToChat: shouldNavigate,
-                                    presavedImageName: presavedName)
+                                    presavedImageName: presavedName,
+                                    source: "share")   // >>> CHANGE-[2026-09-21 12:44:10]-[发图来源标签]：分享扩展来源
             }
             return
         }

@@ -92,12 +92,44 @@ func hasSavedItems(in msg: ChatMessage) -> Bool {
 /// 换设备拉到这条消息时取不到图，渲染侧需降级为占位（见 ChatView.userImageBubble）。
 let USER_IMAGE_PREFIX = "__USER_IMAGE__"
 
-/// 解析出用户发图消息里的本地文件名；非发图消息返回 nil。
+// >>> CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 开始
+// 图片消息文本格式升级为可携带「来源」：
+//   新：__USER_IMAGE__{source}:{filename}     旧：__USER_IMAGE__{filename}
+// 来源用于在图片气泡上方显示「拍照自动记 / 图片自动记（相册、分享）/ 文件自动记 / 截屏自动记」标签。
+// 分隔符 ":" 是安全的：文件名由 LocalImageStore / ScreenshotStore 生成为 UUID.jpg，绝不含冒号；
+// 旧消息（无冒号）→ 来源解析为 nil → 不显示标签，天然向后兼容。
+//
+// ⚠️ 回退须知：若日后要回退本次改动，请【保留本段解码逻辑】、只回退渲染层标签——
+// 因为旧版解码会把 "camera:xxx.jpg" 整串当文件名 → 找不到文件 → 图片退化成「仅存于原设备」占位。
+private let USER_IMAGE_SOURCE_SEP: Character = ":"
+
+/// 编码一条发图消息的文本（source 为 nil 时退化为旧格式，保持兼容）。
+func encodeUserImageText(source: String?, imageName: String) -> String {
+    guard let s = source, !s.isEmpty else { return USER_IMAGE_PREFIX + imageName }
+    return USER_IMAGE_PREFIX + s + String(USER_IMAGE_SOURCE_SEP) + imageName
+}
+
+/// 解析出用户发图消息里的本地文件名；非发图消息返回 nil。新旧两种格式都支持。
 func decodeUserImageName(_ text: String) -> String? {
     guard text.hasPrefix(USER_IMAGE_PREFIX) else { return nil }
-    let name = String(text.dropFirst(USER_IMAGE_PREFIX.count))
-    return name.isEmpty ? nil : name
+    let body = String(text.dropFirst(USER_IMAGE_PREFIX.count))
+    if let idx = body.firstIndex(of: USER_IMAGE_SOURCE_SEP) {
+        let name = String(body[body.index(after: idx)...])
+        return name.isEmpty ? nil : name
+    }
+    return body.isEmpty ? nil : body
 }
+
+/// 解析出用户发图消息的来源（camera / library / file / share / screenshot）；
+/// 旧消息（无来源段）返回 nil → 渲染层据此不显示标签。
+func decodeUserImageSource(_ text: String) -> String? {
+    guard text.hasPrefix(USER_IMAGE_PREFIX) else { return nil }
+    let body = String(text.dropFirst(USER_IMAGE_PREFIX.count))
+    guard let idx = body.firstIndex(of: USER_IMAGE_SOURCE_SEP) else { return nil }
+    let src = String(body[body.startIndex..<idx])
+    return src.isEmpty ? nil : src
+}
+// <<< CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 结束
 
 // >>> CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 开始
 // MARK: - Siri 口述原话（右侧用户气泡 + 「Siri 自动记」标签）
@@ -113,14 +145,52 @@ let SIRI_SAID_PREFIX = "__SIRI_SAID__"
 /// 把用户提交的图片作为一条「用户消息」插入对话流——像微信一样：先出现你发的图，小记随后回识别卡片。
 /// 拍照 / 相册 / 文件导入（`runImageRecognition`）与截屏无感识别共用此入口。
 /// - Parameter imageName: 已落盘的文件名（截屏链路 ScreenshotStore 已存过图，传入可避免重复落盘）。
+/// - Parameter source: 图片来源（camera / library / file / share / screenshot），仅用于气泡上方的「XX自动记」标签；nil = 不显示标签。
 /// - Returns: 本地文件名，便于后续识别结果卡片复用同一张原图。
 @discardableResult
 @MainActor
-func appendUserImageMessage(image: UIImage?, context: ModelContext, imageName: String? = nil) -> String? {
+func appendUserImageMessage(image: UIImage?, context: ModelContext, imageName: String? = nil,
+                            source: String? = nil) -> String? {
     guard let name = imageName ?? LocalImageStore.save(image) else { return nil }
-    context.insert(ChatMessage(role: .user, text: USER_IMAGE_PREFIX + name))
+    // >>> CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 开始
+    context.insert(ChatMessage(role: .user, text: encodeUserImageText(source: source, imageName: name)))
+    // <<< CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 结束
     return name
 }
+
+// >>> CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 开始
+/// 气泡上方的「XX 自动记」来源小标签（Siri / 拍照 / 图片 / 文件 / 分享 / 截屏 共用同一款展现）。
+/// 纯展示（无按钮），遵守项目「禁嵌套 Button」铁律；颜色用语义色 AIATheme.sub，深色自适应。
+struct AutoRecordTag: View {
+    let text: String
+    let icon: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .semibold))
+            Text(text)
+                .font(AIATheme.Font.micro)
+        }
+        .foregroundStyle(AIATheme.sub)
+        .padding(.trailing, 6)
+    }
+}
+
+/// 图片来源 → 标签文案 + 图标；nil（旧消息 / 未标注来源）返回 nil → 不显示标签。
+/// 口径（2026-09-21 用户拍板）：拍照「拍照自动记」；相册 / 分享扩展「图片自动记」；
+/// 文件导入「文件自动记」；截屏快捷指令「截屏自动记」；Siri 口述另走 SIRI_SAID_PREFIX。
+func imageSourceTag(_ source: String?) -> (text: String, icon: String)? {
+    switch source {
+    case "camera":     return ("拍照自动记", "camera.fill")
+    case "library":    return ("图片自动记", "photo.fill")
+    case "share":      return ("图片自动记", "square.and.arrow.down")
+    case "file":       return ("文件自动记", "photo.on.rectangle")
+    case "screenshot": return ("截屏自动记", "text.viewfinder")
+    default:           return nil
+    }
+}
+// <<< CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 结束
 
 /// 用户发出的图片气泡：右对齐缩略图，点开看大图，长按可删除/多选。
 /// 做成独立 struct 而非 ChatView 内的 ViewBuilder 函数——它需要持有自己的
