@@ -99,6 +99,17 @@ func decodeUserImageName(_ text: String) -> String? {
     return name.isEmpty ? nil : name
 }
 
+// >>> CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 开始
+// MARK: - Siri 口述原话（右侧用户气泡 + 「Siri 自动记」标签）
+
+/// 对话页「Siri 口述原话」协议前缀。ChatMessage.text = PREFIX + 用户对 Siri 说的原话。
+/// 由 TellAIAIntent 插入；渲染层据此显示为右侧用户气泡 + 上方「Siri 自动记」小标签
+/// （见 ChatView.siriSaidBubble），喂 LLM 上下文前剥掉前缀。
+/// 与 USER_IMAGE_PREFIX 同理：用协议串而不给 ChatMessage 加字段，零 schema 迁移，
+/// 且标签信息随文本一起云同步（换设备拉到也显示正确）。
+let SIRI_SAID_PREFIX = "__SIRI_SAID__"
+// <<< CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 结束
+
 /// 把用户提交的图片作为一条「用户消息」插入对话流——像微信一样：先出现你发的图，小记随后回识别卡片。
 /// 拍照 / 相册 / 文件导入（`runImageRecognition`）与截屏无感识别共用此入口。
 /// - Parameter imageName: 已落盘的文件名（截屏链路 ScreenshotStore 已存过图，传入可避免重复落盘）。

@@ -58,9 +58,26 @@ struct ChatView: View {
     }()) private var recentMessages: [ChatMessage]
     /// 下拉加载的更早消息段（倒序，与 @Query 同源），拼在最近消息之前。
     @State private var earlierMessages: [ChatMessage] = []
+    // >>> CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 开始
+    /// Siri/快捷指令后台写库用的是「独立容器」（AppPersistence.makeSiriWriteContainer），
+    /// 与主容器跨实例不自动合并 → 前台 @Query 感知不到 → 收到 .siriDidSaveData 后手动拉一段并缓存在此。
+    /// 空数组时下方 orderedMessages 行为与改动前完全一致（零开销）。
+    @State private var siriPulledMessages: [ChatMessage] = []
+    // <<< CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 结束
     /// 视图使用正序序列：更早段（正序）+ 最近 60 条（reversed 转正序）。
     private var orderedMessages: [ChatMessage] {
-        earlierMessages.reversed() + recentMessages.reversed()
+        // >>> CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 开始
+        // 无 Siri 拉取段时与改动前逐字一致（保持原有拼接顺序，不做多余排序）。
+        let base = earlierMessages.reversed() + recentMessages.reversed()
+        guard !siriPulledMessages.isEmpty else { return base }
+        // 按 persistentModelID 去重：同一 context 下同一行数据是同一个对象实例，重复项必被过滤。
+        var seen = Set(base.map(\.persistentModelID))
+        var merged = base
+        for m in siriPulledMessages where seen.insert(m.persistentModelID).inserted {
+            merged.append(m)
+        }
+        return merged.sorted { $0.createdAt < $1.createdAt }
+        // <<< CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 结束
     }
     /// 是否还有更早的消息未加载（由 fetchCount 决定，驱动「加载更早」入口显隐，避免无限加载）。
     @State private var hasMoreMessages = false
@@ -233,6 +250,26 @@ struct ChatView: View {
         // <<< CHANGE-[2026-08-22 11:45:00]-[缓存填充标志防删空回退补回] 结束
     }
     // <<< CHANGE-[2026-08-17 21:36:03]-[缓存非空守卫防空白与循环] 结束
+
+    // >>> CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 开始
+    /// 手动拉取最近聊天消息并并入渲染列表（口径与 @Query(recentMessages) 完全一致：7 天窗 + fetchLimit 60）。
+    /// 场景：Siri/快捷指令在后台用「独立容器」写入，跨容器不会触发前台 @Query 刷新
+    /// → 用户切回 App（仍停在对话页）时看不到新气泡，必须退出重进才显示。
+    /// 只在收到 .siriDidSaveData 时调用（该通知由 Siri 写入路径在 MainActor 上发出），代价极低。
+    @MainActor
+    private func pullSiriMessages() {
+        let start = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? .distantPast
+        var d = FetchDescriptor<ChatMessage>(
+            predicate: #Predicate<ChatMessage> { !$0.syncDeleted && $0.createdAt >= start },
+            sortBy: [SortDescriptor(\ChatMessage.createdAt, order: .reverse)]
+        )
+        d.fetchLimit = 60
+        guard let fetched = try? context.fetch(d) else { return }
+        siriPulledMessages = fetched
+        // 渲染列表绝大多数读 cachedDisplayed 缓存，必须重算缓存，否则「库里有、屏幕没有」。
+        recomputeDisplayed()
+    }
+    // <<< CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 结束
 
     private var displayedMessages: [ChatMessage] {
         // 方式A：先标记空壳开场白（识别开场白 + 之后已无配对识别卡片气泡），渲染层直接隐藏，
@@ -905,9 +942,27 @@ struct ChatView: View {
             // 识别落地（拍照/相册/截屏/ShareExtension/语音等）主动广播的滚动信号：
             // 刷新列表 + 钉到底，保证结果气泡出现后页面自动滚到底、最新卡片完整可见。
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("AIA.chatScrollToBottom"))) { _ in
-                guard !isLoadingEarlier else { return }
-                scrollToLatest(proxy: proxy)
+                // >>> CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 开始
+                // 防御性加固：Siri 链路跑在 Task.detached 里，insertRecognitionGroup 是从后台线程 post
+                // 本通知的，原写法直接改 UI 状态属越线程 → 统一切回主线程执行（前台链路行为不变）。
+                DispatchQueue.main.async {
+                    guard !isLoadingEarlier else { return }
+                    scrollToLatest(proxy: proxy)
+                }
+                // <<< CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 结束
             }
+            // >>> CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 开始
+            // Siri/快捷指令用「独立容器」后台写库，跨容器 @Query 不感知（不会自动刷）：
+            // 收到落盘广播后手动拉一次消息并入列表，用户切回 App（仍停在对话页）时气泡当场出现，不必退出重进。
+            // 该通知由 Siri 路径在 MainActor 上发出，故可直接调用。只挂这一个信号，不恢复"监听全局存库"（那会发烫）。
+            .onReceive(NotificationCenter.default.publisher(for: .siriDidSaveData)) { _ in
+                pullSiriMessages()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    guard !isLoadingEarlier else { return }
+                    scrollToLatest(proxy: proxy)
+                }
+            }
+            // <<< CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 结束
             // 键盘升降：完全交给 defaultScrollAnchor(.bottom)——ScrollView 内容保持贴底，
             // 键盘升起时 safeAreaInset(edge:.bottom) 把输入栏顶到键盘上方、视口底自动压缩到输入栏顶，
             // 气泡随之贴顶，无需滚动。
@@ -999,6 +1054,11 @@ struct ChatView: View {
                 },
                 onEnterMultiSelect: { enterMessageMultiSelect(m.persistentModelID) }
             )
+        // >>> CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 开始
+        } else if m.text.hasPrefix(SIRI_SAID_PREFIX) {
+            // Siri 口述原话：右侧用户气泡 + 上方「Siri 自动记」小标签
+            siriSaidBubble(spoken: String(m.text.dropFirst(SIRI_SAID_PREFIX.count)), message: m)
+        // <<< CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 结束
         } else if m.text.hasPrefix(RECOGNITION_RESULT_PREFIX) {
             // 识别结果卡片宽度由内部气泡钉死到（屏宽 − 60），与文字气泡同宽；
             // 外层不再加 Spacer，避免二次扣减导致比文字气泡窄。
@@ -1010,6 +1070,26 @@ struct ChatView: View {
             bubble(m)
         }
     }
+
+    // >>> CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 开始
+    /// Siri 口述原话气泡：右侧用户气泡 + 上方「Siri 自动记」小标签。
+    /// 标签让用户一眼看出这条不是自己在对话页打的字，而是对 Siri 说的。
+    /// 气泡本体复用 messageBubble（长按复制/删除/多选、深浅色适配全部继承）。
+    @ViewBuilder
+    private func siriSaidBubble(spoken: String, message m: ChatMessage) -> some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            HStack(spacing: 4) {
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                Text("Siri 自动记")
+                    .font(AIATheme.Font.micro)
+            }
+            .foregroundStyle(AIATheme.sub)
+            .padding(.trailing, 6)
+            messageBubble(message: m, isUser: true, displayOverride: spoken)
+        }
+    }
+    // <<< CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 结束
 
     /// 付费墙拦截引导气泡：免费版用户发「视觉专属场景」（如饭菜照片）本地识别失败时，
     /// 给一条可读文案 + 升级 Pro 入口，点击弹出订阅页。
@@ -1353,8 +1433,13 @@ struct ChatView: View {
 
     /// 普通消息气泡。`message == nil` 时用于顶部招呼（无长按菜单/不进多选）。
     @ViewBuilder
-    private func messageBubble(message: ChatMessage? = nil, text: String = "", isUser: Bool = false) -> some View {
-        let displayText = message?.text ?? text
+    // >>> CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 开始
+    // 新增 displayOverride：支持「显示文本 ≠ 存储文本」（Siri 原话存的是 __SIRI_SAID__+原话）。
+    // 长按菜单「复制」用的也是 displayText，因此复制出来天然是干净原话，不会带协议前缀。
+    private func messageBubble(message: ChatMessage? = nil, text: String = "", isUser: Bool = false,
+                               displayOverride: String? = nil) -> some View {
+        let displayText = displayOverride ?? message?.text ?? text
+        // <<< CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 结束
         let userSide = message.map { $0.role == .user } ?? isUser
         let isSelected = message.map { selectedMessageIDs.contains($0.persistentModelID) } ?? false
         let showSelection = messageMultiSelectMode && message != nil
@@ -3636,7 +3721,15 @@ struct ChatView: View {
             if msg.role == .user, ChatView.isRecordOperationMessage(msg.text) { return false }
             return true
         }
-        return recent.map { ["role": $0.role == .user ? "user" : "ai", "text": $0.text] }
+        // >>> CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 开始
+        // Siri 口述原话带 __SIRI_SAID__ 前缀：喂模型前剥掉前缀（方案A：保留原话，
+        // 让之后「那个 / 改成 / 删掉」这类指代仍能对上；不剥会污染提示词）。
+        return recent.map { msg in
+            var t = msg.text
+            if t.hasPrefix(SIRI_SAID_PREFIX) { t = String(t.dropFirst(SIRI_SAID_PREFIX.count)) }
+            return ["role": msg.role == .user ? "user" : "ai", "text": t]
+        }
+        // <<< CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 结束
     }
 
     private func send() {
