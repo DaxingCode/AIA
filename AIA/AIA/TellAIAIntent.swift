@@ -42,12 +42,36 @@ struct TellAIAIntent: AppIntent {
             }
             let context = ModelContext(container)   // 独立后台上下文，非 mainContext
 
+            // >>> CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 开始
+            // ① 用户对 Siri 说的「原话」插成一条用户气泡（套 SIRI_SAID_PREFIX 协议串，
+            //    渲染层显示为右侧气泡 + 上方「Siri 自动记」小标签）。
+            //    必须在 processRecognition 之前插入：其内部开场白的 createdAt 更晚 → 顺序恒为「我说 → AI 回」。
+            let spoken = phrase.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !spoken.isEmpty {
+                context.insert(ChatMessage(role: .user, text: SIRI_SAID_PREFIX + spoken, createdAt: Date()))
+            }
+            // <<< CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 结束
+
             // 数据写入独立容器后，主线程广播让前台 @Query 刷新（跨容器不自动合并）。三处写路径共用。
             let notifySiriSaved = {
                 _ = Task { @MainActor in
                     NotificationCenter.default.post(name: .siriDidSaveData, object: nil)
                 }
             }
+
+            // >>> CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 开始
+            // ② 只有「没有走 processRecognition」的分支才用它落一条 AI 回执气泡，
+            //    让 Siri 播报的内容在对话页也看得到（纯水/连不上/没听懂等）。
+            //    ⚠️ 成功分支绝不能调它：那里 processRecognition 已插入「识别开场白 + 卡片」，
+            //    再调会出现两条 AI 文字（重复啰嗦）。
+            @discardableResult
+            func reply(_ text: String) -> String {
+                context.insert(ChatMessage(role: .ai, text: text, createdAt: Date()))
+                try? context.save()
+                notifySiriSaved()
+                return text
+            }
+            // <<< CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 结束
 
             // 饮水快捷解析（零网络，与聊天共用 WaterIntakeParser）。
             let waterParsed = WaterIntakeParser.parse(phrase)
@@ -59,7 +83,7 @@ struct TellAIAIntent: AppIntent {
             if let (ml, display) = waterParsed, localResult == nil {
                 let dup = await MainActor.run { WaterIntakeParser.checkDuplicateAndRegister(phrase, type: "water") }
                 if dup {
-                    return "这杯水我刚记过啦～"
+                    return reply("这杯水我刚记过啦～")
                 }
                 let meal = WaterIntakeParser.mealFromText(phrase) ?? RecognitionSaver.defaultMeal(for: .now)
                 let entry = FoodEntry(
@@ -73,8 +97,8 @@ struct TellAIAIntent: AppIntent {
                 )
                 context.insert(entry)
                 try? context.save()
-                notifySiriSaved()
-                return "已记录：饮水 \(Int(ml)) 毫升"
+                // reply(...) 内部已统一 try? save + notifySiriSaved()，此处不再重复广播
+                return reply("已记录：饮水 \(Int(ml)) 毫升")
             }
 
             // 复合句里的水（如「喝了水，午饭35元」）：记水但不提前退出，下面与账单一起返回。
@@ -107,7 +131,7 @@ struct TellAIAIntent: AppIntent {
                 do {
                     result = try await RecognizeService.parseText(phrase).result
                 } catch {
-                    return "没连上，稍后再试？或者打开 App 手动记。"
+                    return reply("没连上，稍后再试？或者打开 App 手动记。")
                 }
             }
 
@@ -115,13 +139,13 @@ struct TellAIAIntent: AppIntent {
             guard !types.isEmpty, !types.contains("none") else {
                 // 用户可能只说了模块名（如「记账、记饮食、记待办」），没有具体内容可记
                 if let ws = waterSummary {
-                    return "已记录：\(ws)"
+                    return reply("已记录：\(ws)")
                 }
                 let hints = Self.moduleHints(in: phrase)
                 if !hints.isEmpty {
-                    return "想记\(hints.joined(separator: "、"))？打开小记，用语音或截图就能记啦。"
+                    return reply("想记\(hints.joined(separator: "、"))？打开小记，用语音或截图就能记啦。")
                 }
-                return "没听懂，换个说法试试？比如「午饭35」或「25日提醒我交报表」。"
+                return reply("没听懂，换个说法试试？比如「午饭35」或「25日提醒我交报表」。")
             }
 
             // 2. 统一入库水槽：与对话页文字/语音记录同一套逻辑（含周期待办、HealthKit 卡路里同步）。
