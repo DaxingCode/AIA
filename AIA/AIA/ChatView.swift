@@ -1037,23 +1037,33 @@ struct ChatView: View {
             greetingBubble(m)
         } else if let imgName = decodeUserImageName(m.text) {
             // 用户发出的图片（拍照/相册/文件/截屏）：像微信一样先出现你发的图，小记随后回识别卡片
-            UserImageBubble(
-                imageName: imgName,
-                isSelected: selectedMessageIDs.contains(m.persistentModelID),
-                showSelection: messageMultiSelectMode,
-                onToggleSelection: { toggleMessageSelection(m.persistentModelID) },
-                onDelete: {
-                    // >>> CHANGE-[2026-08-22 11:20:00]-[长按删除消除竞态] 开始
-                    // 同长按删除：当帧即时移除缓存（立即少一行、不跳底），软删落库延后下一帧，
-                    // 顺序隔离避免 recompute 用旧 fresh 把消息补回。回退：恢复同步 removeMessageFromCache + SafeDelete.chatMessageByID。
-                    cachedDisplayed.removeAll { $0.persistentModelID == m.persistentModelID }
-                    DispatchQueue.main.async {
-                        SafeDelete.chatMessageByID(m.persistentModelID, in: context)
-                    }
-                    // <<< CHANGE-[2026-08-22 11:20:00]-[长按删除消除竞态] 结束
-                },
-                onEnterMultiSelect: { enterMessageMultiSelect(m.persistentModelID) }
-            )
+            // >>> CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 开始
+            // 上方按来源打「拍照自动记 / 图片自动记 / 文件自动记 / 分享自动记 / 截屏自动记」标签
+            // （与「Siri 自动记」同款展现）。多选模式隐藏标签：右上角勾选圈 offset(x:8,y:-8) 会顶到
+            // 图片上方那一行，否则会压住标签文字。旧消息无来源 → imageSourceTag 返回 nil，不显示标签。
+            VStack(alignment: .trailing, spacing: 4) {
+                if !messageMultiSelectMode, let tag = imageSourceTag(decodeUserImageSource(m.text)) {
+                    AutoRecordTag(text: tag.text, icon: tag.icon)
+                }
+                UserImageBubble(
+                    imageName: imgName,
+                    isSelected: selectedMessageIDs.contains(m.persistentModelID),
+                    showSelection: messageMultiSelectMode,
+                    onToggleSelection: { toggleMessageSelection(m.persistentModelID) },
+                    onDelete: {
+                        // >>> CHANGE-[2026-08-22 11:20:00]-[长按删除消除竞态] 开始
+                        // 同长按删除：当帧即时移除缓存（立即少一行、不跳底），软删落库延后下一帧，
+                        // 顺序隔离避免 recompute 用旧 fresh 把消息补回。回退：恢复同步 removeMessageFromCache + SafeDelete.chatMessageByID。
+                        cachedDisplayed.removeAll { $0.persistentModelID == m.persistentModelID }
+                        DispatchQueue.main.async {
+                            SafeDelete.chatMessageByID(m.persistentModelID, in: context)
+                        }
+                        // <<< CHANGE-[2026-08-22 11:20:00]-[长按删除消除竞态] 结束
+                    },
+                    onEnterMultiSelect: { enterMessageMultiSelect(m.persistentModelID) }
+                )
+            }
+            // <<< CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 结束
         // >>> CHANGE-[2026-09-21 12:23:28]-[Siri记录进对话页] 开始
         } else if m.text.hasPrefix(SIRI_SAID_PREFIX) {
             // Siri 口述原话：右侧用户气泡 + 上方「Siri 自动记」小标签
@@ -1078,14 +1088,13 @@ struct ChatView: View {
     @ViewBuilder
     private func siriSaidBubble(spoken: String, message m: ChatMessage) -> some View {
         VStack(alignment: .trailing, spacing: 4) {
-            HStack(spacing: 4) {
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 9, weight: .semibold))
-                Text("Siri 自动记")
-                    .font(AIATheme.Font.micro)
+            // >>> CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 开始
+            // 标签抽成 AutoRecordTag（供 Siri / 拍照 / 图片 / 文件 / 分享 / 截屏 共用同一款展现）；
+            // 多选模式隐藏：气泡右上角勾选圈 offset(x:8,y:-8) 会顶到这一行，否则会压住标签文字。
+            if !messageMultiSelectMode {
+                AutoRecordTag(text: "Siri 自动记", icon: "mic.fill")
             }
-            .foregroundStyle(AIATheme.sub)
-            .padding(.trailing, 6)
+            // <<< CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 结束
             messageBubble(message: m, isUser: true, displayOverride: spoken)
         }
     }
@@ -2045,7 +2054,10 @@ struct ChatView: View {
                 return
             }
             runImageRecognition(image: img, context: context,
-                                errorMessage: $fileImportErrorMessage)
+                                errorMessage: $fileImportErrorMessage,
+                                // >>> CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 开始
+                                source: "file")   // 文件导入 → 气泡上方显示「文件自动记」
+                                // <<< CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 结束
         } catch {
             fileImportErrorMessage = error.localizedDescription
         }

@@ -753,13 +753,17 @@ struct CameraRecognitionFlowModifier: ViewModifier {
                     return
                 }
                 CameraPresenter.shared.present { img in
-                    if let img { runRecognize(img) }
+                    // >>> CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 开始
+                    if let img { runRecognize(img, source: "camera") }   // 拍照
+                    // <<< CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 结束
                 }
             }
             .sheet(isPresented: $showPicker) { ImagePicker(image: $pickedImage) }
             .onChange(of: pickedImage) { _, new in
                 if let img = new {
-                    runRecognize(img)
+                    // >>> CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 开始
+                    runRecognize(img, source: "library")                // 相册
+                    // <<< CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 结束
                     pickedImage = nil
                 }
             }
@@ -775,7 +779,12 @@ struct CameraRecognitionFlowModifier: ViewModifier {
                            onSecondary: { showPicker = true })
     }
 
-    private func runRecognize(_ img: UIImage) {
+    // >>> CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 开始
+    // source 由调用点显式传入：拍照走 "camera"、相册走 "library"。
+    // 两条入口本就是独立触发（showCamera→CameraPresenter / showPicker→ImagePicker），
+    // 属确定性区分，不靠分析图片内容；用于图片气泡上方的「拍照自动记 / 图片自动记」标签。
+    // <<< CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 结束
+    private func runRecognize(_ img: UIImage, source: String) {
         // 拍照/选图完成这一瞬间立即跳对话页（先看到「你发的图」+「好记AI正在识别…」加载条），
         // 不再等云端识别完成。已在对话页时（navigateToChat=false）不重复跳。
         // runImageRecognition.finish 里仍保留兜底跳转（path.last != r 幂等守卫，不会双跳）。
@@ -787,7 +796,8 @@ struct CameraRecognitionFlowModifier: ViewModifier {
             NavigationRouter.shared.navigateToChat()
         }
         runImageRecognition(image: img, context: context,
-                            errorMessage: $errorMessage, navigateToChat: navigateToChat)
+                            errorMessage: $errorMessage, navigateToChat: navigateToChat,
+                            source: source)
     }
 }
 
@@ -808,11 +818,16 @@ final class RecognitionActivity: ObservableObject {
 ///   非对话页入口（首页底部栏、四宫格快捷操作等）必须传 true，否则用户留在原页看不到回复；
 ///   ChatView 自身的拍照/相册/文件入口传 false，避免在对话页上再压一层对话页。
 // >>> CHANGE-[2026-08-21 10:00:00]-[分享图片对话页识别] 开始
+// >>> CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 开始
+// 新增 source：图片来源（camera/library/file/share/screenshot），仅用于图片气泡上方的「XX自动记」标签。
+// 带默认值 nil → 既有调用点零改动；不传则不显示标签。
+// <<< CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 结束
 func runImageRecognition(image: UIImage,
                          context: ModelContext,
                          errorMessage: Binding<String?>,
                          navigateToChat: Bool = false,
-                         presavedImageName: String? = nil) {
+                         presavedImageName: String? = nil,
+                         source: String? = nil) {
     // 先发图：像微信一样，对话流里先出现「你发的这张图」，好记AI随后回识别卡片。
     // 返回的文件名同时给识别结果复用，同一张原图不必落盘两次。
     // 所有调用点都来自 UI 事件（主线程），assumeIsolated 成立。
@@ -820,7 +835,9 @@ func runImageRecognition(image: UIImage,
     // presavedImageName：分享扩展等已先插好图的入口传入，避免重复插图。
     let presavedName = MainActor.assumeIsolated { () -> String? in
         if let name = presavedImageName { return name }
-        return appendUserImageMessage(image: image, context: context)
+        // >>> CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 开始
+        return appendUserImageMessage(image: image, context: context, source: source)
+        // <<< CHANGE-[2026-09-21 12:44:10]-[发图来源标签] 结束
     }
     // 拍照/选图质量预检（主线程、256 缩图计算很快）：用于识别「没结果/失败」时，
     // 给出「图糊了/太暗了」这类针对性提示，而非笼统的「识别失败」。
