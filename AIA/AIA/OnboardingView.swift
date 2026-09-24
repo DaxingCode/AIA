@@ -55,22 +55,34 @@ struct OnboardingView: View {
                     .transition(.opacity)
                     .frame(width: geo.size.width, height: geo.size.height)
                     .animation(.easeInOut(duration: 0.25), value: page)
-                    .gesture(
+                    // >>> CHANGE-[2026-09-24 09:41:37]-[引导页翻页手势防回归] 开始
+                    // 原因：原 .gesture(DragGesture(25)) 是独占手势，会压制页面内滚动容器的 pan；
+                    //       当年只靠 "page == 10 不挂手势" 这一条豁免绕过（第 10 页是全文件唯一含 ScrollView 的页）。
+                    //       现改为 simultaneousGesture（与滚动并存）+ 方向守卫（垂直/斜向不翻页），
+                    //       以后任意一页加了 ScrollView 都不会再复现「滑不动」。
+                    // 行为不变：page == 10 仍不挂手势（双保险），横向阈值与方向语义完全保持。
+                    // 回退：git checkout <本次 commit>^ -- AIA/AIA/OnboardingView.swift
+                    .simultaneousGesture(
                         // 第 10 页不挂整页横向手势（与内部纵向 ScrollView 共存），其余页支持左右滑。
                         page == 10 ? nil :
-                        DragGesture(minimumDistance: 25)
+                        DragGesture(minimumDistance: 25, coordinateSpace: .local)
                             .onEnded { value in
                                 let w = geo.size.width
+                                let dx = value.translation.width
+                                let dy = value.translation.height
+                                // 垂直/斜向滑动 → 一律不翻页，放行给页面内滚动
+                                guard abs(dx) > abs(dy) else { return }
                                 // 左滑（位移为负）= 前进
-                                if value.translation.width < -w * 0.18, page < total - 1 {
+                                if dx < -w * 0.18, page < total - 1 {
                                     goNext()
                                 }
                                 // 右滑（位移为正）= 后退，且不在第 0 页
-                                else if value.translation.width > w * 0.18, page > 0 {
+                                else if dx > w * 0.18, page > 0 {
                                     page -= 1
                                 }
                             }
                     )
+                    // <<< CHANGE-[2026-09-24 09:41:37]-[引导页翻页手势防回归] 结束
                 }
 
                 // 底部页码 + 主按钮
