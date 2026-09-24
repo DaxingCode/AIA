@@ -42,10 +42,11 @@ struct RecurringRuleListView: View {
                     // >>> CHANGE-[2026-08-31 23:34:46]-[周期规则按下次生成日期排序] 开始
                     ForEach(sortedRules) { rule in
                     // <<< CHANGE-[2026-08-31 23:34:46]-[周期规则按下次生成日期排序] 结束
+                        // >>> CHANGE-[2026-09-24 09:41:37]-[周期账单页滚动修复] 开始
+                        // 长按进编辑已由 SelectableRow 内部接管（见 ruleCard），
+                        // 这里不再叠加第二个 0.5s 长按，避免两个手势抢同一次 touch、并消除重复震动。
                         ruleCard(rule)
-                            .onLongPressGesture(minimumDuration: 0.5) {
-                                editSheet = EditSheet(rule: rule)
-                            }
+                        // <<< CHANGE-[2026-09-24 09:41:37]-[周期账单页滚动修复] 结束
                     }
                 }
             }
@@ -139,9 +140,24 @@ struct RecurringRuleListView: View {
     }
 
     private func ruleCard(_ rule: RecurringRule) -> some View {
-        SwipeToDeleteCard(onDelete: { deleteRule(rule) }) {
+        // >>> CHANGE-[2026-09-24 09:41:37]-[周期账单页滚动修复] 开始
+        // 原因：SwipeToDeleteCard 的手势写法 `.gesture(DragGesture())`（默认 10pt 触发、无方向判断、
+        //       独占）会 claim 掉整行的 touch，外层 ScrollView 收不到滚动事件 → 整页滑不动。
+        //       换项目统一组件 SelectableRow（simultaneousGesture + minimumDistance: 30 + 方向守卫，
+        //       账单/饮食/待办/健康/商户规则等 9 处已验证可正常滚动）。
+        //       行为对齐：点卡片 = 编辑、长按 = 编辑、左滑 = 删除，与改前完全一致。
+        // 回退：git checkout <本次 commit>^ -- AIA/AIA/RecurringRuleViews.swift
+        SelectableRow(
+            isSelecting: false,
+            isSelected: false,
+            onTap: { editSheet = EditSheet(rule: rule) },
+            onLongPress: { editSheet = EditSheet(rule: rule) },
+            onToggle: {},
+            onDelete: { deleteRule(rule) }
+        ) {
             ruleCardContent(rule)
         }
+        // <<< CHANGE-[2026-09-24 09:41:37]-[周期账单页滚动修复] 结束
     }
 
     private func ruleCardContent(_ rule: RecurringRule) -> some View {
@@ -184,18 +200,23 @@ struct RecurringRuleListView: View {
         .padding(14)
         .card()
         .contentShape(Rectangle())
-        .onTapGesture {
-            editSheet = EditSheet(rule: rule)
-        }
     }
 
     private func deleteRule(_ rule: RecurringRule) {
-        // 规则删除只停止未来自动生成；已生成的历史账单保留在账单列表中。
-        // RecurringRule 不参与 CloudSync，无需 SafeDelete 软删，直接硬删即可。
+        deleteRule(id: rule.persistentModelID)
+    }
+
+    // >>> CHANGE-[2026-09-24 09:41:37]-[周期规则删除按ID现取活对象] 开始
+    /// 规则删除只停止未来自动生成；已生成的历史账单保留在账单列表中。
+    /// RecurringRule 不上云、无需软删，直接硬删；但删除回调是滑动动画结束后（0.2s）才触发的，
+    /// 那时 @Query 行对象可能已失效 → 按项目惯例（同 SafeDelete.*ByID）用 model(for:) 现取活对象再删。
+    private func deleteRule(id: PersistentIdentifier) {
+        guard let live = context.model(for: id) as? RecurringRule else { return }
         withAnimation {
-            context.delete(rule)
+            context.delete(live)
         }
     }
+    // <<< CHANGE-[2026-09-24 09:41:37]-[周期规则删除按ID现取活对象] 结束
 }
 
 struct RecurringRuleEditView: View {
