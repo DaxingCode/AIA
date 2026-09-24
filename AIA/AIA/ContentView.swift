@@ -62,6 +62,8 @@ enum HomeRoute: Hashable {
     case energy30DaysRecords
     // 2026-09-07：饮食喜好页 Top 5「查看全部」跳转，展示所有记录过的食物（次数/重量/热量）
     case dietAllFoods
+    // 2026-09-24：我的食物库入口（饮食记录页右上角 fork.knife 按钮 / 手动添加页亦可跳转）
+    case foodLibrary
 
     // >>> CHANGE-[2026-08-20 15:30:00]-[小记查询跳转按钮] 开始
     // 原因：小记查询回复需在 AI 气泡下方渲染平级跳转按钮，把 HomeRoute 编码进 ChatMessage.actionRouteRaw（String?）。
@@ -458,6 +460,9 @@ struct ContentView: View {
             Energy30DaysRecordsView()
         case .dietAllFoods:
             DietAllFoodsView()
+        // 2026-09-24：我的食物库（仅保存到食物库入口，列出 source=="user" 的 FoodMeta）
+        case .foodLibrary:
+            FoodLibraryView()
         }
     }
 

@@ -142,6 +142,8 @@ struct Pill: View {
     var body: some View {
         Text(text)
             .font(AIATheme.Font.micro)
+            .lineLimit(1)
+            .fixedSize()
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
             .background(bg)

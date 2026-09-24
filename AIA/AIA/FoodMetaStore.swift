@@ -124,6 +124,11 @@ enum FoodMetaStore {
             let key = FoodMeta.normalize(e.name)
             guard !key.isEmpty else { continue }
             if let existing = peek(name: e.name, in: context) {
+                // >>> CHANGE-[2026-09-24 16:00:00]-[seed 保留用户食物库] 开始
+                // 原因: 用户通过「仅保存到食物库」自定义的同名食物(source "user")，不希望被版本升级的内置表覆盖回退。
+                // 回退: 删本 if 块即可恢复「内置表永远覆盖同名条目」。
+                if existing.source == "user" { continue }
+                // <<< CHANGE-[2026-09-24 16:00:00]-[seed 保留用户食物库] 结束
                 existing.displayName = e.name
                 existing.kcal = e.kcal
                 existing.protein = e.protein

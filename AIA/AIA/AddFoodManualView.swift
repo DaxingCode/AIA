@@ -106,6 +106,15 @@ private struct FoodDraft: Identifiable {
     var searchText: String = ""
     var cloudError: String? = nil          // 该卡独立联网搜索错误，避免多卡串扰
     var savedEntry: FoodEntry? = nil
+    // >>> CHANGE-[2026-09-24 16:00:00]-[仅保存到食物库标记] 开始
+    // 原因: 新增「仅保存到食物库」开关后，一张草稿可能走两条保存路径——建 FoodEntry（餐次记录）
+    //       或仅写 FoodMeta(source:"user")（食物库）。savedToLibrary 标记该草稿走的是后者，
+    //       供 infoCard 隐藏开关、summaryCard 展示「已加入食物库」、deleteDraft 走 FoodMeta 删除。
+    // 回退: 删本行 + 下方 save/delete/summary 的 library 分支即可。
+    var savedToLibrary: Bool = false
+    var savedLibraryKcal: Double = 0   // 摘要卡展示用：每100g热量
+    // <<< CHANGE-[2026-09-24 16:00:00]-[仅保存到食物库标记] 结束
+
     // >>> CHANGE-[2026-08-18 16:38:05]-[营养元素按重量缩放+区分来源只读] 开始
     // 原因: 用 searchText 非空判断"来自搜索"会误伤"打名字但不选结果"的手动填场景(名称框绑的就是 searchText)。
     //       改用独立标志: 仅 applySearchResult 真正选取搜索结果时置 true。
@@ -172,11 +181,21 @@ struct AddFoodManualView: View {
     @State private var meal: String
     @State private var date: Date
 
+    // >>> CHANGE-[2026-09-24 16:00:00]-[仅保存到食物库开关] 开始
+    // 原因: 用户要求新增「仅保存到食物库」开关——打开后只把食物写进 FoodMeta(source:"user")，
+    //       不建餐次记录。默认关闭，纯页面内状态，不落盘；可从食物库页经 initialSaveToLibraryOnly 预开。
+    // 回退: 删本行 + infoCard 开关行 + save/saveAndContinue 的 library 分支 + persistToLibrary 即可。
+    @State private var saveToLibraryOnly: Bool = false
+    // <<< CHANGE-[2026-09-24 16:00:00]-[仅保存到食物库开关] 结束
+
     /// 外部传入日期与餐次时自动带上（如从饮食记录页按所选日期/餐次进入）；
     /// 用户在页面内仍可自由修改。两者缺省时按当前时间推断。
-    init(initialDate: Date = Date(), initialMeal: String? = nil) {
+    init(initialDate: Date = Date(),
+         initialMeal: String? = nil,
+         initialSaveToLibraryOnly: Bool = false) {
         _date = State(initialValue: initialDate)
         _meal = State(initialValue: initialMeal ?? RecognitionSaver.defaultMeal(for: initialDate))
+        _saveToLibraryOnly = State(initialValue: initialSaveToLibraryOnly)
     }
 
     // 搜索（作用于「当前正在编辑的最后一张未收起草稿」）
@@ -568,8 +587,11 @@ struct AddFoodManualView: View {
             // 营养成分网格
             nutritionSection(at: idx)
 
-            // 本卡底部「添加更多食物」：入库收起 → 底部长新空白卡
-            addMoreFoodButton(at: idx)
+            // 本卡底部「添加更多食物」：入库收起 → 底部长新空白卡。
+            // 仅保存到食物库模式下隐藏：保存即收起并自动长新空白卡（saveAndContinue 已 append），无需此按钮。
+            if !saveToLibraryOnly {
+                addMoreFoodButton(at: idx)
+            }
         }
         .padding(14)
         .card()
@@ -591,6 +613,33 @@ struct AddFoodManualView: View {
 
     private var infoCard: some View {
         VStack(spacing: 0) {
+            // >>> CHANGE-[2026-09-24 16:00:00]-[信息卡顶部加「仅保存到食物库」开关] 开始
+            // 原因: 用户要求把开关放在信息卡内、餐次/日期之上；打开后隐藏餐次与日期（食物库不关联餐次）。
+            //       一旦已有任意草稿保存（餐次或食物库），开关置灰禁用——既锁定模式避免半餐次半入库，
+            //       又保证卡片在库模式下仍有内容（不会因隐藏整行而变空卡）。
+            // 回退: 删本 HStack + 下方 `if !saveToLibraryOnly` 包裹即可恢复只有餐次/日期的卡片。
+            HStack(spacing: 12) {
+                Image(systemName: "fork.knife")
+                    .font(AIATheme.Font.subhead)
+                    .foregroundStyle(AIATheme.muted)
+                    .frame(width: 20, alignment: .center)
+                Text("仅保存到食物库")
+                    .font(AIATheme.Font.callout)
+                    .foregroundStyle(.primary)
+                Spacer()
+                Toggle("", isOn: $saveToLibraryOnly)
+                    .labelsHidden()
+            }
+            .padding(.vertical, 14)
+            .padding(.horizontal, 14)
+            .disabled(drafts.contains(where: { $0.savedEntry != nil || $0.savedToLibrary }))
+
+            // 开关关闭时，餐次/日期与开关之间加分隔线
+            if !saveToLibraryOnly { Divider().padding(.leading, 46) }
+            // <<< CHANGE-[2026-09-24 16:00:00]-[信息卡顶部加「仅保存到食物库」开关] 结束
+
+            // 餐次 / 日期：开关打开时隐藏（食物库不关联餐次）
+            if !saveToLibraryOnly {
             // 餐次选择
             HStack(spacing: 12) {
                 Image(systemName: "clock.fill")
@@ -638,6 +687,7 @@ struct AddFoodManualView: View {
             }
             .padding(.vertical, 10)
             .padding(.horizontal, 14)
+            }
 
         }
         .card()
@@ -982,9 +1032,14 @@ struct AddFoodManualView: View {
         VStack(alignment: .leading, spacing: 4) {
             // 第一行：第 N 份 + 食物名称（左），删除按钮（右）
             HStack(spacing: 6) {
+                // >>> CHANGE-[2026-09-24 16:00:00]-[摘要卡区分食物库项] 开始
+                // 原因: 仅保存到食物库的草稿无 savedEntry，需换图标并在第二行显示「已加入食物库」。
+                //       图标统一用叉勺(fork.knife)，与餐次记录一致表示"食物"，靠文字「已加入食物库」区分。
+                // 回退: 图标改回 "fork.knife"，删第二行的 savedToLibrary 分支即可。
                 Image(systemName: "fork.knife")
                     .font(AIATheme.Font.micro)
                     .foregroundStyle(AIATheme.food)
+                // <<< CHANGE-[2026-09-24 16:00:00]-[摘要卡区分食物库项] 结束
                 Text("第 \(idx + 1) 份")
                     .font(AIATheme.Font.micro.weight(.medium))
                     .foregroundStyle(AIATheme.sub)
@@ -1006,20 +1061,30 @@ struct AddFoodManualView: View {
 
             // 第二行：餐次·重量（左）+ 热量（右）
             HStack(spacing: 6) {
-                Text(draft.savedEntry?.meal ?? meal)
-                    .font(AIATheme.Font.micro)
-                    .foregroundStyle(AIATheme.sub)
-                if draft.savedWeight > 0 {
-                    Text("· \(Int(draft.savedWeight))g")
+                // >>> CHANGE-[2026-09-24 16:00:00]-[摘要卡第二行食物库文案] 开始
+                // 原因: 食物库项无餐次/重量，改为显示「已加入食物库」+ 每100g热量。
+                // 回退: 删本 if/else，恢复原 `Text(draft.savedEntry?.meal ?? meal)...` 即可。
+                if draft.savedToLibrary {
+                    Text("已加入食物库")
                         .font(AIATheme.Font.micro)
                         .foregroundStyle(AIATheme.sub)
+                } else {
+                    Text(draft.savedEntry?.meal ?? meal)
+                        .font(AIATheme.Font.micro)
+                        .foregroundStyle(AIATheme.sub)
+                    if draft.savedWeight > 0 {
+                        Text("· \(Int(draft.savedWeight))g")
+                            .font(AIATheme.Font.micro)
+                            .foregroundStyle(AIATheme.sub)
+                    }
                 }
+                // <<< CHANGE-[2026-09-24 16:00:00]-[摘要卡第二行食物库文案] 结束
                 Spacer(minLength: 0)
                 HStack(spacing: 3) {
                     Image(systemName: "flame.fill")
                         .font(AIATheme.Font.micro)
                         .foregroundStyle(AIATheme.food)
-                    Text("\(Int(draft.savedCalories)) kcal")
+                    Text("\(Int(draft.savedToLibrary ? draft.savedLibraryKcal : draft.savedCalories)) kcal")
                         .font(AIATheme.Font.subhead.weight(.semibold))
                         .foregroundStyle(AIATheme.food)
                 }
@@ -1107,11 +1172,57 @@ struct AddFoodManualView: View {
             totalSugar: entry.sugar,
             totalSodium: entry.sodium,
             weightGram: entry.weightGram ?? 0,
-            source: "manual",
+            // >>> CHANGE-[2026-09-24 16:00:00]-[餐次保存不降级用户食物库] 开始
+            // 原因: 某食物已在「我的食物库」(source:"user")，之后当餐次记录保存时 upsert 会以 "manual" 覆盖，
+            //       导致该条目从「我的食物库」消失。已有 user 条目则保持 user，不被降级。
+            // 回退: 改回 `source: "manual"` 单行即可。
+            source: (FoodMetaStore.peek(name: draft.name.trimmingCharacters(in: .whitespaces), in: context)?.source == "user") ? "user" : "manual",
+            // <<< CHANGE-[2026-09-24 16:00:00]-[餐次保存不降级用户食物库] 结束
             in: context
         )
         return entry
     }
+
+    // >>> CHANGE-[2026-09-24 16:00:00]-[仅保存到食物库保存逻辑] 开始
+    /// 仅加入食物库：直接以每100g基准写入 FoodMeta(source:"user")，不建 FoodEntry。
+    /// 营养网格里的 base* 字段本身就是每100g值，无需按重量反算；重量/餐次/日期全部忽略。
+    /// 返回每100g热量，供摘要卡展示。
+    private func persistToLibrary(draft: FoodDraft) -> Double {
+        let trimmed = draft.name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return 0 }
+        let baseCal = Double(draft.baseKcalText) ?? 0
+        let basePro = Double(draft.baseProteinText) ?? 0
+        let baseCar = Double(draft.baseCarbsText) ?? 0
+        let baseFat = Double(draft.baseFatText) ?? 0
+        let baseFib = Double(draft.baseFiberText) ?? 0
+        let baseSug = Double(draft.baseSugarText) ?? 0
+        let baseSod = Double(draft.baseSodiumText) ?? 0
+        // 热量兜底与总入口一致（4+4+9），base 即每100g，无需再乘 ratio
+        let kcal = baseCal > 0 ? baseCal : (basePro * 4 + baseCar * 4 + baseFat * 9)
+
+        FoodMetaStore.upsert(
+            name: trimmed,
+            displayName: trimmed,
+            kcal: kcal,
+            protein: basePro,
+            carbs: baseCar,
+            fat: baseFat,
+            fiber: baseFib,
+            sugar: baseSug,
+            sodium: baseSod,
+            source: "user",
+            in: context
+        )
+        do {
+            try context.save()
+            print("[AddFoodManual] library add OK: \(trimmed) kcal/100g=\(kcal)")
+        } catch {
+            print("[AddFoodManual] library add FAILED: \(error)")
+        }
+        UsageAnalytics.logAdd("food", source: "library")
+        return kcal
+    }
+    // <<< CHANGE-[2026-09-24 16:00:00]-[仅保存到食物库保存逻辑] 结束
 
     /// 保存：把最后一张未收起的草稿也入库，然后关闭页面。
     private func save() {
@@ -1120,6 +1231,15 @@ struct AddFoodManualView: View {
             DispatchQueue.main.async { dismiss() }
             return
         }
+        // >>> CHANGE-[2026-09-24 16:00:00]-[save 分流到食物库] 开始
+        // 原因: 开关打开时仅保存到食物库（不建餐次记录），保存即关闭页面。
+        // 回退: 删本 if 块即可恢复只走 persist。
+        if saveToLibraryOnly {
+            _ = persistToLibrary(draft: drafts[i])
+            DispatchQueue.main.async { dismiss() }
+            return
+        }
+        // <<< CHANGE-[2026-09-24 16:00:00]-[save 分流到食物库] 结束
         let draft = drafts[i]
         let entry = persist(draft: draft)
         drafts[i].savedEntry = entry
@@ -1132,6 +1252,21 @@ struct AddFoodManualView: View {
     private func saveAndContinue(at idx: Int) {
         let draft = drafts[idx]
         guard draft.isValid else { return }
+        // >>> CHANGE-[2026-09-24 16:00:00]-[saveAndContinue 分流到食物库] 开始
+        // 原因: 开关打开时仅写 FoodMeta(source:"user")，收起为「已加入食物库」摘要。
+        //       不清空 name（摘要卡/删除都要用），也不建 FoodEntry。
+        // 回退: 删本 if 块即可恢复只走 persist。
+        if saveToLibraryOnly {
+            let kcal = persistToLibrary(draft: draft)
+            drafts[idx].savedToLibrary = true
+            drafts[idx].savedLibraryKcal = kcal
+            searchResults = []
+            showSearchResults = false
+            cloudErrorMessage = nil
+            drafts.append(FoodDraft())
+            return
+        }
+        // <<< CHANGE-[2026-09-24 16:00:00]-[saveAndContinue 分流到食物库] 结束
         let entry = persist(draft: draft)
         // 该草稿收起：持有真实实例 + 记录展示快照
         drafts[idx].savedEntry = entry
@@ -1157,8 +1292,25 @@ struct AddFoodManualView: View {
         cloudErrorMessage = nil
     }
 
-    /// 删除已收起草稿：走 SafeDelete.foodByID 软删，避免滚动后 fault 闪退。
+    /// 删除已收起草稿：餐次记录走 SafeDelete.foodByID 软删；食物库项走 FoodMeta 删除。
     private func deleteDraft(at idx: Int) {
+        // >>> CHANGE-[2026-09-24 16:00:00]-[deleteDraft 支持食物库项] 开始
+        // 原因: 「仅保存到食物库」收起的草稿无 savedEntry，需删除对应的 FoodMeta(user) 行。
+        // 回退: 删本 if 块，恢复原 `guard let entry = drafts[idx].savedEntry` 逻辑即可。
+        if drafts[idx].savedToLibrary {
+            if let meta = FoodMetaStore.peek(name: drafts[idx].name, in: context) {
+                context.delete(meta)
+                do {
+                    try context.save()
+                    print("[AddFoodManual] library delete OK: \(drafts[idx].name)")
+                } catch {
+                    print("[AddFoodManual] library delete FAILED: \(error)")
+                }
+            }
+            drafts.remove(at: idx)
+            return
+        }
+        // <<< CHANGE-[2026-09-24 16:00:00]-[deleteDraft 支持食物库项] 结束
         guard let entry = drafts[idx].savedEntry else { return }
         let id = entry.persistentModelID
         drafts.remove(at: idx)

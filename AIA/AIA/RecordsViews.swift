@@ -919,8 +919,26 @@ struct FoodListView: View {
                             }
                             .buttonStyle(.plain)
 
-                            Text(dateTitleText)
-                                .font(AIATheme.Font.footnote.weight(.medium))
+                            // >>> CHANGE-[2026-09-24 16:00:00]-[日期表头可点开选择日期] 开始
+                            // 原因: 用户要求点击日期文案也能打开「选择日期」sheet（与右上角日历按钮同功能）。
+                            // 加 chevron.down 提示可点；视觉令牌沿用既有写法。
+                            // 回退: 把 Button 改回裸 Text(dateTitleText) 即可。
+                            Button {
+                                showDatePicker = true
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(dateTitleText)
+                                        .font(AIATheme.Font.footnote.weight(.medium))
+                                        .lineLimit(1)
+                                        .fixedSize()
+                                    Image(systemName: "chevron.down")
+                                        .font(AIATheme.Font.micro)
+                                        .foregroundStyle(AIATheme.sub)
+                                }
+                                .fixedSize(horizontal: true, vertical: false)
+                            }
+                            .buttonStyle(.plain)
+                            // <<< CHANGE-[2026-09-24 16:00:00]-[日期表头可点开选择日期] 结束
 
                             Spacer()
 
@@ -934,6 +952,7 @@ struct FoodListView: View {
                                         .font(AIATheme.Font.micro)
                                         .foregroundStyle(AIATheme.muted)
                                 }
+                                .fixedSize(horizontal: true, vertical: false)
                             }
                             .buttonStyle(.plain)
 
@@ -1165,19 +1184,26 @@ struct FoodListView: View {
                 // 日历按钮只对「饮食记录」tab 有意义（选日期看当日饮食）
                 if dietTab == .records {
                     ToolbarItem(placement: .topBarTrailing) {
-                        HStack(spacing: 4) {
-                            Button { showAddFood = true } label: {
-                                Image(systemName: "plus")
-                                    .font(AIATheme.Font.headline.weight(.medium))
-                                    .foregroundStyle(AIATheme.blue)
-                            }
-                            Button { showDatePicker = true } label: {
-                                Image(systemName: "calendar")
-                                    .font(AIATheme.Font.headline)
-                                    .foregroundStyle(AIATheme.blue)
-                            }
+                        Button { showAddFood = true } label: {
+                            Image(systemName: "plus")
+                                .font(AIATheme.Font.body.weight(.semibold))
+                                .foregroundStyle(AIATheme.blue)
                         }
                     }
+                    // >>> CHANGE-[2026-09-24 16:00:00]-[右上角日历按钮改为食物库入口] 开始
+                    // 原因: 用户要求把右上角日历按钮换成「我的食物库」入口；选日期功能已移到日期表头点击。
+                    //       2026-09-24: 拆为两个独立 ToolbarItem + body.semibold，尺寸间距与待办页右上角一致。
+                    // 回退: 把 fork.knife 按钮换回 calendar + showDatePicker 即可。
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            NavigationRouter.shared.navigate(.foodLibrary)
+                        } label: {
+                            Image(systemName: "fork.knife")
+                                .font(AIATheme.Font.body.weight(.semibold))
+                                .foregroundStyle(AIATheme.blue)
+                        }
+                    }
+                    // <<< CHANGE-[2026-09-24 16:00:00]-[右上角日历按钮改为食物库入口] 结束
                 }
             }
         }
