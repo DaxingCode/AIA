@@ -183,7 +183,7 @@ struct FoodMetaEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("显示名称") {
+                Section("食物名称") {
                     TextField("名称", text: $meta.displayName)
                 }
                 Section("每 100 克营养") {
@@ -194,6 +194,24 @@ struct FoodMetaEditor: View {
                     nutrientField("纤维", $meta.fiber, "g")
                     nutrientField("糖", $meta.sugar, "g")
                     nutrientField("钠", $meta.sodium, "mg")
+                    // >>> CHANGE-[2026-09-24]-[编辑页按营养素自动算热量] 开始
+                    // 原因: 用户希望输入蛋白/碳水/脂肪克重后自动算出热量（4/4/9 估算，纤维已含在碳水内不重复计）。
+                    //       做成一键填入而非实时覆盖，避免营养标签上的实际热量被公式值冲掉。
+                    // 回退: 删本 Button 行 + 下方 autoKcal 计算属性即可。
+                    Button {
+                        meta.kcal = autoKcal
+                    } label: {
+                        HStack {
+                            Label("按营养素计算热量", systemImage: "wand.and.stars")
+                                .font(AIATheme.Font.footnote.weight(.medium))
+                                .foregroundStyle(AIATheme.blue)
+                            Spacer()
+                            Text("≈ \(Int(autoKcal.rounded())) kcal")
+                                .font(AIATheme.Font.footnote)
+                                .foregroundStyle(AIATheme.sub)
+                        }
+                    }
+                    // <<< CHANGE-[2026-09-24]-[编辑页按营养素自动算热量] 结束
                 }
                 Section {
                     Button(role: .destructive) {
@@ -242,19 +260,64 @@ struct FoodMetaEditor: View {
         }
     }
 
+    /// 4/4/9 估算：蛋白 4、碳水 4、脂肪 9 kcal/g（纤维已计入碳水，不重复计）
+    private var autoKcal: Double {
+        meta.protein * 4 + meta.carbs * 4 + meta.fat * 9
+    }
+
     private func nutrientField(_ title: String, _ value: Binding<Double>, _ unit: String) -> some View {
         HStack {
             Text(title)
             Spacer()
-            TextField("0", value: value, format: .number)
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
-                .frame(width: 96)
+            DecimalField(value: value)
             Text(unit)
                 .foregroundStyle(.secondary)
                 .font(AIATheme.Font.micro)
         }
     }
+
+    // >>> CHANGE-[2026-09-24]-[营养输入支持小数] 开始
+    // 原因: TextField(value:format:.number) 逐键解析，输入 "12." 这类中间态会解析失败被回退，导致打不出小数点。
+    //       改为文本驱动输入，宽松解析（兼容全角句号/逗号），失焦后再规整显示。
+    // 回退: DecimalField 换回 TextField(value:format: .number) 即可。
+    private struct DecimalField: View {
+        @Binding var value: Double
+        @State private var text: String = ""
+        @FocusState private var focused: Bool
+
+        var body: some View {
+            TextField("0", text: $text)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 96)
+                .focused($focused)
+                .onAppear { text = Self.display(value) }
+                .onChange(of: text) { _, new in
+                    if let v = Self.parse(new) { value = v }
+                }
+                .onChange(of: focused) { _, isOn in
+                    if !isOn { text = Self.display(value) }
+                }
+                .onChange(of: value) { _, v in
+                    // 外部改值（如点「按营养素计算热量」）时同步显示；正在输入时不打断
+                    if !focused { text = Self.display(v) }
+                }
+        }
+
+        private static func parse(_ s: String) -> Double? {
+            let normalized = s
+                .replacingOccurrences(of: "。", with: ".")
+                .replacingOccurrences(of: "，", with: ".")
+                .replacingOccurrences(of: ",", with: ".")
+            guard !normalized.isEmpty, normalized != "." else { return nil }
+            return Double(normalized)
+        }
+
+        private static func display(_ v: Double) -> String {
+            v == v.rounded() ? String(Int(v)) : String(v)
+        }
+    }
+    // <<< CHANGE-[2026-09-24]-[营养输入支持小数] 结束
 }
 // <<< CHANGE-[2026-09-24]-[食物库点击编辑] 结束
 
