@@ -748,7 +748,20 @@ struct ContentView: View {
             // 不依赖 performOnAppear 的 onboardingDone 分支、也不依赖 showOnboarding 的 onChange——
             // 删 App 重装后那条触发链若因任何原因没 fire，睡眠恢复仍能在此兜底跑起来。
             // 引导页遮挡期间启动轮询无害：8s 窗口内数据到位即盖，引导页 dismiss 后用户可见。
-            restoreSleepMaskOnStartup()
+            // >>> CHANGE-[2026-09-24 11:42:08]-[首帧写入错峰一帧] 开始
+            // 原因：restoreSleepMaskOnStartup() 内部会同步写 sleepMaskRestoreWindowOpen（可能还有
+            //       showSleepMask）两个 @State，与 performOnAppear 的写入挤在同一帧 → 叠加成
+            //       「同一帧内多次更新含 NavigationStack 的根 body」，正是 SwiftUI
+            //       `Update NavigationRequestObserver tried to update multiple times per frame`
+            //       断言的触发形态（2026-09-24 真机日志实证）。
+            // 做法：把这次调用错开一帧（async）。8s 恢复窗口只是晚约 16ms 开始，语义不变；
+            //       restoreSleepMaskOnStartup 幂等（isOpen 已 true 时重复调用无害），
+            //       runDeferredStartup 里那次调用照旧。
+            // 回退：去掉 async 包装，恢复同步调用。
+            DispatchQueue.main.async {
+                restoreSleepMaskOnStartup()
+            }
+            // <<< CHANGE-[2026-09-24 11:42:08]-[首帧写入错峰一帧] 结束
         }
         // 首次启动：引导页关闭（showOnboarding 由 true→false）后再跑冷启动重活，
         // 避免与引导页抢首帧导致老机型黑屏卡死。
