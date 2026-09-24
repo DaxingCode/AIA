@@ -1162,6 +1162,40 @@ final class CloudSyncManager: ObservableObject {
     // MARK: - 昵称（profile）
     /// 把云端昵称写回本地 userNickname。仅当云端更新时间晚于本地时才覆盖（后写胜出），
     /// 避免把本次登录刚拉到的旧值又写回、或覆盖本地更新的编辑。
+    // >>> CHANGE-[2026-09-24 11:42:08]-[云端设置写入去重] 开始
+    /// 只在值真的变化时才写 UserDefaults。
+    /// 原因：云同步应用 profile/setting 时是逐键无条件覆盖写，同一批键在启动阶段会被多轮重复写
+    /// （2026-09-24 真机日志：0.4 秒内 aia.stepGoal / aia.sleepGoalHours 等被写 4~5 次）。
+    /// 而 ContentView 用 @AppStorage 订阅了同一批键 → 每次写入都会让「含 NavigationStack 的根 body」
+    /// 全量重算（日志实证：6 次重算 + `Update NavigationRequestObserver tried to update multiple
+    /// times per frame` 断言 + Hang detected 3.23s/6.85s）。去重后启动期写入次数可压到 0~1 次。
+    /// 注：各段末尾的 updatedAt 锚点写必须保留（否则每轮同步都会重复应用同一份云端数据）。
+    /// 回退：调用点换回直接 `UserDefaults.standard.set(v, forKey:)`。
+    private static nonisolated func setIfChanged(_ value: Int, forKey key: String) {
+        if UserDefaults.standard.integer(forKey: key) != value {
+            UserDefaults.standard.set(value, forKey: key)
+        }
+    }
+
+    private static nonisolated func setIfChanged(_ value: Double, forKey key: String) {
+        if UserDefaults.standard.double(forKey: key) != value {
+            UserDefaults.standard.set(value, forKey: key)
+        }
+    }
+
+    private static nonisolated func setIfChanged(_ value: String, forKey key: String) {
+        if UserDefaults.standard.string(forKey: key) != value {
+            UserDefaults.standard.set(value, forKey: key)
+        }
+    }
+
+    private static nonisolated func setIfChanged(_ value: Bool, forKey key: String) {
+        if UserDefaults.standard.bool(forKey: key) != value {
+            UserDefaults.standard.set(value, forKey: key)
+        }
+    }
+    // <<< CHANGE-[2026-09-24 11:42:08]-[云端设置写入去重] 结束
+
     private static nonisolated func applyProfile(remoteDate: Date, payload: [String: Any]) -> Int {
         var merged = 0
         // 昵称：云端更新时间晚于本地才覆盖（后写胜出）。
@@ -1183,16 +1217,19 @@ final class CloudSyncManager: ObservableObject {
         }
         // 健康目标：云端更新时间晚于本地整组锚点才覆盖（后写胜出），避免覆盖本地更新的编辑。
         if remoteDate.timeIntervalSince1970 > UserDefaults.standard.double(forKey: "userProfileUpdatedAt") {
-            if let v = payload["heightCm"]        as? Double { UserDefaults.standard.set(v, forKey: "aia.heightCm") }
-            if let v = payload["weightKg"]        as? Double { UserDefaults.standard.set(v, forKey: "aia.weightKg") }
-            if let v = payload["age"]             as? Int    { UserDefaults.standard.set(v, forKey: "aia.age") }
-            if let v = payload["bioSex"]          as? Int    { UserDefaults.standard.set(v, forKey: "aia.bioSex") }
-            if let v = payload["activityLevel"]   as? Int    { UserDefaults.standard.set(v, forKey: "aia.activityLevel") }
-            if let v = payload["targetHeightCm"]  as? Double { UserDefaults.standard.set(v, forKey: "aia.targetHeightCm") }
-            if let v = payload["stepGoal"]        as? Int    { UserDefaults.standard.set(v, forKey: "aia.stepGoal") }
-            if let v = payload["sleepGoalHours"]  as? Double { UserDefaults.standard.set(v, forKey: "aia.sleepGoalHours") }
-            if let v = payload["exerciseGoalMin"] as? Double { UserDefaults.standard.set(v, forKey: "aia.exerciseGoalMin") }
-            if let v = payload["fitnessGoal"]     as? String { UserDefaults.standard.set(v, forKey: "aia.fitnessGoal") }
+            // >>> CHANGE-[2026-09-24 11:42:08]-[云端设置写入去重] 开始
+            // 逐键改为「值变才写」（见 setIfChanged 说明）；末尾锚点写保留。
+            if let v = payload["heightCm"]        as? Double { setIfChanged(v, forKey: "aia.heightCm") }
+            if let v = payload["weightKg"]        as? Double { setIfChanged(v, forKey: "aia.weightKg") }
+            if let v = payload["age"]             as? Int    { setIfChanged(v, forKey: "aia.age") }
+            if let v = payload["bioSex"]          as? Int    { setIfChanged(v, forKey: "aia.bioSex") }
+            if let v = payload["activityLevel"]   as? Int    { setIfChanged(v, forKey: "aia.activityLevel") }
+            if let v = payload["targetHeightCm"]  as? Double { setIfChanged(v, forKey: "aia.targetHeightCm") }
+            if let v = payload["stepGoal"]        as? Int    { setIfChanged(v, forKey: "aia.stepGoal") }
+            if let v = payload["sleepGoalHours"]  as? Double { setIfChanged(v, forKey: "aia.sleepGoalHours") }
+            if let v = payload["exerciseGoalMin"] as? Double { setIfChanged(v, forKey: "aia.exerciseGoalMin") }
+            if let v = payload["fitnessGoal"]     as? String { setIfChanged(v, forKey: "aia.fitnessGoal") }
+            // <<< CHANGE-[2026-09-24 11:42:08]-[云端设置写入去重] 结束
             UserDefaults.standard.set(remoteDate.timeIntervalSince1970, forKey: "userProfileUpdatedAt")
             merged += 1
         }
@@ -1222,21 +1259,24 @@ final class CloudSyncManager: ObservableObject {
         let localUpdated = UserDefaults.standard.double(forKey: "userSettingUpdatedAt")
         guard remoteDate.timeIntervalSince1970 > localUpdated else { return 0 }
         // 目标热量：>0 视为自定义并写入；0/未设置标记为自动（不覆盖本地 override 数值）。
+        // >>> CHANGE-[2026-09-24 11:42:08]-[云端设置写入去重] 开始
+        // 同 applyProfile：逐键改为「值变才写」，末尾 userSettingUpdatedAt 锚点写保留。
         if let tc = payload["targetCalories"] as? Double, tc > 0 {
-            UserDefaults.standard.set(tc, forKey: "aia.calorieGoalOverride")
-            UserDefaults.standard.set(true, forKey: "aia.calorieGoalIsCustom")
+            setIfChanged(tc, forKey: "aia.calorieGoalOverride")
+            setIfChanged(true, forKey: "aia.calorieGoalIsCustom")
         } else if payload["targetCalories"] is Double {
-            UserDefaults.standard.set(false, forKey: "aia.calorieGoalIsCustom")
+            setIfChanged(false, forKey: "aia.calorieGoalIsCustom")
         }
         if let hg = payload["healthGoal"] as? String, !hg.isEmpty {
-            UserDefaults.standard.set(hg, forKey: "aia.healthGoal")
+            setIfChanged(hg, forKey: "aia.healthGoal")
         }
         if let dp = payload["dietPreference"] as? String, !dp.isEmpty {
-            UserDefaults.standard.set(dp, forKey: "aia.dietPreference")
+            setIfChanged(dp, forKey: "aia.dietPreference")
         }
         if let wg = payload["weightGoal"] as? Double {
-            UserDefaults.standard.set(wg, forKey: "aia.weightGoalKg")
+            setIfChanged(wg, forKey: "aia.weightGoalKg")
         }
+        // <<< CHANGE-[2026-09-24 11:42:08]-[云端设置写入去重] 结束
         UserDefaults.standard.set(remoteDate.timeIntervalSince1970, forKey: "userSettingUpdatedAt")
         return 1
     }
