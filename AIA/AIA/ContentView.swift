@@ -565,6 +565,17 @@ struct ContentView: View {
             HealthManager.shared.requestAuthorization()
         }
         // <<< CHANGE-[2026-08-20 15:30:13]-[授权弹窗延后到新人引导后] 结束
+        // >>> CHANGE-[2026-09-24 10:15:03]-[好评弹窗冷启动也触发] 开始
+        // 原因：好评引导原先只在下方 didBecomeActive 通知里触发，而 App 是异步建 SwiftData 容器的
+        //       （AIAApp 的 Task.detached + .containerReady 通知），ContentView 可能在 didBecomeActive
+        //       之后才挂载 → 那次通知被错过，冷启动这轮完全不检查。
+        //       这里补一次（延迟 1.5s 躲首帧风暴）；maybeRequestReview 内部有 shouldPrompt 守卫 +
+        //       promptedAt 节流，重复调用幂等，不会连弹两次。
+        // 回退：删掉本段。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            AppStoreReviewManager.shared.maybeRequestReview()
+        }
+        // <<< CHANGE-[2026-09-24 10:15:03]-[好评弹窗冷启动也触发] 结束
         // 睡眠遮罩恢复：交给 restoreSleepMaskOnStartup()，由根 .onAppear 无条件调用兜底，
         // 这里再调一次双保险（runDeferredStartup 在 .onAppear 之后由引导关闭/非首启触发）。
         // 两次都开 8s 窗口但第二次 isOpen 已被首次置 true，restoreSleepMaskIfNeeded 幂等，无害。
@@ -972,6 +983,15 @@ struct ContentView: View {
         GlobalToastOverlay()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .zIndex(2000)
+        // >>> CHANGE-[2026-09-24 10:15:03]-[好评弹窗移到根视图] 开始
+        // 五星好评浮层：与触发点（didBecomeActive / runDeferredStartup 里的 maybeRequestReview）
+        // 同在根视图，保证在首页或任意被 push 的页面都能显示。层级压在 toast(2000) 之上。
+        // 宿主内部局部订阅 AppStoreReviewManager，根视图 body 不受其 @Published 影响。
+        // 回退：删掉这段（并恢复 SettingsView 上的 overlay 与 @StateObject review）。
+        StarReviewPromptHost()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .zIndex(2100)
+        // <<< CHANGE-[2026-09-24 10:15:03]-[好评弹窗移到根视图] 结束
         // >>> CHANGE-[2026-08-30 14:06:01]-[版本更新弹窗] 开始
         // 建议更新提示：云端 latestVersion 高于本地版本且未被「暂不」忽略时弹出。
         // 美化独立弹窗（VersionUpdateAlertView）：App 图标 + 标题 + 副标题 + 上下大按钮。

@@ -202,7 +202,10 @@ struct SettingsView: View {
     @State private var showFeedbackMail = false
     @State private var feedbackMailUnavailable = false
     // >>> CHANGE-[2026-08-28 18:34:20]-[五星好评与分享App] 开始
-    @StateObject private var review = AppStoreReviewManager.shared
+    // >>> CHANGE-[2026-09-24 10:15:03]-[好评弹窗移到根视图] 开始
+    // review（AppStoreReviewManager）原仅服务本页的五星浮层；浮层已挪到 ContentView 根 ZStack
+    // （原位置导致"触发在首页、浮层挂在设置页"→ 弹窗从未显示），本页不再需要订阅该单例。
+    // <<< CHANGE-[2026-09-24 10:15:03]-[好评弹窗移到根视图] 结束
     @State private var showShareSheet = false
     // <<< CHANGE-[2026-08-28 18:34:20]-[五星好评与分享App] 结束
 
@@ -327,26 +330,18 @@ struct SettingsView: View {
                 AppURLs.appStore
             ])
         }
-        // 低分(1-3星)引导应用内反馈：监听 AppStoreReviewManager 发出的通知，复用本页 MailComposer 通道
-        .onReceive(NotificationCenter.default.publisher(for: .openFeedbackMail)) { _ in
-            if MFMailComposeViewController.canSendMail() {
-                showFeedbackMail = true
-            } else {
-                feedbackMailUnavailable = true
-            }
-        }
-        // 五星好评选择弹窗（overlay 浮层，参考 CenteredAlertCard 视觉）
-        .overlay(
-            Group {
-                if review.showStarPrompt {
-                    StarReviewPrompt(
-                        selected: $review.selectedStars,
-                        onChoose: { stars in review.chooseStars(stars) },
-                        onDismiss: { review.dismissPrompt() }
-                    )
-                }
-            }
-        )
+        // >>> CHANGE-[2026-09-24 10:33:41]-[低分反馈改根宿主直连] 开始
+        // 原先本页监听 .openFeedbackMail 来弹反馈邮件，但五星浮层在首页触发/显示，本页不在视图树时
+        // 通知无人接收 → 点 1-3 星静默无反应（2026-09-24 实测）。现由根视图的 StarReviewPromptHost
+        // 直接渲染邮件/「邮件不可用」提示。本页「帮助与反馈」按钮不受影响（它直接置 showFeedbackMail，不走通知）。
+        // 回退：恢复上方 .onReceive(.openFeedbackMail) 段。
+        // <<< CHANGE-[2026-09-24 10:33:41]-[低分反馈改根宿主直连] 结束
+        // >>> CHANGE-[2026-09-24 10:15:03]-[好评弹窗移到根视图] 开始
+        // 原先这里挂 StarReviewPrompt 的 overlay，但触发点在首页（ContentView 的 didBecomeActive），
+        // 本页不在视图树时浮层根本不渲染 → 弹窗从未显示过。现统一挂到 ContentView 根 ZStack
+        // （StarReviewPromptHost），触发时必定在树里。
+        // 回退：恢复上方 overlay 段（并恢复本文件顶部的 @StateObject review）。
+        // <<< CHANGE-[2026-09-24 10:15:03]-[好评弹窗移到根视图] 结束
         // <<< CHANGE-[2026-08-28 18:34:20]-[五星好评与分享App] 结束
     }
 
