@@ -87,8 +87,17 @@ final class AuthManager: ObservableObject {
         shared.userName = KeychainHelper.get(KeychainHelper.kName) ?? ""
         shared.isLoggedIn = true
         // >>> CHANGE-[2026-08-28 18:34:20]-[五星好评与分享App] 开始
-        // 静默恢复登录也视作一次登录起点，写入时间戳供好评引导「登录≥3天」判定。
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "aia.loginAt")
+        // >>> CHANGE-[2026-09-24 10:15:03]-[好评弹窗登录起点不再被冷启覆盖] 开始
+        // 原因：本方法被 MainOrLoginView 的 @State 初始化闭包调用（见 AIAApp.swift），**每次冷启动**都会执行一次。
+        //       原先无条件把 aia.loginAt 写成"现在"，而好评引导的判定发生在冷启后 1.5s
+        //       （ContentView 的 didBecomeActive + 1.5s），距刚写入的 loginAt 只有 1.5 秒 →
+        //       「登录≥3天」恒不成立，好评弹窗自 2026-08-28 上线起一次都没弹过。
+        //       改为只在「从未记录过登录时间」时写入（首次登录 / 重装后首次静默恢复），冷启动恢复不再刷新起点。
+        // 回退：删掉下方 if 判断，恢复无条件 set。
+        if UserDefaults.standard.double(forKey: "aia.loginAt") <= 0 {
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "aia.loginAt")
+        }
+        // <<< CHANGE-[2026-09-24 10:15:03]-[好评弹窗登录起点不再被冷启覆盖] 结束
         // <<< CHANGE-[2026-08-28 18:34:20]-[五星好评与分享App] 结束
         return true
     }
