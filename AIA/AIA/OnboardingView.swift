@@ -36,20 +36,28 @@ struct OnboardingView: View {
                 // 不挂整页横向手势，避免与纵向滚动抢事件，该页仍用按钮翻页。
                 GeometryReader { geo in
                     Group {
-                        switch page {
-                        case 0: welcomePage
-                        case 1: screenshotPage
-                        case 2: payScreenshotPage
-                        case 3: notifyScreenshotPage
-                        case 4: payFoodPage
-                        case 5: voiceScenarioPage
-                        case 6: siriPage
-                        case 7: quickActionsPage
-                        case 8: healthPage
-                        case 9: askPage
-                        case 10: shortcutsPage
-                        default: donePage
+                        // >>> CHANGE-[2026-09-24 11:18:03]-[引导页小屏滚动兜底] 开始
+                        // 原因：12 页里只有第 10 页（shortcutsPage）自带 ScrollView；其余 11 页在小屏
+                        //       （如 SE 类）或系统「大字号」下内容可能超出屏高，且没有任何滚动容器
+                        //       → 下半截完全看不到、也无法滑动。
+                        // 做法：page != 10 的页统一套一层纵向 ScrollView，并用 minHeight = 屏高 保持
+                        //       「内容放得下时仍垂直居中」（视感与改前一致，只有放不下时才能滚）；
+                        //       第 10 页保持原样（自带 ScrollView，再套一层会变成同轴嵌套滚动）。
+                        // 注：横向翻页已改用 simultaneousGesture + 方向守卫，与本滚动容器天然共存。
+                        // 回退：删掉 ScrollView 包装，恢复直接 `currentPageContent`。
+                        if page == 10 {
+                            currentPageContent
+                        } else {
+                            ScrollView(.vertical) {
+                                currentPageContent
+                                    // 宽度钉死屏宽、高度至少一屏：内容放得下时仍垂直居中，
+                                    // 放不下时才产生滚动（不能写 frame(width:minHeight:)，两者不同重载）
+                                    .frame(minWidth: geo.size.width,
+                                           maxWidth: geo.size.width,
+                                           minHeight: geo.size.height)
+                            }
                         }
+                        // <<< CHANGE-[2026-09-24 11:18:03]-[引导页小屏滚动兜底] 结束
                     }
                     .id(page)
                     .transition(.opacity)
@@ -141,6 +149,28 @@ struct OnboardingView: View {
             }
         }
     }
+
+    // >>> CHANGE-[2026-09-24 11:18:03]-[引导页小屏滚动兜底] 开始
+    /// 当前页内容（12 选 1）。抽成独立属性，供 body 里的「小屏滚动兜底」复用：
+    /// page == 10（快捷指令页）直接用它（自带 ScrollView）；其余页套一层纵向 ScrollView 再放它。
+    @ViewBuilder
+    private var currentPageContent: some View {
+        switch page {
+        case 0: welcomePage
+        case 1: screenshotPage
+        case 2: payScreenshotPage
+        case 3: notifyScreenshotPage
+        case 4: payFoodPage
+        case 5: voiceScenarioPage
+        case 6: siriPage
+        case 7: quickActionsPage
+        case 8: healthPage
+        case 9: askPage
+        case 10: shortcutsPage
+        default: donePage
+        }
+    }
+    // <<< CHANGE-[2026-09-24 11:18:03]-[引导页小屏滚动兜底] 结束
 
     private var toastView: some View {
         HStack(spacing: 6) {
