@@ -917,8 +917,11 @@ struct ContentView: View {
             .environment(\.modelContext, context)
             .interactiveDismissDisabled(true)
             .onDisappear {
-                ScreenshotStore.clearPending()
+                ScreenshotStore.clearPending()   // 出队刚确认/取消这条
                 pendingPresent = nil
+                isCheckingScreenshotPending = false
+                // 续跑队列里剩余待确认截图（多张需确认时逐张弹，互不丢失）
+                Task { await checkScreenshotPending(navigateToChat: pendingNavigate) }
             }
         }
         // 外观模式已由 AIAApp.WindowGroup 最外层统一驱动（@AppStorage 响应式覆盖整窗），此处不再重复。
@@ -1028,11 +1031,13 @@ struct ContentView: View {
         }   // ZStack 结束
     }   // body 结束
 
+    // >>> CHANGE-[2026-10-02 11:30:00]-[截屏无感识别多张队列化] 开始
     /// 检查后台识别留下的待确认结果（截图无感识别链路）：
     /// 走 processRecognition —— 按「来源 × 类别」二维设置分流，结果统一组装成一条对话气泡消息插入对话流：
     /// - .inserted：已在对话流插入结果气泡（已保存态 / 待确认态卡片随设置而定）→ 清 pending；
     ///   若用户是点系统通知进来的（navigateToChat=true），跳到对话页查看结果。
     /// - .nothing：按设置丢弃、或未识别出任何类别 → 仅清 pending。
+    /// 队列化：每次只处理「队首一条」，各分支出队后递归续跑下一条，直到队列空（连续多张截图/分享互不丢）。
     @MainActor
     private func checkScreenshotPending(navigateToChat: Bool = false, forceSave: Bool = false) async {
         guard !isCheckingScreenshotPending, pendingPresent == nil else { return }
@@ -1058,7 +1063,7 @@ struct ContentView: View {
         // >>> 分享扩展来源：图片已进对话页，识别交给主 App 在对话页内完成（显示「好记AI正在识别…」加载条）。
         // 不再读扩展端 result，统一复用拍照/相册那条成熟识别链路，避免两端各写一份识别。
         if p.fromShareExtension {
-            ScreenshotStore.clearPending()
+            ScreenshotStore.clearPending()   // 出队本条
             isCheckingScreenshotPending = false
             if let img {
                 runImageRecognition(image: img, context: context,
@@ -1067,6 +1072,8 @@ struct ContentView: View {
                                     presavedImageName: presavedName,
                                     source: "share")   // >>> CHANGE-[2026-09-21 12:44:10]-[发图来源标签]：分享扩展来源
             }
+            // 续跑队列里剩余待处理项（连续多张分享/截图互不丢）
+            Task { await checkScreenshotPending(navigateToChat: navigateToChat) }
             return
         }
         // <<< 分享扩展来源结束
@@ -1074,7 +1081,7 @@ struct ContentView: View {
         // 付费墙拦截分支：后台识别被免费版权益拦截（无云端视觉 + 本地覆盖不到），
         // 不当作普通识别结果处理，而是回插「升级 Pro」引导气泡——与对话页付费墙做法一致。
         if p.isPaywallBlocked {
-            ScreenshotStore.clearPending()
+            ScreenshotStore.clearPending()   // 出队本条
             // 已开通 Pro/试用/白名单的用户本不该走这条分支；若因权益状态抖动误入，
             // 不要再提示「升级 Pro」（会造成「已开通还让升级」的困惑），改提示重试/网络问题。
             let text: String
@@ -1088,18 +1095,20 @@ struct ContentView: View {
             if navigateToChat {
                 DispatchQueue.main.async { NavigationRouter.shared.navigate(.chat) }
             }
+            Task { await checkScreenshotPending(navigateToChat: navigateToChat) }
             return
         }
 
         // 普通识别失败分支（非权益类错误：本地解析/网络/云端异常）。
         // 绝提示「升级 Pro」，避免已开通会员用户被误导；给友好提示即可。
         if p.isRecognizeFailed {
-            ScreenshotStore.clearPending()
+            ScreenshotStore.clearPending()   // 出队本条
             context.insert(ChatMessage(role: .ai, text: "这张图片暂时没能识别成功，可能是网络或图片问题。你可以稍后重试，或手动记录～"))
             isCheckingScreenshotPending = false
             if navigateToChat {
                 DispatchQueue.main.async { NavigationRouter.shared.navigate(.chat) }
             }
+            Task { await checkScreenshotPending(navigateToChat: navigateToChat) }
             return
         }
 
@@ -1126,15 +1135,15 @@ struct ContentView: View {
                                                               screenshotShortcut: true,
                                                               presavedImageName: presavedName,
                                                               marksHomeHighlight: true)
+            // 出队本条（无论 inserted/nothing 都清空，避免点通知回 App 时重复处理）
+            ScreenshotStore.clearPending()
             isCheckingScreenshotPending = false
             switch outcome {
             case .inserted:
-                // 结果已进对话气泡：立即清 pending，避免点通知回 App 时重复处理
-                ScreenshotStore.clearPending()
+                break
             case .nothing:
-                // 按设置丢弃或未识别：仅清 pending，不弹不存。
+                // 按设置丢弃或未识别：不弹不存。
                 // 但图已经「发」出去了，好记AI必须有回应，否则对话里只剩一张没人理的图。
-                ScreenshotStore.clearPending()
                 if presavedName != nil {
                     context.insert(ChatMessage(role: .ai, text: "这张图我没识别到可记录的内容～可以在「设置 → 识别结果保存方式设置」里调整保存策略。"))
                 }
@@ -1144,8 +1153,11 @@ struct ContentView: View {
                     NavigationRouter.shared.navigate(.chat)
                 }
             }
+            // 续跑队列里剩余待处理项（连续多张截图/分享互不丢）
+            Task { await checkScreenshotPending(navigateToChat: navigateToChat, forceSave: false) }
         }
     }
+    // <<< CHANGE-[2026-10-02 11:30:00]-[截屏无感识别多张队列化] 结束
 
     // MARK: - 顶部标题 + 待处理角标
     private var greeting: String {
